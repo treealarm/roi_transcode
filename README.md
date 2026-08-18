@@ -176,6 +176,25 @@ that into `mvhd` as a different movie timescale describing the same 12.000 s.
 A mask is quantized to the 32-pixel block grid and carries no halo, so it
 deliberately differs in the encode itself.
 
+## Synthetic scenes
+
+```bash
+./scripts/make-scenes.py            # all of them, into testdata/scenes/
+./scripts/make-scenes.py moving
+```
+
+Five clips, each with a `truth.json` saying where the object is on every frame,
+and a `roi.json` the CLI takes directly. The backgrounds differ in what they
+stress: `flat` has no texture to hide behind, `edges` is where ringing shows up
+first, `zoneplate` sweeps spatial frequency, `texture` is high-entropy, and
+`moving` is the only one where the box does not sit still.
+
+The ground truth is the point. A mask built from the same guess the encoder was
+given proves nothing; one built from `truth.json` is independent of it. `check.sh`
+verifies the truth actually describes the video before trusting it -- a clip and
+a JSON that disagreed would make every mask derived from them a lie, and nothing
+downstream would notice.
+
 ## Checks
 
 ```bash

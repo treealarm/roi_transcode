@@ -60,7 +60,7 @@ ssim() { # file x y w h
 
 # --- encode + record --------------------------------------------------------
 
-declare -A BYTES SSIM_ROI SSIM_BG
+declare -A BYTES SSIM_ROI SSIM_BG SSIM_RING
 
 # Sets LAST_OUT rather than echoing it: called in a command substitution the
 # arrays below would be filled in a subshell and lost.
@@ -76,16 +76,18 @@ encode() { # name roi.json encoder extra-args...
     BYTES[$name]=$(stat -c %s "$out")
     SSIM_ROI[$name]=$(ssim "$out" $PX $PY $PW $PH)
     SSIM_BG[$name]=$(ssim "$out" $BGX $BGY $PW $PH)
+    # A ring straddling the zone's edge, where a QP step turns into ringing.
+    SSIM_RING[$name]=$(ssim "$out" $((PX - 16)) $((PY - 16)) $((PW + 32)) $((PH + 32)))
     local backend; backend=$(grep -oE 'encoded with [^ ]+' "${WORK}/${name}.log" | head -1 | cut -d' ' -f3)
-    printf '%s,synth,%s,%s,28,%s,%s,%s,%s\n' "$(date -Is)" "${backend:-unknown}" \
+    printf '%s,synth,%s,%s,28,%s,%s,%s,%s,%s\n' "$(date -Is)" "${backend:-unknown}" \
         "$name" "${BYTES[$name]}" "${SSIM_ROI[$name]}" "${SSIM_BG[$name]}" \
-        "$(count_packets "$out" 2>/dev/null || echo)" >> "$CSV"
+        "$(count_packets "$out" 2>/dev/null || echo)" "${SSIM_RING[$name]}" >> "$CSV"
 }
 
 # --- run --------------------------------------------------------------------
 
 mkdir -p "$EVAL"
-[[ -f "$CSV" ]] || echo "ts,sequence,encoder,mode,qp,bytes,ssim_roi,ssim_bg,packets" > "$CSV"
+[[ -f "$CSV" ]] || echo "ts,sequence,encoder,mode,qp,bytes,ssim_roi,ssim_bg,packets,ssim_ring" > "$CSV"
 
 if [[ ! -f "$SRC" ]]; then
     step "synthetic source"
@@ -156,6 +158,11 @@ mechanism_checks() { # encoder cqp
         "${SSIM_ROI[roi_${enc}]}" "${SSIM_ROI[bgonly_${enc}]}"
     assert_lt "[${enc}] ROI costs less than flat quality" \
         "${BYTES[roi_${enc}]}" "${BYTES[noroi_${enc}]}"
+    # The halo exists to soften the QP step at the boundary. Without it the edge
+    # is where ringing appears first, so the ring has to come out better than the
+    # same ring with the background crushed and no object rectangle at all.
+    assert_gt "[${enc}] the halo protects the zone's edge" \
+        "${SSIM_RING[roi_${enc}]}" "${SSIM_RING[bgonly_${enc}]}"
 
     if [[ "$cqp" == "yes" ]]; then
         assert_eq "[${enc}] a boost leaves the background untouched" \
@@ -228,6 +235,70 @@ if [[ -e /dev/dri/renderD128 ]]; then
     fi
 else
     printf '  skip  no /dev/dri, hardware backends unavailable\n'
+fi
+
+step "synthetic scenes and their ground truth"
+SCENES="${ROOT}/testdata/scenes"
+if [[ ! -f "${SCENES}/moving/source.mp4" ]]; then
+    python3 "${ROOT}/scripts/make-scenes.py" >/dev/null 2>&1 || true
+fi
+if [[ -f "${SCENES}/moving/source.mp4" ]]; then
+    # The ground truth is only worth having if it describes the video. A clip and
+    # a JSON that disagree would make every mask built from it a lie, and nothing
+    # downstream would notice.
+    if python3 - "$SCENES" <<'PY' >/dev/null 2>&1
+import json, subprocess, sys, pathlib
+root = pathlib.Path(sys.argv[1])
+def luma(video, t, x, y, w, h):
+    out = subprocess.run(["ffmpeg","-v","error","-ss",str(t),"-i",video,"-frames:v","1",
+        "-vf",f"crop={w}:{h}:{x}:{y},format=gray","-f","rawvideo","-"],
+        capture_output=True).stdout
+    return sum(out)/len(out) if out else -1
+for scene in ("texture","moving"):
+    truth = json.loads((root/scene/"truth.json").read_text())
+    vid = str(root/scene/"source.mp4")
+    for idx in (25, 150, 275):
+        fr = truth["frames"][idx]
+        x,y,w,h = fr["objects"][0]["bbox"]
+        inside = luma(vid, fr["t"], x+20, y+20, w-40, h-40)
+        outside = luma(vid, fr["t"], max(0, x-w-20), y+20, w-40, h-40)
+        assert inside > outside + 40, (scene, fr["t"], inside, outside)
+PY
+    then
+        pass "ground truth matches the rendered video"
+    else
+        fail "ground truth does not match the rendered video"
+    fi
+
+    # A moving box is the case a static fixture cannot cover: the ROI has to
+    # follow it, and a stale rectangle would leave the plate in crushed
+    # background while protecting empty space.
+    if "${BUILD}/roi-transcode" --in "${SCENES}/moving/source.mp4" \
+        --roi "${SCENES}/moving/roi.json" --out "${WORK}/moving.mp4" \
+        --encoder x265 --crf 28 --gop 1 >/dev/null 2>&1; then
+        moving_ok=1
+        for probe in "1.0 128 288" "6.0 550 288" "11.0 972 288"; do
+            set -- $probe
+            zone=$(ffmpeg -hide_banner -ss "$1" -i "${SCENES}/moving/source.mp4" \
+                -ss "$1" -i "${WORK}/moving.mp4" -filter_complex \
+                "[0:v]crop=384:144:$2:$3[a];[1:v]crop=384:144:$2:$3[b];[a][b]ssim" \
+                -f null - 2>&1 | grep -oE 'All:[0-9.]+' | head -1 | cut -d: -f2)
+            back=$(ffmpeg -hide_banner -ss "$1" -i "${SCENES}/moving/source.mp4" \
+                -ss "$1" -i "${WORK}/moving.mp4" -filter_complex \
+                "[0:v]crop=384:144:40:40[a];[1:v]crop=384:144:40:40[b];[a][b]ssim" \
+                -f null - 2>&1 | grep -oE 'All:[0-9.]+' | head -1 | cut -d: -f2)
+            awk "BEGIN{exit !(${zone:-0} > ${back:-1})}" || moving_ok=0
+        done
+        if [[ $moving_ok -eq 1 ]]; then
+            pass "the ROI follows a moving box"
+        else
+            fail "the ROI did not follow the moving box"
+        fi
+    else
+        fail "moving scene failed to encode"
+    fi
+else
+    printf '  skip  scenes not generated (scripts/make-scenes.py)\n'
 fi
 
 step "gRPC: both entry points, and the sandbox"
