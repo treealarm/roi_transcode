@@ -6,7 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(PkgConfig REQUIRED)
 
-set(FFMPEG_DEV_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg-dev")
+set(FFMPEG_DEV_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg-dev"
+    CACHE PATH "Vendored FFmpeg headers; point elsewhere or clear to force pkg-config")
 set(FFMPEG_SYS_INCLUDE
     "${FFMPEG_DEV_ROOT}/usr/include/x86_64-linux-gnu")
 
