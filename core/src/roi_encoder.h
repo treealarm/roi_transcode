@@ -1,0 +1,65 @@
+#pragma once
+
+// The HEVC encoder with region-of-interest side data, independent of where the
+// frames came from. A file pipeline and a caller pushing frames want exactly
+// this and nothing else around it.
+
+#include "av_raii.h"
+#include "roi/roi_types.h"
+#include "roi/transcoder.h"
+
+#include <string>
+#include <vector>
+
+class PacketSink;
+
+struct EncoderParams {
+    int width = 0;
+    int height = 0;
+    // Frame rate. Also picks the default GOP (two seconds) when gop == 0.
+    AVRational fps{25, 1};
+    EncoderKind kind = EncoderKind::Auto;
+    int crf = 28;
+    int gop = 0;
+    std::string preset = "medium";
+};
+
+class RoiEncoder {
+public:
+    // Opens a backend, falling back down the chain when kind is Auto, then
+    // calls sink.begin(). Throws if nothing opens.
+    void open(const EncoderParams& params, PacketSink& sink);
+
+    EncoderKind kind() const { return m_kind; }
+    // Human-readable name of the backend that actually opened.
+    const char* label() const;
+    AVCodecContext* ctx() { return m_enc.p; }
+    AVRational time_base() const { return m_enc.p->time_base; }
+
+    // `frame` may be in any software pixel format and is converted to what the
+    // encoder wants; `pts` is already in the encoder time base. `rects` are in
+    // pixels, strongest first -- on overlap the lowest index wins.
+    void encode(AVFrame* frame, const std::vector<RoiRect>& rects, int64_t pts);
+    // Drains the encoder. Does not end the sink.
+    void flush();
+
+private:
+    void drain();
+    AVFrame* to_encoder_format(AVFrame* src);
+
+    EncoderKind m_kind = EncoderKind::X265;
+    roiav::CodecCtx m_enc;
+    roiav::Buffer m_hw_device;
+    roiav::Buffer m_hw_frames;
+    AVPixelFormat m_sw_pix = AV_PIX_FMT_YUV420P;
+    bool m_hw_upload = false;
+
+    roiav::Sws m_sws;
+    int m_sws_src_w = 0;
+    int m_sws_src_h = 0;
+    int m_sws_src_fmt = -1;
+    roiav::Frame m_sw_frame;
+    bool m_sw_frame_ready = false;
+    roiav::Packet m_pkt;
+    PacketSink* m_sink = nullptr;
+};

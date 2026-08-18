@@ -62,6 +62,8 @@ target_compile_options(roi_geometry PRIVATE ${ROI_WARNINGS})
 # ---------------------------------------------------------------------------
 add_library(roi_core STATIC
     core/src/transcoder.cpp
+    core/src/roi_encoder.cpp
+    core/src/file_mux_sink.cpp
 )
 
 target_include_directories(roi_core

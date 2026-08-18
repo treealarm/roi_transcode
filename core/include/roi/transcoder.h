@@ -21,6 +21,9 @@ struct TranscodeOptions {
     int crf = 28;
     int gop = 0; // 0 = 2 seconds
     std::string preset = "medium";
+    // Passed to the muxer as "movflags"; empty leaves its default. ta_vms
+    // archive clips are fragmented mp4, exports use faststart.
+    std::string movflags;
 };
 
 class Transcoder {
