@@ -1,6 +1,6 @@
 #pragma once
 
-#include "roi_types.h"
+#include "roi/roi_types.h"
 
 #include <vector>
 

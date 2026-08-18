@@ -1,7 +1,7 @@
 #pragma once
 
-#include "roi_types.h"
-#include "transcoder.h"
+#include "roi/roi_types.h"
+#include "roi/transcoder.h"
 
 #include <atomic>
 #include <chrono>

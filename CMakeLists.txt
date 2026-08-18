@@ -36,53 +36,75 @@ else()
     message(STATUS "FFmpeg via pkg-config: ${FFMPEG_INCLUDE_DIRS}")
 endif()
 
-set(ROI_COMMON_SOURCES
-    src/qp_delta_map.cpp
-    src/roi_json.cpp
-    src/roi_map_builder.cpp
-    src/transcoder.cpp
+set(ROI_WARNINGS
+    $<$<CXX_COMPILER_ID:GNU>:-Wall -Wextra>
+    $<$<CXX_COMPILER_ID:Clang>:-Wall -Wextra>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4>
 )
 
-add_executable(roi-transcode
-    src/main.cpp
-    ${ROI_COMMON_SOURCES}
+# ---------------------------------------------------------------------------
+# roi_geometry -- turning boxes (later: masks) into the rectangles an encoder
+# takes. Pure arithmetic: no FFmpeg, so it stays unit-testable on its own.
+# ---------------------------------------------------------------------------
+add_library(roi_geometry STATIC
+    core/src/roi_map_builder.cpp
+    core/src/qp_delta_map.cpp
+)
+target_include_directories(roi_geometry
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core/include
+           ${CMAKE_CURRENT_SOURCE_DIR}/core/src
+)
+target_compile_options(roi_geometry PRIVATE ${ROI_WARNINGS})
+
+# ---------------------------------------------------------------------------
+# roi_core -- the module a separate project embeds. FFmpeg and the standard
+# library, nothing else: no gRPC, no Dapr, no JSON, no ta_vms headers.
+# ---------------------------------------------------------------------------
+add_library(roi_core STATIC
+    core/src/transcoder.cpp
 )
 
-target_include_directories(roi-transcode PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party
-    ${FFMPEG_INCLUDE_DIRS}
+target_include_directories(roi_core
+    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/core/include
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/core/src
 )
+target_include_directories(roi_core SYSTEM PUBLIC ${FFMPEG_INCLUDE_DIRS})
 
 if(FFMPEG_LIBRARY_DIRS)
-    target_link_directories(roi-transcode PRIVATE ${FFMPEG_LIBRARY_DIRS})
+    target_link_directories(roi_core PUBLIC ${FFMPEG_LIBRARY_DIRS})
 endif()
+target_link_libraries(roi_core PUBLIC roi_geometry ${FFMPEG_LIBRARIES})
+target_compile_definitions(roi_core PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_compile_options(roi_core PRIVATE ${ROI_WARNINGS})
 
-target_link_libraries(roi-transcode PRIVATE ${FFMPEG_LIBRARIES})
+# ---------------------------------------------------------------------------
+# roi_json -- roi.json <-> RoiDocument. Separate from roi_core so embedding the
+# encoder does not drag in nlohmann; only the CLI and the service parse files.
+# ---------------------------------------------------------------------------
+add_library(roi_json STATIC json/roi_json.cpp)
+target_include_directories(roi_json
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/json
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+)
+target_link_libraries(roi_json PUBLIC roi_core)
+target_compile_options(roi_json PRIVATE ${ROI_WARNINGS})
 
+# ---------------------------------------------------------------------------
+# Adapters
+# ---------------------------------------------------------------------------
+add_executable(roi-transcode cli/main.cpp)
+target_link_libraries(roi-transcode PRIVATE roi_core roi_json)
 target_compile_definitions(roi-transcode PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_compile_options(roi-transcode PRIVATE ${ROI_WARNINGS})
 
-target_compile_options(roi-transcode PRIVATE
-    $<$<CXX_COMPILER_ID:GNU>:-Wall -Wextra>
-    $<$<CXX_COMPILER_ID:Clang>:-Wall -Wextra>
-    $<$<CXX_COMPILER_ID:MSVC>:/W4>
-)
+enable_testing()
 
-add_executable(roi_map_builder_test
-    src/roi_map_builder_test.cpp
-    src/qp_delta_map.cpp
-    src/roi_map_builder.cpp
-)
-
-target_include_directories(roi_map_builder_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_compile_options(roi_map_builder_test PRIVATE
-    $<$<CXX_COMPILER_ID:GNU>:-Wall -Wextra>
-    $<$<CXX_COMPILER_ID:Clang>:-Wall -Wextra>
-    $<$<CXX_COMPILER_ID:MSVC>:/W4>
-)
+add_executable(roi_map_builder_test tests/roi_map_builder_test.cpp)
+# Links the geometry only -- these are pure functions and the test has no
+# business pulling FFmpeg in to check arithmetic.
+target_link_libraries(roi_map_builder_test PRIVATE roi_geometry)
+target_compile_options(roi_map_builder_test PRIVATE ${ROI_WARNINGS})
+add_test(NAME roi_map_builder COMMAND roi_map_builder_test)
 
 # Optional gRPC + Dapr service (needs vcpkg toolchain with grpc/protobuf).
 option(ROI_BUILD_SVC "Build roi-transcode-svc (gRPC/Dapr)" ON)
@@ -100,12 +122,11 @@ if(ROI_BUILD_SVC)
     set(DAPR_PROTO_FILE ${ROI_PROTO_DIR}/dapr/dapr_runtime.proto)
 
     add_executable(roi-transcode-svc
-        src/svc_main.cpp
-        src/job/roi_job_manager.cpp
-        src/grpc/roi_transcode_service.cpp
-        src/grpc/dapr_publisher.cpp
-        src/grpc/path_guard.cpp
-        ${ROI_COMMON_SOURCES}
+        svc/svc_main.cpp
+        svc/job/roi_job_manager.cpp
+        svc/grpc/roi_transcode_service.cpp
+        svc/grpc/dapr_publisher.cpp
+        svc/grpc/path_guard.cpp
     )
 
     protobuf_generate(
@@ -124,34 +145,22 @@ if(ROI_BUILD_SVC)
     )
 
     target_include_directories(roi-transcode-svc PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+        ${CMAKE_CURRENT_SOURCE_DIR}/svc
         ${CMAKE_CURRENT_BINARY_DIR}
-        ${FFMPEG_INCLUDE_DIRS}
     )
 
-    if(FFMPEG_LIBRARY_DIRS)
-        target_link_directories(roi-transcode-svc PRIVATE ${FFMPEG_LIBRARY_DIRS})
-    endif()
-
     target_link_libraries(roi-transcode-svc PRIVATE
-        ${FFMPEG_LIBRARIES}
+        roi_core
+        roi_json
         protobuf::libprotobuf
         gRPC::grpc
         gRPC::grpc++
     )
 
     target_compile_definitions(roi-transcode-svc PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(roi-transcode-svc PRIVATE ${ROI_WARNINGS})
 
-    target_compile_options(roi-transcode-svc PRIVATE
-        $<$<CXX_COMPILER_ID:GNU>:-Wall -Wextra>
-        $<$<CXX_COMPILER_ID:Clang>:-Wall -Wextra>
-        $<$<CXX_COMPILER_ID:MSVC>:/W4>
-    )
-
-    add_executable(roi_grpc_smoke
-        tools/roi_grpc_smoke.cpp
-    )
+    add_executable(roi_grpc_smoke tools/roi_grpc_smoke.cpp)
     protobuf_generate(
         TARGET roi_grpc_smoke
         IMPORT_DIRS ${ROI_PROTO_DIR}
@@ -171,4 +180,5 @@ if(ROI_BUILD_SVC)
         gRPC::grpc
         gRPC::grpc++
     )
+    target_compile_options(roi_grpc_smoke PRIVATE ${ROI_WARNINGS})
 endif()
