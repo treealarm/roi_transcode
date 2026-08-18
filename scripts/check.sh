@@ -7,6 +7,10 @@
 # from later, without rewriting this script.
 set -uo pipefail
 
+# awk and printf follow the locale: under a comma-decimal locale a formatted
+# number comes out as "0,02", which is neither valid JSON nor comparable here.
+export LC_ALL=C
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="${BUILD:-${ROOT}/build}"
 EVAL="${ROOT}/testdata/eval"
