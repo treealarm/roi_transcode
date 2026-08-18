@@ -1,4 +1,5 @@
 #include "grpc/dapr_publisher.h"
+#include "grpc/path_guard.h"
 #include "grpc/roi_transcode_service.h"
 #include "job/roi_job_manager.h"
 
@@ -9,6 +10,7 @@
 #include <cstdlib>
 #include <format>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -23,10 +25,16 @@ void on_signal(int)
     g_stop = true;
 }
 
-std::string env_or(const char* key, const char* fallback)
+// A missing required variable is a misconfiguration, and it has to be visible at
+// startup rather than through surprising behavior later.
+std::string require_env(const char* key)
 {
     const char* v = std::getenv(key);
-    return (v && *v) ? std::string(v) : std::string(fallback);
+    if (!v || !*v) {
+        throw std::runtime_error(
+            std::string("Required environment variable '") + key + "' is not set");
+    }
+    return std::string(v);
 }
 
 const char* state_name(RoiJobState s)
@@ -105,12 +113,16 @@ void on_job_status(const RoiJobStatus& st, DaprPublisher& publisher)
 }
 } // namespace
 
-int main(int /*argc*/, char** /*argv*/)
+int run()
 {
-    const std::string app_id = env_or("APP_ID", "roitrc");
-    const std::string bind = env_or("GRPC_ROI_BIND", "127.0.0.1");
-    const std::string port = env_or("GRPC_ROI_PORT", "50061");
+    const std::string app_id = require_env("APP_ID");
+    const std::string bind = require_env("GRPC_ROI_BIND");
+    const std::string port = require_env("GRPC_ROI_PORT");
     const std::string listen = bind + ":" + port;
+
+    // Resolve the sandbox now. Left to the first request, a bad ROI_ALLOWED_ROOTS
+    // would let the process come up looking healthy.
+    const auto& roots = init_allowed_roots();
 
     std::signal(SIGINT, on_signal);
     std::signal(SIGTERM, on_signal);
@@ -129,10 +141,14 @@ int main(int /*argc*/, char** /*argv*/)
         std::fprintf(stderr, "failed to listen on %s\n", listen.c_str());
         return 1;
     }
+    std::string root_list;
+    for (const auto& root : roots) {
+        root_list += (root_list.empty() ? "" : ",") + root;
+    }
     std::fprintf(stderr,
-        "roi-transcode-svc app_id=%s listening on %s dapr_publish=%s\n",
+        "roi-transcode-svc app_id=%s listening on %s dapr_publish=%s roots=%s\n",
         app_id.c_str(), listen.c_str(),
-        publisher->enabled() ? "on" : "off");
+        publisher->enabled() ? "on" : "off", root_list.c_str());
 
     while (!g_stop.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -140,4 +156,14 @@ int main(int /*argc*/, char** /*argv*/)
     server->Shutdown();
     RoiJobManager::instance().shutdown();
     return 0;
+}
+
+int main(int /*argc*/, char** /*argv*/)
+{
+    try {
+        return run();
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "roi-transcode-svc: %s\n", e.what());
+        return 1;
+    }
 }

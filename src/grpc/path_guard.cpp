@@ -16,7 +16,7 @@ constexpr char k_root_sep = ';';
 constexpr char k_root_sep = ':';
 #endif
 
-std::vector<fs::path> allowed_roots()
+std::vector<fs::path> parse_allowed_roots()
 {
     const char* raw = std::getenv("ROI_ALLOWED_ROOTS");
     if (!raw || !*raw) {
@@ -46,6 +46,15 @@ std::vector<fs::path> allowed_roots()
     if (roots.empty()) {
         throw std::runtime_error("ROI_ALLOWED_ROOTS has no usable entries");
     }
+    return roots;
+}
+
+// Resolved once. Re-reading the environment and canonicalizing every root on
+// each request bought nothing: the variable cannot change under a running
+// process.
+const std::vector<fs::path>& allowed_roots()
+{
+    static const std::vector<fs::path> roots = parse_allowed_roots();
     return roots;
 }
 
@@ -86,4 +95,16 @@ std::string require_allowed_path(const std::string& raw, const char* field)
     }
     throw std::runtime_error(
         std::string(field) + " is outside ROI_ALLOWED_ROOTS: " + canon.string());
+}
+
+const std::vector<std::string>& init_allowed_roots()
+{
+    static const std::vector<std::string> names = [] {
+        std::vector<std::string> out;
+        for (const auto& root : allowed_roots()) {
+            out.push_back(root.string());
+        }
+        return out;
+    }();
+    return names;
 }

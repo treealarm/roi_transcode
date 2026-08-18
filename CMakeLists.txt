@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(PkgConfig REQUIRED)
 
-set(FFMPEG_DEV_ROOT "${CMAKE_SOURCE_DIR}/third_party/ffmpeg-dev")
+set(FFMPEG_DEV_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg-dev")
 set(FFMPEG_SYS_INCLUDE
     "${FFMPEG_DEV_ROOT}/usr/include/x86_64-linux-gnu")
 
@@ -48,8 +48,8 @@ add_executable(roi-transcode
 )
 
 target_include_directories(roi-transcode PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/third_party
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party
     ${FFMPEG_INCLUDE_DIRS}
 )
 
@@ -74,7 +74,7 @@ add_executable(roi_map_builder_test
 )
 
 target_include_directories(roi_map_builder_test PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 target_compile_options(roi_map_builder_test PRIVATE
@@ -89,8 +89,14 @@ if(ROI_BUILD_SVC)
     find_package(Protobuf CONFIG REQUIRED)
     find_package(gRPC CONFIG REQUIRED)
 
-    set(ROI_PROTO_FILE ${CMAKE_SOURCE_DIR}/proto/roi_transcode.proto)
-    set(DAPR_PROTO_FILE ${CMAKE_SOURCE_DIR}/proto/dapr/dapr_runtime.proto)
+    # The protos live in the repository-wide proto/ directory, next to every other
+    # ta_vms service contract. Overridable so an extracted copy can point elsewhere;
+    # roi_core itself needs none of this, only the service adapter does.
+    set(ROI_PROTO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../proto" CACHE PATH
+        "Directory holding roi_transcode.proto and dapr/dapr_runtime.proto")
+    cmake_path(SET ROI_PROTO_DIR NORMALIZE "${ROI_PROTO_DIR}")
+    set(ROI_PROTO_FILE ${ROI_PROTO_DIR}/roi_transcode.proto)
+    set(DAPR_PROTO_FILE ${ROI_PROTO_DIR}/dapr/dapr_runtime.proto)
 
     add_executable(roi-transcode-svc
         src/svc_main.cpp
@@ -103,22 +109,22 @@ if(ROI_BUILD_SVC)
 
     protobuf_generate(
         TARGET roi-transcode-svc
-        IMPORT_DIRS ${CMAKE_SOURCE_DIR}/proto
+        IMPORT_DIRS ${ROI_PROTO_DIR}
         PROTOS ${ROI_PROTO_FILE} ${DAPR_PROTO_FILE}
     )
 
     protobuf_generate(
         TARGET roi-transcode-svc
         LANGUAGE grpc
-        IMPORT_DIRS ${CMAKE_SOURCE_DIR}/proto
+        IMPORT_DIRS ${ROI_PROTO_DIR}
         PROTOS ${ROI_PROTO_FILE} ${DAPR_PROTO_FILE}
         PLUGIN protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
         GENERATE_EXTENSIONS .grpc.pb.cc .grpc.pb.h
     )
 
     target_include_directories(roi-transcode-svc PRIVATE
-        ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/third_party
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party
         ${CMAKE_CURRENT_BINARY_DIR}
         ${FFMPEG_INCLUDE_DIRS}
     )
@@ -147,13 +153,13 @@ if(ROI_BUILD_SVC)
     )
     protobuf_generate(
         TARGET roi_grpc_smoke
-        IMPORT_DIRS ${CMAKE_SOURCE_DIR}/proto
+        IMPORT_DIRS ${ROI_PROTO_DIR}
         PROTOS ${ROI_PROTO_FILE}
     )
     protobuf_generate(
         TARGET roi_grpc_smoke
         LANGUAGE grpc
-        IMPORT_DIRS ${CMAKE_SOURCE_DIR}/proto
+        IMPORT_DIRS ${ROI_PROTO_DIR}
         PROTOS ${ROI_PROTO_FILE}
         PLUGIN protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
         GENERATE_EXTENSIONS .grpc.pb.cc .grpc.pb.h
