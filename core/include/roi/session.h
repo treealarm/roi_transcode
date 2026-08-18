@@ -5,6 +5,7 @@
 // each with the regions worth keeping sharp, and takes packets back.
 
 #include "roi/geometry.h"
+#include "roi/report.h"
 #include "roi/roi_types.h"
 #include "roi/transcoder.h"
 
@@ -76,16 +77,6 @@ struct SessionParams {
     int max_regions = 32;
 };
 
-struct Report {
-    EncoderKind encoder_used = EncoderKind::X265;
-    std::string encoder_name;
-    int64_t frames = 0;
-    int64_t packets = 0;
-    int64_t bytes = 0;
-    // Regions the encoder's region budget could not take.
-    int64_t regions_dropped = 0;
-};
-
 class Session {
 public:
     Session(const SessionParams& params, PacketSink& sink);
@@ -96,6 +87,11 @@ public:
     // One frame with its regions. A frame carrying neither a mask nor boxes is
     // encoded with the background treatment alone.
     void submit(const Frame& frame, const Regions& regions);
+
+    // Which backend opened. Known as soon as the session exists, and with
+    // Encoder::Auto that is the only way to find out.
+    EncoderKind encoder_used() const;
+    std::string encoder_name() const;
 
     // Drains decoder and encoder, ends the sink, and reports what happened.
     Report finish();

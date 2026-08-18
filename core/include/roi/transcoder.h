@@ -1,17 +1,10 @@
 #pragma once
 
+#include "roi/report.h"
 #include "roi/roi_types.h"
 
 #include <atomic>
 #include <string>
-
-enum class EncoderKind {
-    Auto,
-    Qsv,
-    Vaapi,
-    Nvenc,
-    X265,
-};
 
 struct TranscodeOptions {
     std::string input_path;
@@ -29,5 +22,5 @@ struct TranscodeOptions {
 class Transcoder {
 public:
     // If cancel becomes true mid-run, throws std::runtime_error("cancelled").
-    void run(const TranscodeOptions& opt, std::atomic_bool* cancel = nullptr);
+    roi::Report run(const TranscodeOptions& opt, std::atomic_bool* cancel = nullptr);
 };

@@ -37,7 +37,7 @@ AVRational guess_fps(AVStream* st, AVCodecContext* dec)
 
 } // namespace
 
-void Transcoder::run(const TranscodeOptions& opt, std::atomic_bool* cancel)
+roi::Report Transcoder::run(const TranscodeOptions& opt, std::atomic_bool* cancel)
 {
     roiav::FmtIn in;
     check(avformat_open_input(&in.p, opt.input_path.c_str(), nullptr, nullptr),
@@ -83,6 +83,7 @@ void Transcoder::run(const TranscodeOptions& opt, std::atomic_bool* cancel)
 
     RoiMapBuilder roi_builder;
     QpDeltaMapBuilder qp_map;
+    int64_t frames = 0;
     roiav::Frame dec_frame;
     roiav::Packet ipkt;
     bool logged_roi = false;
@@ -114,6 +115,7 @@ void Transcoder::run(const TranscodeOptions& opt, std::atomic_bool* cancel)
         const int64_t out_pts = av_rescale_q(
             pts == AV_NOPTS_VALUE ? 0 : pts, in_v->time_base, enc.time_base());
         enc.encode(dec_frame.p, rects, out_pts);
+        ++frames;
     };
 
     while (av_read_frame(in.p, ipkt.p) >= 0) {
@@ -155,4 +157,10 @@ void Transcoder::run(const TranscodeOptions& opt, std::atomic_bool* cancel)
     sink.end();
     std::fprintf(stderr, "encoded with %s crf=%d preset=%s\n", enc.label(),
         opt.crf, opt.preset.c_str());
+
+    roi::Report report;
+    report.encoder_used = enc.kind();
+    report.encoder_name = enc.label();
+    report.frames = frames;
+    return report;
 }

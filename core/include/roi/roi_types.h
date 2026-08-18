@@ -5,6 +5,14 @@
 #include <unordered_map>
 #include <vector>
 
+enum class EncoderKind {
+    Auto,
+    Qsv,
+    Vaapi,
+    Nvenc,
+    X265,
+};
+
 struct KindConfig {
     int qp_delta = -6;
     double pad_norm = 0.02;

@@ -175,6 +175,16 @@ Session::Session(const SessionParams& params, PacketSink& sink)
 
 Session::~Session() = default;
 
+EncoderKind Session::encoder_used() const
+{
+    return m_impl->report.encoder_used;
+}
+
+std::string Session::encoder_name() const
+{
+    return m_impl->report.encoder_name;
+}
+
 void Session::submit(const Frame& frame, const Regions& regions)
 {
     if (m_impl->params.codec == InputCodec::Raw) {

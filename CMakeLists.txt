@@ -169,6 +169,7 @@ if(ROI_BUILD_SVC)
 
     target_include_directories(roi-transcode-svc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/svc
+        ${CMAKE_CURRENT_SOURCE_DIR}/core/src
         ${CMAKE_CURRENT_BINARY_DIR}
     )
 
@@ -203,7 +204,12 @@ if(ROI_BUILD_SVC)
         GENERATE_EXTENSIONS .grpc.pb.cc .grpc.pb.h
     )
     target_include_directories(roi_grpc_smoke PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+    target_include_directories(roi_grpc_smoke SYSTEM PRIVATE ${FFMPEG_INCLUDE_DIRS})
+    if(FFMPEG_LIBRARY_DIRS)
+        target_link_directories(roi_grpc_smoke PRIVATE ${FFMPEG_LIBRARY_DIRS})
+    endif()
     target_link_libraries(roi_grpc_smoke PRIVATE
+        ${FFMPEG_LIBRARIES}
         protobuf::libprotobuf
         gRPC::grpc
         gRPC::grpc++

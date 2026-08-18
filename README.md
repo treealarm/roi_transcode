@@ -75,9 +75,17 @@ Writes `testdata/synth.mp4` (plate `A123BC 77` on `testsrc2`) and
 
 ## gRPC service (+ optional Dapr)
 
-Same job pattern as `ta_vms/media_server` EdgeImport: Start / Get / Cancel /
-List. Proto: `../proto/roi_transcode.proto` (repository-wide, with every
-other ta_vms service contract).
+Two entry points, one `Settings` shared by both. Proto:
+`../proto/roi_transcode.proto` (repository-wide, with every other ta_vms
+service contract).
+
+- **File job** — `StartFileJob` / `GetJob` / `CancelJob` / `ListJobs`, the same
+  pattern as `ta_vms/media_server` EdgeImport: start returns immediately, poll
+  for the result, cancel is best effort.
+- **Frame stream** — `EncodeStream`, a bidirectional stream for a caller with no
+  file. First message is `open`, then frames, each carrying a mask or boxes.
+  With `output_path` set the packets are muxed there; otherwise they come back
+  over the stream.
 
 ```bash
 cmake --preset linux-default
@@ -107,8 +115,49 @@ repeated `boxes` (+ optional `kinds` / `background_qp_delta` / `hold_sec`),
 `encoder`, `crf`, `gop`, `preset`. `background_qp_delta: 0` disables the
 full-frame background ROI.
 
-Smoke (against a running svc):
+Smoke (against a running svc) covers both:
 
 ```bash
-./build/roi_grpc_smoke [host:port] [in] [out] [roi.json]
+./build/roi_grpc_smoke 127.0.0.1:50061 clip.mp4 out.mp4 testdata/roi.json
+./build/roi_grpc_smoke 127.0.0.1:50061 clip.mp4 out.mp4 --stream
 ```
+
+## Frame mode
+
+`roi::Session` takes frames instead of a path -- raw planes or compressed access
+units (H.264, H.265, JPEG) -- each with a mask or a box list, and hands packets
+to a `PacketSink`. The public surface is `core/include/roi/session.h`; the whole
+of `roi_core` depends on nothing but FFmpeg and the standard library, so a
+separate project can `add_subdirectory` it.
+
+`roi-frame-push` drives that from a file, which is also how the two modes are
+kept honest:
+
+```bash
+./build/roi-frame-push --in clip.mp4 --roi roi.json --out out.mp4 --push raw
+./build/roi-frame-push --in clip.mp4 --roi roi.json --out out.mp4 --push bitstream
+./build/roi-frame-push --in clip.mp4 --roi roi.json --out out.mp4 --mask
+```
+
+With boxes, `--push raw` and `--push bitstream` produce byte-for-byte the same
+file as `roi-transcode`. A mask is quantized to the 32-pixel block grid and
+carries no halo, so it deliberately does not.
+
+## Checks
+
+```bash
+./scripts/check.sh
+```
+
+One exit code, no step that needs a human to look at a picture: unit tests, the
+service refusing a broken configuration, structural checks on the output, the
+ROI assertions, frame/file parity, the gRPC paths and the sandbox, and a
+standalone build of `roi_core`. Each encode also appends a row to
+`testdata/eval/runs.csv`, so rate-distortion curves can be built from
+accumulated runs without rewriting the script.
+
+Note the assertions differ per backend on purpose. Under CQP (Quick Sync) the QP
+offsets are independent, so boosting a zone leaves the background bit-identical
+and equality is fair. `libx265` runs CRF, where rate control couples the regions
+-- bits spent on the zone are taken from the background -- so there only the
+direction is asserted.

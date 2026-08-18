@@ -126,7 +126,7 @@ void RoiJobManager::run_job(const std::shared_ptr<Job>& entry, RoiJobRequest req
         if (entry->cancel.load()) {
             throw std::runtime_error("cancelled");
         }
-        Transcoder{}.run(req.options, &entry->cancel);
+        const roi::Report report = Transcoder{}.run(req.options, &entry->cancel);
         {
             std::lock_guard lock(mutex_);
             if (entry->cancel.load()) {
@@ -135,7 +135,10 @@ void RoiJobManager::run_job(const std::shared_ptr<Job>& entry, RoiJobRequest req
             } else {
                 entry->status.state = RoiJobState::Completed;
                 entry->status.message = "ok";
-                entry->status.encoder_used = "see process log";
+                // With ENCODER_AUTO the backend is only known once one opened,
+                // and the difference matters enough to report rather than to
+                // leave the caller reading the process log.
+                entry->status.encoder_used = report.encoder_name;
             }
             entry->status.end_ts = std::chrono::system_clock::now();
             snapshot = entry->status;

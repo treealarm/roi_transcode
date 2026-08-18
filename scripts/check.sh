@@ -214,6 +214,50 @@ else
     printf '  skip  no /dev/dri, hardware backends unavailable\n'
 fi
 
+step "gRPC: both entry points, and the sandbox"
+if [[ -x "${BUILD}/roi-transcode-svc" && -x "${BUILD}/roi_grpc_smoke" ]]; then
+    port=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+    APP_ID=check GRPC_ROI_BIND=127.0.0.1 GRPC_ROI_PORT="$port" \
+        ROI_ALLOWED_ROOTS="${ROOT}:${WORK}" "${BUILD}/roi-transcode-svc" \
+        >"${WORK}/svc.log" 2>&1 &
+    svc=$!
+    for _ in $(seq 40); do
+        grep -q 'listening on' "${WORK}/svc.log" 2>/dev/null && break
+        sleep 0.25
+    done
+
+    if "${BUILD}/roi_grpc_smoke" "127.0.0.1:${port}" "$SRC" "${WORK}/grpc_job.mp4" \
+        "${ROOT}/testdata/synth_roi.json" >"${WORK}/grpc_job.log" 2>&1; then
+        pass "file job completed"
+        assert_eq "job reports the backend it used" \
+            "$(grep -oE 'encoder=.+' "${WORK}/grpc_job.log" | head -1 | cut -d= -f2- | cut -d' ' -f1)" \
+            "hevc_qsv"
+    else
+        fail "file job over gRPC"; sed 's/^/      /' "${WORK}/grpc_job.log" >&2
+    fi
+
+    if "${BUILD}/roi_grpc_smoke" "127.0.0.1:${port}" "$SRC" "" --stream \
+        >"${WORK}/grpc_stream.log" 2>&1; then
+        streamed=$(grep -oE '[0-9]+ packets streamed back' "${WORK}/grpc_stream.log" | grep -oE '^[0-9]+')
+        assert_eq "stream returns a packet per frame" "${streamed:-0}" "$src_frames"
+    else
+        fail "frame stream over gRPC"; sed 's/^/      /' "${WORK}/grpc_stream.log" >&2
+    fi
+
+    # A path outside ROI_ALLOWED_ROOTS must be refused, not written.
+    if "${BUILD}/roi_grpc_smoke" "127.0.0.1:${port}" "$SRC" "/etc/roi_escape.mp4" \
+        "${ROOT}/testdata/synth_roi.json" >"${WORK}/grpc_escape.log" 2>&1; then
+        fail "a path outside the sandbox was accepted"
+    else
+        pass "a path outside the sandbox is refused"
+    fi
+
+    kill "$svc" 2>/dev/null
+    wait "$svc" 2>/dev/null || true
+else
+    fail "service or smoke client not built"
+fi
+
 step "the core builds on its own"
 tmpb="${WORK}/standalone"
 if cmake -S "${ROOT}" -B "$tmpb" -G Ninja -DROI_BUILD_SVC=OFF \
