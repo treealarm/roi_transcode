@@ -1,6 +1,7 @@
 /build/
 /build-svc/
 /build-cli/
+/build-release/
 /out/
 /.cache/
 *.mp4

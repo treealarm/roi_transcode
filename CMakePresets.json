@@ -13,12 +13,23 @@
       }
     },
     {
+      "name": "linux-release",
+      "displayName": "Linux Release (vcpkg grpc)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-release",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "/mnt/wdblue/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "CMAKE_BUILD_TYPE": "Release",
+        "ROI_BUILD_SVC": "ON"
+      }
+    },
+    {
       "name": "linux-cli-only",
-      "displayName": "Linux CLI only (no gRPC)",
+      "displayName": "Linux CLI only (no gRPC, no repo protos)",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-cli",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_BUILD_TYPE": "Release",
         "ROI_BUILD_SVC": "OFF"
       }
     },
