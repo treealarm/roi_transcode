@@ -147,7 +147,8 @@ bool try_open(Attempt& out, EncoderKind kind, const AVCodec* codec,
     }
     out.enc.p->width = p.width;
     out.enc.p->height = p.height;
-    out.enc.p->time_base = av_inv_q(p.fps);
+    out.enc.p->time_base =
+        p.time_base.den > 0 ? p.time_base : av_inv_q(p.fps);
     out.enc.p->framerate = p.fps;
     const int gop_auto = std::max(p.fps.num / std::max(p.fps.den, 1), 1) * 2;
     out.enc.p->gop_size = p.gop > 0 ? p.gop : gop_auto;

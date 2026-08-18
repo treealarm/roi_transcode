@@ -161,11 +161,12 @@ void test_priority_order_and_truncation()
 
     const auto all = rects_from_qp_map(grid, 32, nullptr);
     CHECK(all.size() == 4);
-    // Strongest |delta| first: -9, -6, 4, -2.
+    // Boosts first and strongest first, suppression last: -9, -6, -2, then +4.
+    // Not by magnitude -- that would rank the +4 background above the -2 object.
     CHECK(all[0].qp_delta == -9);
     CHECK(all[1].qp_delta == -6);
-    CHECK(all[2].qp_delta == 4);
-    CHECK(all[3].qp_delta == -2);
+    CHECK(all[2].qp_delta == -2);
+    CHECK(all[3].qp_delta == 4);
 
     int dropped = 0;
     const auto few = rects_from_qp_map(grid, 2, &dropped);
@@ -173,7 +174,11 @@ void test_priority_order_and_truncation()
     CHECK(dropped == 2);
     CHECK(few[0].qp_delta == -9);
     CHECK(few[1].qp_delta == -6);
-    CHECK(find_rect(few, 0, 0) == nullptr); // the weakest was the one dropped
+    // The background suppression is dropped before any object boost.
+    for (const auto& r : few) {
+        CHECK(r.qp_delta < 0);
+    }
+    CHECK(find_rect(few, 0, 0) == nullptr); // the weakest boost went too
 }
 
 void test_degenerate_input()

@@ -144,11 +144,15 @@ std::vector<RoiRect> rects_from_qp_map(
         }
     }
 
-    // Strongest first: on overlap the encoder keeps the lowest index, and a
-    // truncated tail should cost the least important regions.
+    // Ascending delta: quality boosts first, strongest first, then background
+    // suppression. Ordering by magnitude instead would rank a +20 background
+    // above a -8 object -- the encoder keeps the lowest index on overlap, and
+    // the truncated tail has to be the regions whose loss costs least. Dropping
+    // a suppression only leaves that area at the base QP; dropping a boost
+    // damages the object the whole exercise is meant to protect.
     std::stable_sort(out.begin(), out.end(),
         [](const RoiRect& a, const RoiRect& b) {
-            return std::abs(a.qp_delta) > std::abs(b.qp_delta);
+            return a.qp_delta < b.qp_delta;
         });
 
     if (max_regions > 0 && static_cast<int>(out.size()) > max_regions) {

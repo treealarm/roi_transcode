@@ -65,6 +65,8 @@ add_library(roi_core STATIC
     core/src/transcoder.cpp
     core/src/roi_encoder.cpp
     core/src/file_mux_sink.cpp
+    core/src/frame_input.cpp
+    core/src/session.cpp
 )
 
 target_include_directories(roi_core
@@ -99,6 +101,14 @@ add_executable(roi-transcode cli/main.cpp)
 target_link_libraries(roi-transcode PRIVATE roi_core roi_json)
 target_compile_definitions(roi-transcode PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_compile_options(roi-transcode PRIVATE ${ROI_WARNINGS})
+
+add_executable(roi-frame-push cli/frame_push.cpp)
+# Reaches into core/src for FileMuxSink: it is part of this build, not a
+# consumer, and reimplementing a muxer here would prove nothing.
+target_include_directories(roi-frame-push PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/core/src)
+target_link_libraries(roi-frame-push PRIVATE roi_core roi_json)
+target_compile_definitions(roi-frame-push PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_compile_options(roi-frame-push PRIVATE ${ROI_WARNINGS})
 
 enable_testing()
 

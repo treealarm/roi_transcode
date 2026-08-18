@@ -18,6 +18,9 @@ struct EncoderParams {
     int height = 0;
     // Frame rate. Also picks the default GOP (two seconds) when gop == 0.
     AVRational fps{25, 1};
+    // Encoder time base. Left at den == 0 it follows the frame rate, which is
+    // what a file wants; a pushed source usually has its own units instead.
+    AVRational time_base{0, 0};
     EncoderKind kind = EncoderKind::Auto;
     int crf = 28;
     int gop = 0;

@@ -17,4 +17,12 @@ public:
         int width,
         int height,
         double t_sec) const;
+
+    // Same conversion without the time window: the pushed frame mode is handed
+    // the boxes for the frame it is submitting, so there is nothing to select.
+    std::vector<Detection> detections_from(
+        const std::vector<RoiSample>& samples,
+        const std::unordered_map<std::string, KindConfig>& kinds,
+        int width,
+        int height) const;
 };

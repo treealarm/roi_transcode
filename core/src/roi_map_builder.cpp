@@ -85,6 +85,23 @@ std::vector<RoiRect> RoiMapBuilder::build(
     return out;
 }
 
+namespace {
+Detection to_detection(
+    const RoiSample& s, const KindConfig& kind, int width, int height)
+{
+    Detection d;
+    d.x1 = static_cast<int>(std::lround(s.bbox_x * width));
+    d.y1 = static_cast<int>(std::lround(s.bbox_y * height));
+    d.x2 = static_cast<int>(std::lround((s.bbox_x + s.bbox_w) * width));
+    d.y2 = static_cast<int>(std::lround((s.bbox_y + s.bbox_h) * height));
+    d.qp_delta = kind.qp_delta;
+    d.pad_qp_delta = kind.qp_delta / 2;
+    d.pad_x = static_cast<int>(std::lround(kind.pad_norm * width));
+    d.pad_y = static_cast<int>(std::lround(kind.pad_norm * height));
+    return d;
+}
+} // namespace
+
 std::vector<Detection> RoiMapBuilder::detections_at(
     const RoiDocument& doc,
     int width,
@@ -98,17 +115,23 @@ std::vector<Detection> RoiMapBuilder::detections_at(
         if (std::abs(s.t - t_sec) > hold) {
             continue;
         }
-        const KindConfig kind = kind_or_default(doc, s.kind);
-        Detection d;
-        d.x1 = static_cast<int>(std::lround(s.bbox_x * width));
-        d.y1 = static_cast<int>(std::lround(s.bbox_y * height));
-        d.x2 = static_cast<int>(std::lround((s.bbox_x + s.bbox_w) * width));
-        d.y2 = static_cast<int>(std::lround((s.bbox_y + s.bbox_h) * height));
-        d.qp_delta = kind.qp_delta;
-        d.pad_qp_delta = kind.qp_delta / 2;
-        d.pad_x = static_cast<int>(std::lround(kind.pad_norm * width));
-        d.pad_y = static_cast<int>(std::lround(kind.pad_norm * height));
-        out.push_back(d);
+        out.push_back(to_detection(s, kind_or_default(doc, s.kind), width, height));
+    }
+    return out;
+}
+
+std::vector<Detection> RoiMapBuilder::detections_from(
+    const std::vector<RoiSample>& samples,
+    const std::unordered_map<std::string, KindConfig>& kinds,
+    int width,
+    int height) const
+{
+    std::vector<Detection> out;
+    out.reserve(samples.size());
+    for (const auto& s : samples) {
+        auto it = kinds.find(s.kind);
+        const KindConfig kind = it != kinds.end() ? it->second : KindConfig{};
+        out.push_back(to_detection(s, kind, width, height));
     }
     return out;
 }
