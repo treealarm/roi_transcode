@@ -119,6 +119,11 @@ target_link_libraries(roi_map_builder_test PRIVATE roi_geometry)
 target_compile_options(roi_map_builder_test PRIVATE ${ROI_WARNINGS})
 add_test(NAME roi_map_builder COMMAND roi_map_builder_test)
 
+add_executable(roi_json_test tests/roi_json_test.cpp)
+target_link_libraries(roi_json_test PRIVATE roi_json)
+target_compile_options(roi_json_test PRIVATE ${ROI_WARNINGS})
+add_test(NAME roi_json COMMAND roi_json_test)
+
 add_executable(geometry_test tests/geometry_test.cpp)
 target_link_libraries(geometry_test PRIVATE roi_geometry)
 target_compile_options(geometry_test PRIVATE ${ROI_WARNINGS})
@@ -177,6 +182,11 @@ if(ROI_BUILD_SVC)
 
     target_compile_definitions(roi-transcode-svc PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(roi-transcode-svc PRIVATE ${ROI_WARNINGS})
+
+    add_executable(path_guard_test tests/path_guard_test.cpp svc/grpc/path_guard.cpp)
+    target_include_directories(path_guard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/svc)
+    target_compile_options(path_guard_test PRIVATE ${ROI_WARNINGS})
+    add_test(NAME path_guard COMMAND path_guard_test)
 
     add_executable(roi_grpc_smoke tools/roi_grpc_smoke.cpp)
     protobuf_generate(

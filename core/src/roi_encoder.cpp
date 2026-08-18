@@ -285,6 +285,16 @@ void RoiEncoder::open(const EncoderParams& params, PacketSink& sink)
     m_sw_pix = opened.sw_pix;
     m_hw_upload = opened.hw_upload;
 
+    // libx265 and the hardware wrappers hand back packets with no duration. The
+    // mp4 muxer derives each sample's duration from the next packet, so with
+    // nothing following it the final sample is silently dropped -- one frame
+    // short, and the file a frame shorter than the source. MPEG-TS does not
+    // care, which is why this only ever showed up in mp4.
+    m_frame_duration = av_rescale_q(1, av_inv_q(params.fps), m_enc.p->time_base);
+    if (m_frame_duration <= 0) {
+        m_frame_duration = 1;
+    }
+
     m_sink = &sink;
     m_sink->begin(m_enc.p);
 }
@@ -333,6 +343,9 @@ void RoiEncoder::drain()
             break;
         }
         check(r, "receive packet");
+        if (m_pkt.p->duration <= 0) {
+            m_pkt.p->duration = m_frame_duration;
+        }
         m_sink->on_packet(m_pkt.p, m_enc.p->time_base);
         av_packet_unref(m_pkt.p);
     }
@@ -343,6 +356,10 @@ void RoiEncoder::encode(
 {
     AVFrame* sw = to_encoder_format(frame);
     sw->pts = pts;
+    // A frame handed straight through still carries the decoder's picture type.
+    // Choosing I/P/B is the encoder's job, and honouring the decoder's answer
+    // would let the input's GOP structure override the requested one.
+    sw->pict_type = AV_PICTURE_TYPE_NONE;
     attach_roi(sw, rects);
 
     if (m_hw_upload) {

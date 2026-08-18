@@ -61,7 +61,10 @@ const std::vector<fs::path>& allowed_roots()
 bool is_under(const fs::path& child, const fs::path& root)
 {
     const auto rel = child.lexically_relative(root);
-    if (rel.empty()) {
+    // Empty means unrelated; "." means the root itself, which is a directory and
+    // so never a file to read or write. Letting it through would trade a clear
+    // rejection here for an obscure open failure later.
+    if (rel.empty() || rel == ".") {
         return false;
     }
     for (const auto& part : rel) {

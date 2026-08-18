@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+# One entry point, one exit code. Everything here is machine-checkable: no
+# "look at the pictures" step.
+#
+# Each encode also appends a row to testdata/eval/runs.csv. The pass/fail
+# verdict is the exit code; the rows are what rate-distortion curves get built
+# from later, without rewriting this script.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BUILD="${BUILD:-${ROOT}/build}"
+EVAL="${ROOT}/testdata/eval"
+SRC="${ROOT}/testdata/synth.mp4"
+CSV="${EVAL}/runs.csv"
+WORK="$(mktemp -d)"
+trap 'rm -rf "${WORK}"' EXIT
+
+# Plate box, must match testdata/synth_roi.json on a 1280x720 frame.
+PX=448; PY=288; PW=384; PH=144
+# A busy patch of background, same size, well away from the plate.
+BGX=40; BGY=40
+
+fails=0
+pass() { printf '  ok    %s\n' "$1"; }
+fail() { printf '  FAIL  %s\n' "$1"; fails=$((fails + 1)); }
+step() { printf '\n== %s ==\n' "$1"; }
+
+# --- assertions -------------------------------------------------------------
+
+assert_eq() { # label actual expected
+    if [[ "$2" == "$3" ]]; then pass "$1 ($2)"; else fail "$1: got $2, want $3"; fi
+}
+assert_lt() { # label a b   (a < b)
+    if awk "BEGIN{exit !($2 < $3)}"; then pass "$1 ($2 < $3)"
+    else fail "$1: $2 is not < $3"; fi
+}
+assert_gt() {
+    if awk "BEGIN{exit !($2 > $3)}"; then pass "$1 ($2 > $3)"
+    else fail "$1: $2 is not > $3"; fi
+}
+
+probe() { ffprobe -v error -select_streams v:0 -show_entries "$1" -of csv=p=0 "$2"; }
+# nb_read_packets is only filled in when ffprobe is told to count, and without
+# that it reports N/A -- which would make a frame-count assertion pass by
+# comparing one N/A to another.
+count_packets() {
+    ffprobe -v error -count_packets -select_streams v:0 \
+        -show_entries stream=nb_read_packets -of csv=p=0 "$1"
+}
+
+ssim() { # file x y w h
+    ffmpeg -hide_banner -ss 1.0 -i "$SRC" -ss 1.0 -i "$1" -filter_complex \
+        "[0:v]crop=$4:$5:$2:$3[a];[1:v]crop=$4:$5:$2:$3[b];[a][b]ssim" \
+        -f null - 2>&1 | grep -oE 'All:[0-9.]+' | head -1 | cut -d: -f2
+}
+
+# --- encode + record --------------------------------------------------------
+
+declare -A BYTES SSIM_ROI SSIM_BG
+
+# Sets LAST_OUT rather than echoing it: called in a command substitution the
+# arrays below would be filled in a subshell and lost.
+LAST_OUT=""
+encode() { # name roi.json encoder extra-args...
+    local name="$1" roi="$2" enc="$3"; shift 3
+    local out="${WORK}/${name}.mp4"
+    LAST_OUT="$out"
+    if ! "${BUILD}/roi-transcode" --in "$SRC" --roi "${ROOT}/testdata/${roi}" \
+        --out "$out" --encoder "$enc" --crf 28 --gop 1 "$@" >"${WORK}/${name}.log" 2>&1; then
+        fail "encode ${name} (${enc})"; sed 's/^/      /' "${WORK}/${name}.log" >&2; return 1
+    fi
+    BYTES[$name]=$(stat -c %s "$out")
+    SSIM_ROI[$name]=$(ssim "$out" $PX $PY $PW $PH)
+    SSIM_BG[$name]=$(ssim "$out" $BGX $BGY $PW $PH)
+    local backend; backend=$(grep -oE 'encoded with [^ ]+' "${WORK}/${name}.log" | head -1 | cut -d' ' -f3)
+    printf '%s,synth,%s,%s,28,%s,%s,%s,%s\n' "$(date -Is)" "${backend:-unknown}" \
+        "$name" "${BYTES[$name]}" "${SSIM_ROI[$name]}" "${SSIM_BG[$name]}" \
+        "$(count_packets "$out" 2>/dev/null || echo)" >> "$CSV"
+}
+
+# --- run --------------------------------------------------------------------
+
+mkdir -p "$EVAL"
+[[ -f "$CSV" ]] || echo "ts,sequence,encoder,mode,qp,bytes,ssim_roi,ssim_bg,packets" > "$CSV"
+
+if [[ ! -f "$SRC" ]]; then
+    step "synthetic source"
+    "${ROOT}/scripts/make-synth.sh" >/dev/null 2>&1 || { echo "make-synth.sh failed" >&2; exit 1; }
+fi
+
+step "unit tests"
+for t in roi_map_builder_test geometry_test roi_json_test path_guard_test; do
+    if [[ -x "${BUILD}/${t}" ]]; then
+        if "${BUILD}/${t}" >/dev/null 2>&1; then pass "$t"; else fail "$t"; fi
+    else
+        fail "$t not built"
+    fi
+done
+
+step "startup refuses a broken configuration"
+if [[ -x "${BUILD}/roi-transcode-svc" ]]; then
+    for spec in "APP_ID" "ROI_ALLOWED_ROOTS" "relative-root"; do
+        case "$spec" in
+          APP_ID)            out=$(env -u APP_ID -u GRPC_ROI_BIND -u GRPC_ROI_PORT \
+                                   -u ROI_ALLOWED_ROOTS "${BUILD}/roi-transcode-svc" 2>&1); rc=$? ;;
+          ROI_ALLOWED_ROOTS) out=$(env -u ROI_ALLOWED_ROOTS APP_ID=t GRPC_ROI_BIND=127.0.0.1 \
+                                   GRPC_ROI_PORT=50099 "${BUILD}/roi-transcode-svc" 2>&1); rc=$? ;;
+          relative-root)     out=$(env APP_ID=t GRPC_ROI_BIND=127.0.0.1 GRPC_ROI_PORT=50099 \
+                                   ROI_ALLOWED_ROOTS=not/absolute "${BUILD}/roi-transcode-svc" 2>&1); rc=$? ;;
+        esac
+        if [[ $rc -ne 0 && -n "$out" ]]; then pass "refuses ${spec}"; else fail "refuses ${spec}"; fi
+    done
+else
+    fail "roi-transcode-svc not built"
+fi
+
+step "structural: the encoder produced a whole file"
+src_frames=$(count_packets "$SRC" 2>/dev/null || echo 0)
+encode base synth_roi.json x265 || true
+out="$LAST_OUT"
+if [[ -n "${BYTES[base]:-}" ]]; then
+    assert_eq "codec is hevc" "$(probe stream=codec_name "$out")" "hevc"
+    assert_eq "resolution kept" "$(probe stream=width,height "$out" | tr '\n' 'x' | sed 's/x$//')" \
+        "$(probe stream=width,height "$SRC" | tr '\n' 'x' | sed 's/x$//')"
+    assert_eq "frame count kept" "$(count_packets "$out")" "$src_frames"
+fi
+
+# Runs the four reference encodes on one backend and checks what the ROI
+# mechanism is supposed to guarantee.
+#
+# The comparisons are chosen so exactly one thing varies. Comparing roi against
+# noroi would put a 2.8 MB file next to a 5.3 MB one and measure the bitrate
+# rather than the mechanism, which is the classic way to make adaptive encoding
+# look good for the wrong reason.
+#
+# `cqp` says whether the backend holds QP constant. It matters: under CQP the
+# offsets are independent per block, so boosting the plate leaves the background
+# bit-identical and equality is a fair assertion. x265 runs CRF, where rate
+# control couples the regions -- spending bits on the plate demonstrably costs
+# the background -- so there the same assertion would be false for a legitimate
+# reason, and only the direction is checked.
+mechanism_checks() { # encoder cqp
+    local enc="$1" cqp="$2"
+    encode "noroi_${enc}"     synth_noroi.json     "$enc" || return
+    encode "plateonly_${enc}" synth_plateonly.json "$enc" || return
+    encode "bgonly_${enc}"    synth_bgonly.json    "$enc" || return
+    encode "roi_${enc}"       synth_roi.json       "$enc" || return
+
+    assert_gt "[${enc}] a boost lifts the zone" \
+        "${SSIM_ROI[plateonly_${enc}]}" "${SSIM_ROI[noroi_${enc}]}"
+    assert_gt "[${enc}] the zone survives a crushed background" \
+        "${SSIM_ROI[roi_${enc}]}" "${SSIM_ROI[bgonly_${enc}]}"
+    assert_lt "[${enc}] ROI costs less than flat quality" \
+        "${BYTES[roi_${enc}]}" "${BYTES[noroi_${enc}]}"
+
+    if [[ "$cqp" == "yes" ]]; then
+        assert_eq "[${enc}] a boost leaves the background untouched" \
+            "${SSIM_BG[plateonly_${enc}]}" "${SSIM_BG[noroi_${enc}]}"
+        assert_eq "[${enc}] the same suppression crushes the background equally" \
+            "${SSIM_BG[roi_${enc}]}" "${SSIM_BG[bgonly_${enc}]}"
+    else
+        assert_lt "[${enc}] suppression does crush the background" \
+            "${SSIM_BG[roi_${enc}]}" "${SSIM_BG[noroi_${enc}]}"
+    fi
+}
+
+step "the ROI mechanism does what it claims (x265, CRF)"
+mechanism_checks x265 no
+
+step "frame mode agrees with file mode"
+for mode in raw bitstream; do
+    if "${BUILD}/roi-frame-push" --in "$SRC" --roi "${ROOT}/testdata/synth_roi.json" \
+        --out "${WORK}/push_${mode}.mp4" --push "$mode" --encoder x265 --crf 28 --gop 1 \
+        >/dev/null 2>&1; then
+        if cmp -s "${WORK}/base.mp4" "${WORK}/push_${mode}.mp4"; then
+            pass "push ${mode} is byte-identical to the file pipeline"
+        else
+            fail "push ${mode} diverged from the file pipeline"
+        fi
+    else
+        fail "push ${mode} failed to run"
+    fi
+done
+
+# The mask quantizes to the block grid and carries no halo, so it is not
+# expected to match; it must still protect the zone against the background.
+if "${BUILD}/roi-frame-push" --in "$SRC" --roi "${ROOT}/testdata/synth_roi.json" \
+    --out "${WORK}/push_mask.mp4" --push raw --mask --encoder x265 --crf 28 --gop 1 \
+    >/dev/null 2>&1; then
+    m_roi=$(ssim "${WORK}/push_mask.mp4" $PX $PY $PW $PH)
+    m_bg=$(ssim "${WORK}/push_mask.mp4" $BGX $BGY $PW $PH)
+    assert_gt "mask protects the zone" "$m_roi" "$m_bg"
+    printf '%s,synth,x265,mask,28,%s,%s,%s,\n' "$(date -Is)" \
+        "$(stat -c %s "${WORK}/push_mask.mp4")" "$m_roi" "$m_bg" >> "$CSV"
+else
+    fail "mask mode failed to run"
+fi
+
+step "encoder backends"
+if [[ -e /dev/dri/renderD128 ]]; then
+    # shellcheck source=/dev/null
+    if source "${ROOT}/scripts/qsv-env.sh" 2>/dev/null; then
+        encode qsv_auto synth_roi.json auto || true
+        got=$(grep -oE 'encoded with [^ ]+' "${WORK}/qsv_auto.log" | head -1 | cut -d' ' -f3)
+        assert_eq "auto picks QSV with the Intel runtime" "${got:-none}" "hevc_qsv"
+        # QSV is the primary path and it is CQP, so the strict form of the
+        # mechanism checks runs here.
+        step "the ROI mechanism does what it claims (QSV, CQP)"
+        mechanism_checks qsv yes
+    else
+        printf '  skip  Intel runtime not fetched (scripts/fetch-intel-qsv.sh)\n'
+    fi
+else
+    printf '  skip  no /dev/dri, hardware backends unavailable\n'
+fi
+
+step "the core builds on its own"
+tmpb="${WORK}/standalone"
+if cmake -S "${ROOT}" -B "$tmpb" -G Ninja -DROI_BUILD_SVC=OFF \
+        -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1 \
+   && cmake --build "$tmpb" --target roi_core -j"$(nproc)" >/dev/null 2>&1; then
+    pass "roi_core builds with no gRPC, no vcpkg toolchain and no repo protos"
+else
+    fail "roi_core does not build standalone"
+fi
+
+printf '\n'
+if [[ $fails -eq 0 ]]; then
+    printf 'all checks passed; rows appended to %s\n' "$CSV"
+    exit 0
+fi
+printf '%d check(s) failed\n' "$fails"
+exit 1

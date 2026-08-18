@@ -64,5 +64,8 @@ private:
     roiav::Frame m_sw_frame;
     bool m_sw_frame_ready = false;
     roiav::Packet m_pkt;
+    // One frame's worth of the encoder time base, used when the encoder leaves
+    // a packet's duration unset.
+    int64_t m_frame_duration = 0;
     PacketSink* m_sink = nullptr;
 };
