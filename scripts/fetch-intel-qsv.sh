@@ -2,7 +2,7 @@
 # Unpack Intel GPU client/unified debs (no sudo) for working hevc_qsv on ADL.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DEST="${ROOT}/third_party/intel-qsv"
+DEST="${ROOT}/runtime/intel-qsv"
 BASE="https://repositories.intel.com/gpu/ubuntu"
 mkdir -p /tmp/intel-qsv-debs "$DEST"
 cd /tmp/intel-qsv-debs

@@ -1,5 +1,5 @@
+#include "roi/roi.h"
 #include "roi_json.h"
-#include "roi/transcoder.h"
 
 #include <cstdio>
 #include <cstring>
@@ -19,31 +19,25 @@ void usage()
         "libx265 is the CPU fallback (needs aq-mode).\n");
 }
 
-EncoderKind parse_encoder(const char* s)
+roi::Encoder parse_encoder(const char* s)
 {
-    if (std::strcmp(s, "auto") == 0) {
-        return EncoderKind::Auto;
-    }
-    if (std::strcmp(s, "qsv") == 0) {
-        return EncoderKind::Qsv;
-    }
-    if (std::strcmp(s, "vaapi") == 0) {
-        return EncoderKind::Vaapi;
-    }
-    if (std::strcmp(s, "nvenc") == 0) {
-        return EncoderKind::Nvenc;
-    }
-    if (std::strcmp(s, "x265") == 0) {
-        return EncoderKind::X265;
-    }
+    if (std::strcmp(s, "auto") == 0) return roi::Encoder::Auto;
+    if (std::strcmp(s, "qsv") == 0) return roi::Encoder::Qsv;
+    if (std::strcmp(s, "vaapi") == 0) return roi::Encoder::Vaapi;
+    if (std::strcmp(s, "nvenc") == 0) return roi::Encoder::Nvenc;
+    if (std::strcmp(s, "x265") == 0) return roi::Encoder::X265;
     throw std::runtime_error("unknown --encoder (auto|qsv|vaapi|nvenc|x265)");
 }
 } // namespace
 
 int main(int argc, char** argv)
 {
-    TranscodeOptions opt;
+    std::string input_path;
+    std::string output_path;
+    RoiJson roi_doc;
     bool have_roi = false;
+    roi::Settings settings;
+
     try {
         for (int i = 1; i < argc; ++i) {
             const char* a = argv[i];
@@ -55,20 +49,20 @@ int main(int argc, char** argv)
                 return argv[++i];
             };
             if (std::strcmp(a, "--in") == 0) {
-                opt.input_path = need("--in");
+                input_path = need("--in");
             } else if (std::strcmp(a, "--out") == 0) {
-                opt.output_path = need("--out");
+                output_path = need("--out");
             } else if (std::strcmp(a, "--roi") == 0) {
-                opt.roi = load_roi_json(need("--roi"));
+                roi_doc = load_roi_json(need("--roi"));
                 have_roi = true;
             } else if (std::strcmp(a, "--encoder") == 0) {
-                opt.encoder = parse_encoder(need("--encoder"));
+                settings.encoder = parse_encoder(need("--encoder"));
             } else if (std::strcmp(a, "--crf") == 0) {
-                opt.crf = std::stoi(need("--crf"));
+                settings.crf = std::stoi(need("--crf"));
             } else if (std::strcmp(a, "--gop") == 0) {
-                opt.gop = std::stoi(need("--gop"));
+                settings.gop = std::stoi(need("--gop"));
             } else if (std::strcmp(a, "--preset") == 0) {
-                opt.preset = need("--preset");
+                settings.preset = need("--preset");
             } else if (std::strcmp(a, "-h") == 0
                 || std::strcmp(a, "--help") == 0) {
                 usage();
@@ -77,11 +71,12 @@ int main(int argc, char** argv)
                 throw std::runtime_error(std::string("unknown arg: ") + a);
             }
         }
-        if (opt.input_path.empty() || opt.output_path.empty() || !have_roi) {
+        if (input_path.empty() || output_path.empty() || !have_roi) {
             usage();
             return 2;
         }
-        Transcoder{}.run(opt);
+        settings.quality = roi_doc.quality;
+        roi::transcode_file(input_path, output_path, roi_doc.boxes, settings);
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "error: %s\n", ex.what());
         return 1;

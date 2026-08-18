@@ -1,6 +1,8 @@
 #include "frame_input.h"
 
 #include <cstring>
+namespace roi {
+
 
 using roiav::check;
 using roiav::fail;
@@ -138,3 +140,5 @@ void FrameDecoder::flush(const FrameCb& cb)
     check(avcodec_send_packet(m_dec.p, nullptr), "flush decoder");
     receive(cb);
 }
+
+} // namespace roi

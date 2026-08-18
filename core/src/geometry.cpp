@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <map>
+namespace roi {
+
 
 namespace {
 
@@ -22,7 +24,7 @@ int delta_for_value(int value, const MaskMapping& mapping)
 
 } // namespace
 
-QpDeltaMap qp_map_from_mask(const RoiMask& mask, const MaskMapping& mapping,
+QpDeltaMap qp_map_from_mask(const Mask& mask, const MaskMapping& mapping,
     int frame_width, int frame_height, int block)
 {
     QpDeltaMap m;
@@ -68,10 +70,10 @@ QpDeltaMap qp_map_from_mask(const RoiMask& mask, const MaskMapping& mapping,
     return m;
 }
 
-std::vector<RoiRect> rects_from_qp_map(
+std::vector<Rect> rects_from_qp_map(
     const QpDeltaMap& map, int max_regions, int* dropped)
 {
-    std::vector<RoiRect> out;
+    std::vector<Rect> out;
     if (dropped) {
         *dropped = 0;
     }
@@ -133,7 +135,7 @@ std::vector<RoiRect> rects_from_qp_map(
 
     out.reserve(done.size());
     for (const auto& [run, row_end] : done) {
-        RoiRect r;
+        Rect r;
         r.left = run.col_begin * map.block;
         r.right = std::min(run.col_end * map.block, map.width);
         r.top = run.row_begin * map.block;
@@ -151,7 +153,7 @@ std::vector<RoiRect> rects_from_qp_map(
     // a suppression only leaves that area at the base QP; dropping a boost
     // damages the object the whole exercise is meant to protect.
     std::stable_sort(out.begin(), out.end(),
-        [](const RoiRect& a, const RoiRect& b) {
+        [](const Rect& a, const Rect& b) {
             return a.qp_delta < b.qp_delta;
         });
 
@@ -163,3 +165,5 @@ std::vector<RoiRect> rects_from_qp_map(
     }
     return out;
 }
+
+} // namespace roi

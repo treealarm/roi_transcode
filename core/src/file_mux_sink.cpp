@@ -5,6 +5,8 @@
 extern "C" {
 #include <libavutil/dict.h>
 }
+namespace roi {
+
 
 FileMuxSink::FileMuxSink(std::string path, std::string movflags)
     : m_path(std::move(path)), m_movflags(std::move(movflags))
@@ -84,3 +86,5 @@ void FileMuxSink::end()
     m_finished = true;
     roiav::check(av_write_trailer(m_out.p), "write trailer");
 }
+
+} // namespace roi

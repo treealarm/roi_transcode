@@ -10,13 +10,15 @@ extern "C" {
 #include <libavutil/hwcontext.h>
 #include <libavutil/opt.h>
 }
+namespace roi {
+
 
 using roiav::check;
 using roiav::fail;
 
 namespace {
 
-void attach_roi(AVFrame* frame, const std::vector<RoiRect>& rects)
+void attach_roi(AVFrame* frame, const std::vector<Rect>& rects)
 {
     av_frame_remove_side_data(frame, AV_FRAME_DATA_REGIONS_OF_INTEREST);
     if (rects.empty()) {
@@ -68,11 +70,11 @@ bool init_vaapi_frames(roiav::Buffer& hw, roiav::Buffer& frames, int w, int h)
 const char* RoiEncoder::label() const
 {
     switch (m_kind) {
-    case EncoderKind::Qsv:
+    case Encoder::Qsv:
         return "hevc_qsv (Intel VPL mfxExtEncoderROI)";
-    case EncoderKind::Vaapi:
+    case Encoder::Vaapi:
         return "hevc_vaapi (Intel iHD VAEncROI)";
-    case EncoderKind::Nvenc:
+    case Encoder::Nvenc:
         return "hevc_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)";
     default:
         return "libx265 (CPU fallback)";
@@ -86,7 +88,7 @@ namespace {
 // happily and then returns empty packets, and only an actual encode tells the
 // difference.
 struct Attempt {
-    EncoderKind kind = EncoderKind::X265;
+    Encoder kind = Encoder::X265;
     roiav::CodecCtx enc;
     roiav::Buffer hw_device;
     roiav::Buffer hw_frames;
@@ -136,7 +138,7 @@ bool probe_one_frame(Attempt& a)
     return r >= 0;
 }
 
-bool try_open(Attempt& out, EncoderKind kind, const AVCodec* codec,
+bool try_open(Attempt& out, Encoder kind, const AVCodec* codec,
     const EncoderParams& p, bool probe)
 {
     out = Attempt{};
@@ -154,7 +156,7 @@ bool try_open(Attempt& out, EncoderKind kind, const AVCodec* codec,
     out.enc.p->gop_size = p.gop > 0 ? p.gop : gop_auto;
     out.enc.p->max_b_frames = 0;
 
-    if (kind == EncoderKind::Qsv) {
+    if (kind == Encoder::Qsv) {
         AVDictionary* opts = nullptr;
         av_dict_set(&opts, "child_device_type", "vaapi", 0);
         const int derr = av_hwdevice_ctx_create(
@@ -174,7 +176,7 @@ bool try_open(Attempt& out, EncoderKind kind, const AVCodec* codec,
         av_opt_set(out.enc.p->priv_data, "preset", p.preset.c_str(), 0);
         out.enc.p->flags |= AV_CODEC_FLAG_QSCALE;
         out.enc.p->global_quality = p.crf * FF_QP2LAMBDA;
-    } else if (kind == EncoderKind::Vaapi) {
+    } else if (kind == Encoder::Vaapi) {
         if (!open_hw_device(
                 out.hw_device, AV_HWDEVICE_TYPE_VAAPI, "/dev/dri/renderD128")
             && !open_hw_device(out.hw_device, AV_HWDEVICE_TYPE_VAAPI, nullptr)) {
@@ -190,7 +192,7 @@ bool try_open(Attempt& out, EncoderKind kind, const AVCodec* codec,
         out.hw_upload = true;
         av_opt_set_int(out.enc.p->priv_data, "qp", p.crf, 0);
         av_opt_set(out.enc.p->priv_data, "rc_mode", "CQP", 0);
-    } else if (kind == EncoderKind::Nvenc) {
+    } else if (kind == Encoder::Nvenc) {
         open_hw_device(out.hw_device, AV_HWDEVICE_TYPE_CUDA, nullptr);
         if (out.hw_device.p) {
             out.enc.p->hw_device_ctx = av_buffer_ref(out.hw_device.p);
@@ -214,7 +216,7 @@ bool try_open(Attempt& out, EncoderKind kind, const AVCodec* codec,
         out = Attempt{};
         return false;
     }
-    if (kind == EncoderKind::Qsv && probe) {
+    if (kind == Encoder::Qsv && probe) {
         const bool ok = probe_one_frame(out);
         out = Attempt{};
         if (!ok) {
@@ -229,30 +231,42 @@ bool try_open(Attempt& out, EncoderKind kind, const AVCodec* codec,
 
 void RoiEncoder::open(const EncoderParams& params, PacketSink& sink)
 {
+    open_deferred(params);
+    attach(sink);
+}
+
+void RoiEncoder::attach(PacketSink& sink)
+{
+    m_sink = &sink;
+    m_sink->begin(m_enc.p);
+}
+
+void RoiEncoder::open_deferred(const EncoderParams& params)
+{
     struct Candidate {
-        EncoderKind kind;
+        Encoder kind;
         const char* name;
     };
     std::vector<Candidate> order;
     switch (params.kind) {
-    case EncoderKind::Auto:
+    case Encoder::Auto:
         order = {
-            {EncoderKind::Qsv, "hevc_qsv"},
-            {EncoderKind::Vaapi, "hevc_vaapi"},
-            {EncoderKind::X265, "libx265"},
+            {Encoder::Qsv, "hevc_qsv"},
+            {Encoder::Vaapi, "hevc_vaapi"},
+            {Encoder::X265, "libx265"},
         };
         break;
-    case EncoderKind::Qsv:
-        order = {{EncoderKind::Qsv, "hevc_qsv"}};
+    case Encoder::Qsv:
+        order = {{Encoder::Qsv, "hevc_qsv"}};
         break;
-    case EncoderKind::Vaapi:
-        order = {{EncoderKind::Vaapi, "hevc_vaapi"}};
+    case Encoder::Vaapi:
+        order = {{Encoder::Vaapi, "hevc_vaapi"}};
         break;
-    case EncoderKind::Nvenc:
-        order = {{EncoderKind::Nvenc, "hevc_nvenc"}};
+    case Encoder::Nvenc:
+        order = {{Encoder::Nvenc, "hevc_nvenc"}};
         break;
     default:
-        order = {{EncoderKind::X265, "libx265"}};
+        order = {{Encoder::X265, "libx265"}};
         break;
     }
 
@@ -261,7 +275,7 @@ void RoiEncoder::open(const EncoderParams& params, PacketSink& sink)
     bool got = false;
     for (const auto& c : order) {
         const AVCodec* codec = avcodec_find_encoder_by_name(c.name);
-        if (!codec && c.kind == EncoderKind::X265) {
+        if (!codec && c.kind == Encoder::X265) {
             codec = avcodec_find_encoder(AV_CODEC_ID_HEVC);
         }
         if (!codec) {
@@ -294,9 +308,6 @@ void RoiEncoder::open(const EncoderParams& params, PacketSink& sink)
     if (m_frame_duration <= 0) {
         m_frame_duration = 1;
     }
-
-    m_sink = &sink;
-    m_sink->begin(m_enc.p);
 }
 
 AVFrame* RoiEncoder::to_encoder_format(AVFrame* src)
@@ -352,7 +363,7 @@ void RoiEncoder::drain()
 }
 
 void RoiEncoder::encode(
-    AVFrame* frame, const std::vector<RoiRect>& rects, int64_t pts)
+    AVFrame* frame, const std::vector<Rect>& rects, int64_t pts)
 {
     AVFrame* sw = to_encoder_format(frame);
     sw->pts = pts;
@@ -382,3 +393,5 @@ void RoiEncoder::flush()
     check(avcodec_send_frame(m_enc.p, nullptr), "flush encoder");
     drain();
 }
+
+} // namespace roi

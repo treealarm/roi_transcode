@@ -1,26 +1,19 @@
 #pragma once
 
-// Frames in, encoded packets out. This is the entry point for a project that
-// has no file to hand over: it pushes frames -- raw or already compressed --
-// each with the regions worth keeping sharp, and takes packets back.
+// Frames in, encoded packets out -- for a caller that has no file to hand over.
 
 #include "roi/geometry.h"
+#include "roi/packet_handler.h"
 #include "roi/report.h"
-#include "roi/roi_types.h"
-#include "roi/transcoder.h"
+#include "roi/types.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
-class PacketSink;
-
 namespace roi {
-
-enum class InputCodec { Raw, H264, H265, Jpeg };
 
 // One frame on its way in: either raw planes or one encoded access unit.
 struct Frame {
@@ -41,17 +34,9 @@ struct Frame {
 
 // What to keep sharp in this frame: a mask, or boxes, or neither.
 struct Regions {
-    const RoiMask* mask = nullptr;
-    const RoiSample* boxes = nullptr;
+    const Mask* mask = nullptr;
+    const Box* boxes = nullptr;
     std::size_t box_count = 0;
-};
-
-// Per-kind quality for box input. Masks carry their own strength, so this
-// applies only to boxes.
-struct BoxQuality {
-    std::unordered_map<std::string, KindConfig> kinds;
-    // 0 leaves the background alone rather than meaning "unset".
-    int background_qp_delta = 6;
 };
 
 struct SessionParams {
@@ -60,26 +45,25 @@ struct SessionParams {
     // Units of Frame::pts.
     int time_base_num = 1;
     int time_base_den = 1000;
-    // Only used for the encoder's frame rate and the default GOP.
+    // Only sets the encoder's frame rate and the default GOP.
     int fps_num = 25;
     int fps_den = 1;
 
     InputCodec codec = InputCodec::Raw;
+    // Codec configuration for AVCC/HVCC input; empty for Annex-B or raw.
     std::vector<uint8_t> extradata;
 
-    EncoderKind encoder = EncoderKind::Auto;
-    int crf = 28;
-    int gop = 0;
-    std::string preset = "medium";
+    Settings settings;
 
-    MaskMapping mask_mapping;
-    BoxQuality box_quality;
-    int max_regions = 32;
+    // When set, packets are muxed into this file. Leave empty to receive them
+    // through a PacketHandler instead; giving neither is an error.
+    std::string output_path;
 };
 
 class Session {
 public:
-    Session(const SessionParams& params, PacketSink& sink);
+    // `handler` may be null when params.output_path names a file.
+    explicit Session(const SessionParams& params, PacketHandler* handler = nullptr);
     ~Session();
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
@@ -90,7 +74,7 @@ public:
 
     // Which backend opened. Known as soon as the session exists, and with
     // Encoder::Auto that is the only way to find out.
-    EncoderKind encoder_used() const;
+    Encoder encoder_used() const;
     std::string encoder_name() const;
 
     // Drains decoder and encoder, ends the sink, and reports what happened.

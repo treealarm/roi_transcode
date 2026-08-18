@@ -9,6 +9,8 @@
 #include <functional>
 #include <string>
 #include <vector>
+namespace roi {
+
 
 class PacketSink {
 public:
@@ -83,3 +85,5 @@ private:
     OnPacket m_on_packet;
     OnOpen m_on_open;
 };
+
+} // namespace roi

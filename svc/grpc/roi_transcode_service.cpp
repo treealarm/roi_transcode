@@ -55,32 +55,32 @@ void fill_job(const RoiJobStatus& st, roi::transcode::Job* out)
     out->set_encoder_used(st.encoder_used);
 }
 
-EncoderKind from_proto(roi::transcode::Encoder e)
+roi::Encoder from_proto(roi::transcode::Encoder e)
 {
     switch (e) {
     case roi::transcode::ENCODER_QSV:
-        return EncoderKind::Qsv;
+        return roi::Encoder::Qsv;
     case roi::transcode::ENCODER_VAAPI:
-        return EncoderKind::Vaapi;
+        return roi::Encoder::Vaapi;
     case roi::transcode::ENCODER_NVENC:
-        return EncoderKind::Nvenc;
+        return roi::Encoder::Nvenc;
     case roi::transcode::ENCODER_X265:
-        return EncoderKind::X265;
+        return roi::Encoder::X265;
     default:
-        return EncoderKind::Auto;
+        return roi::Encoder::Auto;
     }
 }
 
-roi::transcode::Encoder to_proto(EncoderKind k)
+roi::transcode::Encoder to_proto(roi::Encoder k)
 {
     switch (k) {
-    case EncoderKind::Qsv:
+    case roi::Encoder::Qsv:
         return roi::transcode::ENCODER_QSV;
-    case EncoderKind::Vaapi:
+    case roi::Encoder::Vaapi:
         return roi::transcode::ENCODER_VAAPI;
-    case EncoderKind::Nvenc:
+    case roi::Encoder::Nvenc:
         return roi::transcode::ENCODER_NVENC;
-    case EncoderKind::X265:
+    case roi::Encoder::X265:
         return roi::transcode::ENCODER_X265;
     default:
         return roi::transcode::ENCODER_AUTO;
@@ -88,73 +88,82 @@ roi::transcode::Encoder to_proto(EncoderKind k)
 }
 
 // Encoder knobs are shared by both entry points, so unpacking them is too.
-void apply_settings(const roi::transcode::Settings& in, EncoderKind& kind,
-    int& crf, int& gop, std::string& preset)
+// One Settings serves both entry points, so unpacking it is written once.
+void apply_settings(const roi::transcode::Settings& in, roi::Settings& out)
 {
-    kind = from_proto(in.encoder());
+    out.encoder = from_proto(in.encoder());
     if (in.crf() > 0) {
-        crf = in.crf();
+        out.crf = in.crf();
     }
     if (in.gop() > 0) {
-        gop = in.gop();
+        out.gop = in.gop();
     }
     if (!in.preset().empty()) {
-        preset = in.preset();
+        out.preset = in.preset();
     }
-}
 
-void apply_kinds(const roi::transcode::RoiQuality& q,
-    std::unordered_map<std::string, KindConfig>& out)
-{
+    const auto& q = in.roi();
+    if (q.has_background_qp_delta()) {
+        out.quality.background_qp_delta = q.background_qp_delta();
+    }
+    if (q.has_hold_sec() && q.hold_sec() > 0) {
+        out.quality.hold_sec = q.hold_sec();
+    }
+    if (q.max_regions() > 0) {
+        out.quality.max_regions = q.max_regions();
+    }
     for (const auto& k : q.kinds()) {
-        KindConfig cfg;
+        roi::KindQuality cfg;
         if (k.has_qp_delta()) {
             cfg.qp_delta = k.qp_delta();
         }
         if (k.has_pad() && k.pad() > 0) {
-            cfg.pad_norm = k.pad();
+            cfg.pad = k.pad();
         }
-        out.emplace(k.kind(), cfg);
+        out.quality.kinds.emplace(k.kind(), cfg);
     }
+    // A mask carries one strength, so it takes the strongest kind on offer.
+    for (const auto& [name, cfg] : out.quality.kinds) {
+        (void)name;
+        out.quality.mask_qp_delta_at_255 =
+            std::min(out.quality.mask_qp_delta_at_255, cfg.qp_delta);
+    }
+}
+
+roi::Box box_from_proto(const roi::transcode::Box& b)
+{
+    roi::Box out;
+    out.t_sec = b.t();
+    out.kind = b.kind();
+    out.x = b.x();
+    out.y = b.y();
+    out.width = b.width();
+    out.height = b.height();
+    return out;
 }
 
 RoiJobRequest build_request(const roi::transcode::FileJobRequest& req)
 {
     RoiJobRequest out;
-    out.options.input_path = require_allowed_path(req.input_path(), "input_path");
-    out.options.output_path = require_allowed_path(req.output_path(), "output_path");
-    out.options.movflags = req.movflags();
-    apply_settings(req.settings(), out.options.encoder, out.options.crf,
-        out.options.gop, out.options.preset);
+    out.input_path = require_allowed_path(req.input_path(), "input_path");
+    out.output_path = require_allowed_path(req.output_path(), "output_path");
+    apply_settings(req.settings(), out.settings);
+    out.settings.movflags = req.movflags();
 
     if (!req.roi_json_path().empty()) {
-        out.options.roi = load_roi_json(
+        RoiJson doc = load_roi_json(
             require_allowed_path(req.roi_json_path(), "roi_json_path"));
+        out.settings.quality = doc.quality;
+        out.boxes = std::move(doc.boxes);
         return out;
     }
 
-    RoiDocument doc;
-    const auto& q = req.settings().roi();
-    if (q.has_background_qp_delta()) {
-        doc.background_qp_delta = q.background_qp_delta();
-    }
-    if (q.has_hold_sec() && q.hold_sec() > 0) {
-        doc.hold_sec = q.hold_sec();
-    }
-    apply_kinds(q, doc.kinds);
     for (const auto& b : req.boxes()) {
-        RoiSample s;
-        s.t = b.t();
-        s.kind = b.kind();
-        s.bbox_x = b.x();
-        s.bbox_y = b.y();
-        s.bbox_w = b.width();
-        s.bbox_h = b.height();
-        doc.samples.push_back(s);
+        out.boxes.push_back(box_from_proto(b));
     }
-    out.options.roi = std::move(doc);
     return out;
 }
+
 } // namespace
 
 grpc::Status RoiTranscodeServiceImpl::StartFileJob(
@@ -213,52 +222,40 @@ grpc::Status RoiTranscodeServiceImpl::ListJobs(
 
 namespace {
 
-// Ships packets back over the stream. The alternative sink writes a file, in
-// which case nothing is streamed and only the summary comes back.
-class StreamSink : public PacketSink {
+// Ships packets back over the stream. The alternative is output_path, in which
+// case the session muxes and only the summary comes back.
+class StreamSink : public roi::PacketHandler {
 public:
     using Writer = grpc::ServerReaderWriter<roi::transcode::StreamResponse,
         roi::transcode::StreamRequest>;
 
     explicit StreamSink(Writer* w) : m_writer(w) {}
 
-    // Only records: which backend opened is known to the Session, not to the
-    // sink, and Opened should carry both that and the extradata in one message.
-    void begin(AVCodecContext* enc) override
-    {
-        if (enc->extradata && enc->extradata_size > 0) {
-            m_extradata.assign(enc->extradata, enc->extradata + enc->extradata_size);
-        }
-    }
-
-    void send_opened(roi::transcode::Encoder kind, const std::string& name)
+    void on_open(const roi::StreamInfo& info) override
     {
         roi::transcode::StreamResponse msg;
         auto* opened = msg.mutable_opened();
-        opened->set_encoder_used(kind);
-        opened->set_encoder_name(name);
-        if (!m_extradata.empty()) {
-            opened->set_extradata(m_extradata.data(), m_extradata.size());
+        opened->set_encoder_used(to_proto(info.encoder_used));
+        opened->set_encoder_name(info.encoder_name);
+        if (info.extradata && info.extradata_size > 0) {
+            opened->set_extradata(info.extradata, info.extradata_size);
         }
         m_writer->Write(msg);
     }
 
-    void on_packet(AVPacket* pkt, AVRational) override
+    void on_packet(const roi::EncodedPacket& pkt) override
     {
         roi::transcode::StreamResponse msg;
         auto* out = msg.mutable_packet();
-        out->set_pts(pkt->pts);
-        out->set_dts(pkt->dts);
-        out->set_key((pkt->flags & AV_PKT_FLAG_KEY) != 0);
-        out->set_data(pkt->data, static_cast<size_t>(pkt->size));
+        out->set_pts(pkt.pts);
+        out->set_dts(pkt.dts);
+        out->set_key(pkt.key);
+        out->set_data(pkt.data, pkt.size);
         m_writer->Write(msg);
     }
 
-    void end() override {}
-
 private:
     Writer* m_writer;
-    std::vector<uint8_t> m_extradata;
 };
 
 roi::InputCodec codec_from_proto(roi::transcode::InputCodec c)
@@ -292,23 +289,8 @@ roi::SessionParams params_from_open(const roi::transcode::StreamOpen& open)
     if (!open.extradata().empty()) {
         sp.extradata.assign(open.extradata().begin(), open.extradata().end());
     }
-    apply_settings(open.settings(), sp.encoder, sp.crf, sp.gop, sp.preset);
-
-    const auto& q = open.settings().roi();
-    if (q.has_background_qp_delta()) {
-        sp.box_quality.background_qp_delta = q.background_qp_delta();
-        sp.mask_mapping.qp_delta_at_0 = q.background_qp_delta();
-    }
-    if (q.max_regions() > 0) {
-        sp.max_regions = q.max_regions();
-    }
-    apply_kinds(q, sp.box_quality.kinds);
-    // A mask carries one strength, so it takes the strongest kind on offer.
-    for (const auto& [name, cfg] : sp.box_quality.kinds) {
-        (void)name;
-        sp.mask_mapping.qp_delta_at_255 =
-            std::min(sp.mask_mapping.qp_delta_at_255, cfg.qp_delta);
-    }
+    apply_settings(open.settings(), sp.settings);
+    sp.settings.movflags = open.movflags();
     return sp;
 }
 
@@ -333,31 +315,24 @@ grpc::Status RoiTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
             return {grpc::StatusCode::INVALID_ARGUMENT,
                 "open needs a frame size"};
         }
-        const roi::SessionParams sp = params_from_open(open);
+        roi::SessionParams sp = params_from_open(open);
 
-        std::unique_ptr<PacketSink> sink;
-        StreamSink* streaming = nullptr;
+        // Either the session muxes into a sandboxed path, or packets come back
+        // over the stream. Opened is sent by the handler, on_open.
+        std::unique_ptr<StreamSink> streaming;
         if (!open.output_path().empty()) {
-            sink = std::make_unique<FileMuxSink>(
-                require_allowed_path(open.output_path(), "output_path"),
-                open.movflags());
+            sp.output_path = require_allowed_path(open.output_path(), "output_path");
         } else {
-            auto s = std::make_unique<StreamSink>(stream);
-            streaming = s.get();
-            sink = std::move(s);
+            streaming = std::make_unique<StreamSink>(stream);
         }
 
-        roi::Session session(sp, *sink);
-        if (streaming) {
-            streaming->send_opened(
-                to_proto(session.encoder_used()), session.encoder_name());
-        }
+        roi::Session session(sp, streaming.get());
 
         // Raw planes arrive tightly packed, so the plane pointers are derived
         // rather than sent: one layout, described once in `open`.
         const auto pix = static_cast<AVPixelFormat>(open.pix_fmt());
-        std::vector<RoiSample> boxes;
-        RoiMask mask;
+        std::vector<roi::Box> boxes;
+        roi::Mask mask;
 
         while (stream->Read(&req)) {
             if (!req.has_frame()) {
@@ -377,14 +352,7 @@ grpc::Status RoiTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
                 regions.mask = &mask;
             } else if (in.has_boxes()) {
                 for (const auto& b : in.boxes().boxes()) {
-                    RoiSample s;
-                    s.t = b.t();
-                    s.kind = b.kind();
-                    s.bbox_x = b.x();
-                    s.bbox_y = b.y();
-                    s.bbox_w = b.width();
-                    s.bbox_h = b.height();
-                    boxes.push_back(s);
+                    boxes.push_back(box_from_proto(b));
                 }
                 regions.boxes = boxes.data();
                 regions.box_count = boxes.size();

@@ -2,9 +2,9 @@
 
 // What a completed encode has to say for itself. Shared by both entry points:
 // the caller of either wants to know which backend actually ran, and with
-// ENCODER_AUTO that is not knowable in advance.
+// Encoder::Auto that is not knowable in advance.
 
-#include "roi/roi_types.h"
+#include "roi/types.h"
 
 #include <cstdint>
 #include <string>
@@ -12,7 +12,7 @@
 namespace roi {
 
 struct Report {
-    EncoderKind encoder_used = EncoderKind::X265;
+    Encoder encoder_used = Encoder::X265;
     std::string encoder_name;
     int64_t frames = 0;
     int64_t packets = 0;

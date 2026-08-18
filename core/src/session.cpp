@@ -18,8 +18,8 @@ namespace {
 // to whatever comes out next -- they have to be carried across and matched up.
 struct HeldRegions {
     std::vector<uint8_t> mask_bytes;
-    RoiMask mask;
-    std::vector<RoiSample> boxes;
+    Mask mask;
+    std::vector<Box> boxes;
     bool has_mask = false;
 
     Regions view() const
@@ -60,14 +60,16 @@ HeldRegions hold(const Regions& in)
 
 } // namespace
 
-// Sits between the encoder and the caller's sink: every packet is counted on
-// its way through, so finish() can report without the caller tallying.
+// Sits between the encoder and wherever packets are going: a file it owns, or
+// the caller's handler. Counts them on the way through so finish() can report
+// without the caller tallying.
 struct Session::Impl : PacketSink {
     SessionParams params;
-    PacketSink* out = nullptr;
+    std::unique_ptr<FileMuxSink> file;
+    PacketHandler* handler = nullptr;
     RoiEncoder encoder;
     FrameDecoder decoder;
-    RoiMapBuilder boxes;
+    RoiMapBuilder builder;
     roiav::Frame wrapper;
     Report report;
     bool finished = false;
@@ -96,42 +98,85 @@ struct Session::Impl : PacketSink {
         return held;
     }
 
-    void begin(AVCodecContext* enc) override { out->begin(enc); }
+    void begin(AVCodecContext* enc) override
+    {
+        if (file) {
+            file->begin(enc);
+        }
+        if (handler) {
+            StreamInfo info;
+            info.width = enc->width;
+            info.height = enc->height;
+            info.extradata = enc->extradata;
+            info.extradata_size = static_cast<std::size_t>(
+                enc->extradata_size > 0 ? enc->extradata_size : 0);
+            info.encoder_used = report.encoder_used;
+            info.encoder_name = report.encoder_name;
+            handler->on_open(info);
+        }
+    }
+
     void on_packet(AVPacket* pkt, AVRational tb) override
     {
         ++report.packets;
         report.bytes += pkt->size;
-        out->on_packet(pkt, tb);
+        if (handler) {
+            EncodedPacket out;
+            out.data = pkt->data;
+            out.size = static_cast<std::size_t>(pkt->size);
+            out.pts = pkt->pts;
+            out.dts = pkt->dts;
+            out.key = (pkt->flags & AV_PKT_FLAG_KEY) != 0;
+            handler->on_packet(out);
+        }
+        if (file) {
+            file->on_packet(pkt, tb);
+        }
     }
-    void end() override { out->end(); }
 
-    std::vector<RoiRect> rects_for(const Regions& regions)
+    void end() override
+    {
+        if (file) {
+            file->end();
+        }
+        if (handler) {
+            handler->on_end();
+        }
+    }
+
+    std::vector<Rect> rects_for(const Regions& regions)
     {
         const int w = params.width;
         const int h = params.height;
 
         if (regions.mask && regions.mask->data) {
-            const QpDeltaMap grid =
-                qp_map_from_mask(*regions.mask, params.mask_mapping, w, h);
+            // The mask has no kind names: it interpolates between the
+            // background and the strongest strength the settings name.
+            MaskMapping mapping;
+            mapping.qp_delta_at_0 = params.settings.quality.background_qp_delta;
+            mapping.qp_delta_at_255 = params.settings.quality.mask_qp_delta_at_255;
+            mapping.levels = params.settings.quality.mask_levels;
+            const QpDeltaMap grid = qp_map_from_mask(*regions.mask, mapping, w, h);
             int dropped = 0;
-            auto rects = rects_from_qp_map(grid, params.max_regions, &dropped);
+            auto rects = rects_from_qp_map(
+                grid, params.settings.quality.max_regions, &dropped);
             report.regions_dropped += dropped;
             return rects;
         }
 
-        std::vector<RoiSample> samples;
+        std::vector<Box> box_list;
         if (regions.boxes && regions.box_count > 0) {
-            samples.assign(regions.boxes, regions.boxes + regions.box_count);
+            box_list.assign(regions.boxes, regions.boxes + regions.box_count);
         }
         const auto dets =
-            boxes.detections_from(samples, params.box_quality.kinds, w, h);
+            builder.detections_from(box_list, params.settings.quality, w, h);
         auto rects =
-            boxes.build(w, h, dets, params.box_quality.background_qp_delta);
-        if (params.max_regions > 0
-            && static_cast<int>(rects.size()) > params.max_regions) {
+            builder.build(w, h, dets, params.settings.quality.background_qp_delta);
+        if (params.settings.quality.max_regions > 0
+            && static_cast<int>(rects.size()) > params.settings.quality.max_regions) {
             report.regions_dropped +=
-                static_cast<int>(rects.size()) - params.max_regions;
-            rects.resize(static_cast<size_t>(params.max_regions));
+                static_cast<int>(rects.size()) - params.settings.quality.max_regions;
+            rects.resize(static_cast<size_t>(params.settings.quality.max_regions));
         }
         return rects;
     }
@@ -143,15 +188,22 @@ struct Session::Impl : PacketSink {
     }
 };
 
-Session::Session(const SessionParams& params, PacketSink& sink)
+Session::Session(const SessionParams& params, PacketHandler* handler)
     : m_impl(std::make_unique<Impl>())
 {
     if (params.width <= 0 || params.height <= 0) {
         roiav::fail("session needs a frame size");
     }
+    if (params.output_path.empty() && !handler) {
+        roiav::fail("session needs either an output_path or a packet handler");
+    }
 
     m_impl->params = params;
-    m_impl->out = &sink;
+    m_impl->handler = handler;
+    if (!params.output_path.empty()) {
+        m_impl->file = std::make_unique<FileMuxSink>(
+            params.output_path, params.settings.movflags);
+    }
 
     m_impl->decoder.open(params.codec,
         params.extradata.empty() ? nullptr : params.extradata.data(),
@@ -163,19 +215,22 @@ Session::Session(const SessionParams& params, PacketSink& sink)
     ep.fps = AVRational{params.fps_num, std::max(params.fps_den, 1)};
     ep.time_base =
         AVRational{params.time_base_num, std::max(params.time_base_den, 1)};
-    ep.kind = params.encoder;
-    ep.crf = params.crf;
-    ep.gop = params.gop;
-    ep.preset = params.preset;
+    ep.kind = params.settings.encoder;
+    ep.crf = params.settings.crf;
+    ep.gop = params.settings.gop;
+    ep.preset = params.settings.preset;
 
-    m_impl->encoder.open(ep, *m_impl);
+    // The report is filled before begin() runs, because StreamInfo carries the
+    // backend and the sink is what reports it.
+    m_impl->encoder.open_deferred(ep);
     m_impl->report.encoder_used = m_impl->encoder.kind();
     m_impl->report.encoder_name = m_impl->encoder.label();
+    m_impl->encoder.attach(*m_impl);
 }
 
 Session::~Session() = default;
 
-EncoderKind Session::encoder_used() const
+Encoder Session::encoder_used() const
 {
     return m_impl->report.encoder_used;
 }
@@ -225,7 +280,7 @@ Report Session::finish()
             m_impl->encode(decoded, held.view(), pts);
         });
         m_impl->encoder.flush();
-        m_impl->out->end();
+        m_impl->end();
     }
     return m_impl->report;
 }

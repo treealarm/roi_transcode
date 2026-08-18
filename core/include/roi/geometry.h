@@ -4,10 +4,12 @@
 // of boxes -- into the rectangles an encoder accepts. Pure arithmetic, no
 // FFmpeg, which is why it is exposed: these are the parts worth unit testing.
 
-#include "roi/roi_types.h"
+#include "roi/types.h"
 
 #include <cstdint>
 #include <vector>
+
+namespace roi {
 
 // Signed QP delta per coding block, raster order. HEVC uses 32x32 CTUs,
 // H.264 16x16 macroblocks. This is the common representation a mask and a
@@ -26,7 +28,7 @@ struct QpDeltaMap {
 
 // 8-bit region-of-interest mask at any resolution: 0 is background, 255 is
 // maximum quality. It is sampled onto the frame, so it need not match its size.
-struct RoiMask {
+struct Mask {
     const uint8_t* data = nullptr;
     int width = 0;
     int height = 0;
@@ -44,7 +46,7 @@ struct MaskMapping {
 // Samples `mask` onto the frame's block grid. Each block takes the *strongest*
 // quality it covers, not the average: crushing a block that caught the edge of
 // a plate costs more than spending bits on the background beside it.
-QpDeltaMap qp_map_from_mask(const RoiMask& mask, const MaskMapping& mapping,
+QpDeltaMap qp_map_from_mask(const Mask& mask, const MaskMapping& mapping,
     int frame_width, int frame_height, int block = 32);
 
 // Merges equal-delta blocks into rectangles, strongest |delta| first because the
@@ -52,5 +54,7 @@ QpDeltaMap qp_map_from_mask(const RoiMask& mask, const MaskMapping& mapping,
 // change", which is the absence of a region rather than a region asking for
 // nothing. Truncated to `max_regions` -- mfxExtEncoderROI takes at most 256 and
 // a VAAPI driver usually far fewer -- and `dropped`, if given, reports the cut.
-std::vector<RoiRect> rects_from_qp_map(
+std::vector<Rect> rects_from_qp_map(
     const QpDeltaMap& map, int max_regions, int* dropped = nullptr);
+
+} // namespace roi

@@ -1,4 +1,4 @@
-#include "roi/transcoder.h"
+#include "roi/roi.h"
 
 #include "av_raii.h"
 #include "packet_sink.h"
@@ -8,6 +8,8 @@
 
 #include <cstdio>
 #include <vector>
+
+namespace roi {
 
 using roiav::check;
 using roiav::fail;
@@ -37,10 +39,12 @@ AVRational guess_fps(AVStream* st, AVCodecContext* dec)
 
 } // namespace
 
-roi::Report Transcoder::run(const TranscodeOptions& opt, std::atomic_bool* cancel)
+Report transcode_file(const std::string& input_path,
+    const std::string& output_path, const std::vector<Box>& boxes,
+    const Settings& settings, std::atomic_bool* cancel)
 {
     roiav::FmtIn in;
-    check(avformat_open_input(&in.p, opt.input_path.c_str(), nullptr, nullptr),
+    check(avformat_open_input(&in.p, input_path.c_str(), nullptr, nullptr),
         "open input");
     check(avformat_find_stream_info(in.p, nullptr), "find stream info");
 
@@ -63,7 +67,7 @@ roi::Report Transcoder::run(const TranscodeOptions& opt, std::atomic_bool* cance
     check(avcodec_parameters_to_context(dec.p, in_v->codecpar), "decoder params");
     check(avcodec_open2(dec.p, decoder, nullptr), "open decoder");
 
-    FileMuxSink sink(opt.output_path, opt.movflags);
+    FileMuxSink sink(output_path, settings.movflags);
     if (aindex >= 0) {
         sink.declare_audio(
             in.p->streams[aindex]->codecpar, in.p->streams[aindex]->time_base);
@@ -73,20 +77,21 @@ roi::Report Transcoder::run(const TranscodeOptions& opt, std::atomic_bool* cance
     ep.width = dec.p->width;
     ep.height = dec.p->height;
     ep.fps = guess_fps(in_v, dec.p);
-    ep.kind = opt.encoder;
-    ep.crf = opt.crf;
-    ep.gop = opt.gop;
-    ep.preset = opt.preset;
+    ep.kind = settings.encoder;
+    ep.crf = settings.crf;
+    ep.gop = settings.gop;
+    ep.preset = settings.preset;
 
     RoiEncoder enc;
     enc.open(ep, sink);
 
     RoiMapBuilder roi_builder;
     QpDeltaMapBuilder qp_map;
-    int64_t frames = 0;
     roiav::Frame dec_frame;
     roiav::Packet ipkt;
     bool logged_roi = false;
+    int64_t frames = 0;
+    int64_t dropped = 0;
 
     auto handle_decoded = [&]() {
         const int64_t pts = dec_frame.p->best_effort_timestamp;
@@ -95,16 +100,21 @@ roi::Report Transcoder::run(const TranscodeOptions& opt, std::atomic_bool* cance
             : static_cast<double>(pts) * av_q2d(in_v->time_base);
 
         const auto dets = roi_builder.detections_at(
-            opt.roi, ep.width, ep.height, t);
-        const auto rects =
-            roi_builder.build(ep.width, ep.height, dets, opt.roi.background_qp_delta);
+            boxes, settings.quality, ep.width, ep.height, t);
+        auto rects = roi_builder.build(
+            ep.width, ep.height, dets, settings.quality.background_qp_delta);
+        const int cap = settings.quality.max_regions;
+        if (cap > 0 && static_cast<int>(rects.size()) > cap) {
+            dropped += static_cast<int>(rects.size()) - cap;
+            rects.resize(static_cast<size_t>(cap));
+        }
 
         if (!logged_roi) {
             const auto grid = qp_map.build(ep.width, ep.height, 32, rects);
             std::fprintf(stderr,
                 "ROI: %zu rects, HEVC qpDeltaMap %dx%d CTU (32x32)\n",
                 rects.size(), grid.cols, grid.rows);
-            if (enc.kind() == EncoderKind::Nvenc) {
+            if (enc.kind() == Encoder::Nvenc) {
                 std::fprintf(stderr,
                     "warning: stock FFmpeg hevc_nvenc ignores ROI; "
                     "qpDeltaMap is built but not submitted to NVENC SDK\n");
@@ -156,11 +166,14 @@ roi::Report Transcoder::run(const TranscodeOptions& opt, std::atomic_bool* cance
     enc.flush();
     sink.end();
     std::fprintf(stderr, "encoded with %s crf=%d preset=%s\n", enc.label(),
-        opt.crf, opt.preset.c_str());
+        settings.crf, settings.preset.c_str());
 
-    roi::Report report;
+    Report report;
     report.encoder_used = enc.kind();
     report.encoder_name = enc.label();
     report.frames = frames;
+    report.regions_dropped = dropped;
     return report;
 }
+
+} // namespace roi

@@ -4,37 +4,11 @@ project(roi-transcode CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(PkgConfig REQUIRED)
+# roi_core and roi_geometry come from core/, which stands alone so another
+# project can add_subdirectory() just that.
+add_subdirectory(core)
 
-set(FFMPEG_DEV_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg-dev"
-    CACHE PATH "Vendored FFmpeg headers; point elsewhere or clear to force pkg-config")
-set(FFMPEG_SYS_INCLUDE
-    "${FFMPEG_DEV_ROOT}/usr/include/x86_64-linux-gnu")
-
-# Prefer vendored Ubuntu headers + system .so (has hevc_qsv). vcpkg ffmpeg in this
-# tree is built without qsv and would win pkg-config under the toolchain.
-if(EXISTS "${FFMPEG_SYS_INCLUDE}/libavcodec/avcodec.h")
-    set(FFMPEG_INCLUDE_DIRS "${FFMPEG_SYS_INCLUDE}")
-    set(FFMPEG_LIBDIR /usr/lib/x86_64-linux-gnu)
-    set(FFMPEG_LIBRARIES
-        ${FFMPEG_LIBDIR}/libavformat.so.60
-        ${FFMPEG_LIBDIR}/libavcodec.so.60
-        ${FFMPEG_LIBDIR}/libavutil.so.58
-        ${FFMPEG_LIBDIR}/libswscale.so.7
-        ${FFMPEG_LIBDIR}/libswresample.so.4
-    )
-    unset(FFMPEG_LIBRARY_DIRS)
-    message(STATUS "FFmpeg headers: ${FFMPEG_INCLUDE_DIRS} (system .so)")
-else()
-    pkg_check_modules(FFMPEG REQUIRED
-        libavformat
-        libavcodec
-        libavutil
-        libswscale
-        libswresample
-    )
-    message(STATUS "FFmpeg via pkg-config: ${FFMPEG_INCLUDE_DIRS}")
-endif()
+find_package(nlohmann_json CONFIG REQUIRED)
 
 set(ROI_WARNINGS
     $<$<CXX_COMPILER_ID:GNU>:-Wall -Wextra>
@@ -43,55 +17,12 @@ set(ROI_WARNINGS
 )
 
 # ---------------------------------------------------------------------------
-# roi_geometry -- turning boxes (later: masks) into the rectangles an encoder
-# takes. Pure arithmetic: no FFmpeg, so it stays unit-testable on its own.
-# ---------------------------------------------------------------------------
-add_library(roi_geometry STATIC
-    core/src/roi_map_builder.cpp
-    core/src/geometry.cpp
-    core/src/qp_delta_map.cpp
-)
-target_include_directories(roi_geometry
-    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core/include
-           ${CMAKE_CURRENT_SOURCE_DIR}/core/src
-)
-target_compile_options(roi_geometry PRIVATE ${ROI_WARNINGS})
-
-# ---------------------------------------------------------------------------
-# roi_core -- the module a separate project embeds. FFmpeg and the standard
-# library, nothing else: no gRPC, no Dapr, no JSON, no ta_vms headers.
-# ---------------------------------------------------------------------------
-add_library(roi_core STATIC
-    core/src/transcoder.cpp
-    core/src/roi_encoder.cpp
-    core/src/file_mux_sink.cpp
-    core/src/frame_input.cpp
-    core/src/session.cpp
-)
-
-target_include_directories(roi_core
-    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/core/include
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/core/src
-)
-target_include_directories(roi_core SYSTEM PUBLIC ${FFMPEG_INCLUDE_DIRS})
-
-if(FFMPEG_LIBRARY_DIRS)
-    target_link_directories(roi_core PUBLIC ${FFMPEG_LIBRARY_DIRS})
-endif()
-target_link_libraries(roi_core PUBLIC roi_geometry ${FFMPEG_LIBRARIES})
-target_compile_definitions(roi_core PRIVATE _CRT_SECURE_NO_WARNINGS)
-target_compile_options(roi_core PRIVATE ${ROI_WARNINGS})
-
-# ---------------------------------------------------------------------------
 # roi_json -- roi.json <-> RoiDocument. Separate from roi_core so embedding the
 # encoder does not drag in nlohmann; only the CLI and the service parse files.
 # ---------------------------------------------------------------------------
 add_library(roi_json STATIC json/roi_json.cpp)
-target_include_directories(roi_json
-    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/json
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party
-)
-target_link_libraries(roi_json PUBLIC roi_core)
+target_include_directories(roi_json PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/json)
+target_link_libraries(roi_json PUBLIC roi_core PRIVATE nlohmann_json::nlohmann_json)
 target_compile_options(roi_json PRIVATE ${ROI_WARNINGS})
 
 # ---------------------------------------------------------------------------
@@ -123,6 +54,13 @@ add_executable(roi_json_test tests/roi_json_test.cpp)
 target_link_libraries(roi_json_test PRIVATE roi_json)
 target_compile_options(roi_json_test PRIVATE ${ROI_WARNINGS})
 add_test(NAME roi_json COMMAND roi_json_test)
+
+# Compiles against the public headers only -- no core/src on the include path,
+# which is the point: it fails if the surface starts leaking internals.
+add_executable(public_api_test tests/public_api_test.cpp)
+target_link_libraries(public_api_test PRIVATE roi_core)
+target_compile_options(public_api_test PRIVATE ${ROI_WARNINGS})
+add_test(NAME public_api COMMAND public_api_test)
 
 add_executable(geometry_test tests/geometry_test.cpp)
 target_link_libraries(geometry_test PRIVATE roi_geometry)

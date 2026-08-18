@@ -1,12 +1,14 @@
 #include "qp_delta_map.h"
 
 #include <algorithm>
+namespace roi {
+
 
 QpDeltaMap QpDeltaMapBuilder::build(
     int width,
     int height,
     int block,
-    const std::vector<RoiRect>& rects) const
+    const std::vector<Rect>& rects) const
 {
     QpDeltaMap m;
     if (width <= 0 || height <= 0 || block <= 0) {
@@ -21,7 +23,7 @@ QpDeltaMap QpDeltaMapBuilder::build(
 
     // Paint last→first so index 0 overwrites (Intel/FFmpeg: first region wins).
     for (int i = static_cast<int>(rects.size()) - 1; i >= 0; --i) {
-        const RoiRect& r = rects[static_cast<size_t>(i)];
+        const Rect& r = rects[static_cast<size_t>(i)];
         if (r.right <= r.left || r.bottom <= r.top) {
             continue;
         }
@@ -38,3 +40,5 @@ QpDeltaMap QpDeltaMapBuilder::build(
     }
     return m;
 }
+
+} // namespace roi

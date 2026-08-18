@@ -19,8 +19,8 @@ Needs a live Intel iGPU/Arc. No GPU → `--encoder x265` (CPU, not Intel SDK).
 
 ## Build
 
-Headers for Ubuntu FFmpeg 6.1.1 live in `third_party/ffmpeg-dev` (extracted
-`-dev` packages). Link against system `libavcodec.so`.
+Everything comes from vcpkg: FFmpeg (with `qsv` and `vaapi`), nlohmann-json,
+protobuf and gRPC. Nothing is vendored.
 
 ```bash
 cmake -S . -B build
@@ -52,7 +52,9 @@ That is also the mode where `mfxExtEncoderROI` `DeltaQP` applies.
 
 Ubuntu 24.04's iHD **24.1** + legacy MediaSDK returns empty HEVC packets
 (`Invalid FrameType:0`). `scripts/fetch-intel-qsv.sh` unpacks Intel's
-**25.2.4** iHD + `libmfx-gen` into `third_party/intel-qsv` (no sudo).
+**25.2.4** iHD + `libmfx-gen` into `runtime/` (no sudo). That is a GPU driver
+matched to the kernel and the card, which is why it is fetched rather than taken
+from vcpkg like everything else.
 With `source scripts/qsv-env.sh`, `--encoder qsv` encodes through
 `hevc_qsv` → `mfxExtEncoderROI`. Without that env, auto falls back to
 `hevc_vaapi` (same iGPU, `VAEncMiscParameterBufferROI`).
@@ -122,16 +124,42 @@ Smoke (against a running svc) covers both:
 ./build/roi_grpc_smoke 127.0.0.1:50061 clip.mp4 out.mp4 --stream
 ```
 
-## Frame mode
+## Using it from another project
 
-`roi::Session` takes frames instead of a path -- raw planes or compressed access
-units (H.264, H.265, JPEG) -- each with a mask or a box list, and hands packets
-to a `PacketSink`. The public surface is `core/include/roi/session.h`; the whole
-of `roi_core` depends on nothing but FFmpeg and the standard library, so a
-separate project can `add_subdirectory` it.
+One include, one namespace, two ways in. `roi_core` depends on FFmpeg and the
+standard library -- no gRPC, no Dapr, no JSON, nothing from ta_vms -- so a
+separate project can `add_subdirectory(roi_transcode/core)` and link it -- `core/`
+is its own CMake project, and `scripts/check.sh` configures it alone to keep that true.
 
-`roi-frame-push` drives that from a file, which is also how the two modes are
-kept honest:
+```cpp
+#include "roi/roi.h"
+
+roi::Settings s;
+s.quality.background_qp_delta = 20;
+s.quality.kinds["plate"] = roi::KindQuality{-8, 0.01};
+
+// A file.
+roi::Report r = roi::transcode_file("in.mp4", "out.mp4", boxes, s);
+
+// Or frames, raw or already compressed, each with a mask or boxes.
+roi::SessionParams p;
+p.width = 1280; p.height = 720;
+p.codec = roi::InputCodec::H264;
+p.settings = s;
+roi::Session session(p, &handler);   // or p.output_path to mux a file
+session.submit(frame, regions);
+roi::Report done = session.finish();
+```
+
+`PacketHandler` carries no FFmpeg types -- bytes, timestamps and a keyframe flag
+-- so writing one needs nothing on the include path but this header.
+`tests/public_api_test.cpp` compiles against the public headers alone and fails
+if that stops being true.
+
+## Driving the frame mode from a file
+
+`roi-frame-push` exists so the frame mode can be exercised without a gRPC client
+in between, and so the two modes can be checked against each other:
 
 ```bash
 ./build/roi-frame-push --in clip.mp4 --roi roi.json --out out.mp4 --push raw
@@ -139,9 +167,14 @@ kept honest:
 ./build/roi-frame-push --in clip.mp4 --roi roi.json --out out.mp4 --mask
 ```
 
-With boxes, `--push raw` and `--push bitstream` produce byte-for-byte the same
-file as `roi-transcode`. A mask is quantized to the 32-pixel block grid and
-carries no halo, so it deliberately does not.
+With boxes, `--push raw` and `--push bitstream` encode exactly the same pictures
+as `roi-transcode` -- identical framemd5 over the whole stream, identical packet
+sizes, identical duration. The containers differ in one field: the frame-push
+CLI hands the session the source stream's time base, as an embedding caller
+would, while the file path derives one from the frame rate, and FFmpeg 9 carries
+that into `mvhd` as a different movie timescale describing the same 12.000 s.
+A mask is quantized to the 32-pixel block grid and carries no halo, so it
+deliberately differs in the encode itself.
 
 ## Checks
 

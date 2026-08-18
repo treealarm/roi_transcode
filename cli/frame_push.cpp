@@ -3,7 +3,7 @@
 // way to exercise the frame mode without a gRPC client in between, and running
 // it against roi-transcode on the same input is the check that both modes agree.
 
-#include "roi/session.h"
+#include "roi/roi.h"
 #include "roi_json.h"
 
 #include <algorithm>
@@ -20,10 +20,6 @@ extern "C" {
 #include <libavutil/imgutils.h>
 }
 
-// Internal, but this tool is part of the same build and deliberately reaches for
-// the muxing sink rather than reimplementing one.
-#include "packet_sink.h"
-
 namespace {
 
 void usage()
@@ -39,13 +35,13 @@ void usage()
         "  --mask            rasterize the boxes into a grayscale mask\n");
 }
 
-EncoderKind parse_encoder(const char* s)
+roi::Encoder parse_encoder(const char* s)
 {
-    if (std::strcmp(s, "auto") == 0) return EncoderKind::Auto;
-    if (std::strcmp(s, "qsv") == 0) return EncoderKind::Qsv;
-    if (std::strcmp(s, "vaapi") == 0) return EncoderKind::Vaapi;
-    if (std::strcmp(s, "nvenc") == 0) return EncoderKind::Nvenc;
-    if (std::strcmp(s, "x265") == 0) return EncoderKind::X265;
+    if (std::strcmp(s, "auto") == 0) return roi::Encoder::Auto;
+    if (std::strcmp(s, "qsv") == 0) return roi::Encoder::Qsv;
+    if (std::strcmp(s, "vaapi") == 0) return roi::Encoder::Vaapi;
+    if (std::strcmp(s, "nvenc") == 0) return roi::Encoder::Nvenc;
+    if (std::strcmp(s, "x265") == 0) return roi::Encoder::X265;
     throw std::runtime_error("unknown --encoder (auto|qsv|vaapi|nvenc|x265)");
 }
 
@@ -63,29 +59,30 @@ roi::InputCodec codec_of(AVCodecID id)
 
 // Boxes live on the timeline; a submitted frame wants the ones around its own
 // instant. Same hold window the file pipeline applies.
-std::vector<RoiSample> samples_at(const RoiDocument& doc, double t_sec)
+std::vector<roi::Box> boxes_at(
+    const std::vector<roi::Box>& boxes, double hold_sec, double t_sec)
 {
-    const double hold = doc.hold_sec > 0 ? doc.hold_sec : 0.25;
-    std::vector<RoiSample> out;
-    for (const auto& s : doc.samples) {
-        if (std::abs(s.t - t_sec) <= hold) {
-            out.push_back(s);
+    const double hold = hold_sec > 0 ? hold_sec : 0.25;
+    std::vector<roi::Box> out;
+    for (const auto& b : boxes) {
+        if (std::abs(b.t_sec - t_sec) <= hold) {
+            out.push_back(b);
         }
     }
     return out;
 }
 
 void rasterize(std::vector<uint8_t>& mask, int w, int h,
-    const std::vector<RoiSample>& samples)
+    const std::vector<roi::Box>& boxes)
 {
     std::fill(mask.begin(), mask.end(), static_cast<uint8_t>(0));
-    for (const auto& s : samples) {
-        const int x0 = std::clamp(static_cast<int>(std::lround(s.bbox_x * w)), 0, w);
-        const int y0 = std::clamp(static_cast<int>(std::lround(s.bbox_y * h)), 0, h);
+    for (const auto& s : boxes) {
+        const int x0 = std::clamp(static_cast<int>(std::lround(s.x * w)), 0, w);
+        const int y0 = std::clamp(static_cast<int>(std::lround(s.y * h)), 0, h);
         const int x1 = std::clamp(
-            static_cast<int>(std::lround((s.bbox_x + s.bbox_w) * w)), 0, w);
+            static_cast<int>(std::lround((s.x + s.width) * w)), 0, w);
         const int y1 = std::clamp(
-            static_cast<int>(std::lround((s.bbox_y + s.bbox_h) * h)), 0, h);
+            static_cast<int>(std::lround((s.y + s.height) * h)), 0, h);
         for (int y = y0; y < y1; ++y) {
             std::fill(mask.begin() + static_cast<size_t>(y) * w + x0,
                 mask.begin() + static_cast<size_t>(y) * w + x1,
@@ -97,11 +94,11 @@ void rasterize(std::vector<uint8_t>& mask, int w, int h,
 struct Args {
     std::string in;
     std::string out;
-    RoiDocument roi;
+    RoiJson roi_doc;
     bool have_roi = false;
     bool bitstream = false;
     bool use_mask = false;
-    EncoderKind encoder = EncoderKind::Auto;
+    roi::Encoder encoder = roi::Encoder::Auto;
     int crf = 28;
     int gop = 0;
     std::string preset = "medium";
@@ -142,23 +139,15 @@ int run(const Args& args)
         sp.fps_num = vs->avg_frame_rate.num;
         sp.fps_den = vs->avg_frame_rate.den;
     }
-    sp.encoder = args.encoder;
-    sp.crf = args.crf;
-    sp.gop = args.gop;
-    sp.preset = args.preset;
-    sp.box_quality.kinds = args.roi.kinds;
-    sp.box_quality.background_qp_delta = args.roi.background_qp_delta;
-
-    // A mask carries one strength, so it borrows the strongest configured kind
-    // and the same background as the box path.
-    int strongest = -6;
-    for (const auto& [name, cfg] : args.roi.kinds) {
-        (void)name;
-        strongest = std::min(strongest, cfg.qp_delta);
+    sp.settings.encoder = args.encoder;
+    sp.settings.crf = args.crf;
+    sp.settings.gop = args.gop;
+    sp.settings.preset = args.preset;
+    sp.settings.quality = args.roi_doc.quality;
+    // A rasterized box is on or off, so two levels is all the mask can express.
+    if (args.use_mask) {
+        sp.settings.quality.mask_levels = 2;
     }
-    sp.mask_mapping.qp_delta_at_255 = strongest;
-    sp.mask_mapping.qp_delta_at_0 = args.roi.background_qp_delta;
-    sp.mask_mapping.levels = 2; // a rasterized box is on or off
 
     if (args.bitstream) {
         sp.codec = codec_of(vs->codecpar->codec_id);
@@ -168,19 +157,19 @@ int run(const Args& args)
         }
     }
 
-    FileMuxSink sink(args.out);
-    roi::Session session(sp, sink);
+    sp.output_path = args.out;
+    roi::Session session(sp);
 
     std::vector<uint8_t> mask_buf(
         static_cast<size_t>(sp.width) * static_cast<size_t>(sp.height));
-    RoiMask mask;
+    roi::Mask mask;
     mask.data = mask_buf.data();
     mask.width = sp.width;
     mask.height = sp.height;
     mask.stride = sp.width;
 
-    auto regions_for = [&](double t_sec, std::vector<RoiSample>& keep) {
-        keep = samples_at(args.roi, t_sec);
+    auto regions_for = [&](double t_sec, std::vector<roi::Box>& keep) {
+        keep = boxes_at(args.roi_doc.boxes, args.roi_doc.quality.hold_sec, t_sec);
         roi::Regions r;
         if (args.use_mask) {
             rasterize(mask_buf, sp.width, sp.height, keep);
@@ -203,7 +192,7 @@ int run(const Args& args)
             if (pkt->stream_index == vindex) {
                 const int64_t pts = pkt->pts != AV_NOPTS_VALUE ? pkt->pts : 0;
                 const double t = static_cast<double>(pts) * av_q2d(vs->time_base);
-                std::vector<RoiSample> keep;
+                std::vector<roi::Box> keep;
                 const roi::Regions r = regions_for(t, keep);
                 roi::Frame f;
                 f.encoded = pkt->data;
@@ -247,7 +236,7 @@ int run(const Args& args)
                     ? frame->best_effort_timestamp
                     : 0;
                 const double t = static_cast<double>(pts) * av_q2d(vs->time_base);
-                std::vector<RoiSample> keep;
+                std::vector<roi::Box> keep;
                 const roi::Regions rg = regions_for(t, keep);
                 roi::Frame f;
                 for (int i = 0; i < 4; ++i) {
@@ -309,7 +298,7 @@ int main(int argc, char** argv)
             } else if (std::strcmp(a, "--out") == 0) {
                 args.out = need("--out");
             } else if (std::strcmp(a, "--roi") == 0) {
-                args.roi = load_roi_json(need("--roi"));
+                args.roi_doc = load_roi_json(need("--roi"));
                 args.have_roi = true;
             } else if (std::strcmp(a, "--push") == 0) {
                 const char* mode = need("--push");

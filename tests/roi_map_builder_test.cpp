@@ -3,6 +3,9 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
+
+using namespace roi;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \
@@ -40,26 +43,31 @@ int main()
     CHECK(rects[2].right == 1920);
     CHECK(rects[2].bottom == 1080);
 
-    RoiDocument doc;
-    doc.hold_sec = 0.25;
-    doc.kinds["plate"] = KindConfig{-10, 0.02};
-    doc.samples.push_back(RoiSample{
-        .t = 1.25,
+    Quality quality;
+    quality.hold_sec = 0.25;
+    quality.kinds["plate"] = KindQuality{-10, 0.02};
+    const std::vector<Box> boxes{Box{
+        .t_sec = 1.25,
         .kind = "plate",
-        .bbox_x = 0.5f,
-        .bbox_y = 0.5f,
-        .bbox_w = 0.1f,
-        .bbox_h = 0.05f,
-    });
+        .x = 0.5f,
+        .y = 0.5f,
+        .width = 0.1f,
+        .height = 0.05f,
+    }};
 
-    const auto at = builder.detections_at(doc, 1000, 1000, 1.20);
+    const auto at = builder.detections_at(boxes, quality, 1000, 1000, 1.20);
     CHECK(at.size() == 1);
     CHECK(at[0].x1 == 500);
     CHECK(at[0].x2 == 600);
     CHECK(at[0].qp_delta == -10);
 
-    const auto miss = builder.detections_at(doc, 1000, 1000, 9.0);
+    const auto miss = builder.detections_at(boxes, quality, 1000, 1000, 9.0);
     CHECK(miss.empty());
+
+    // Without the time window every box resolves, whatever its timestamp.
+    const auto all = builder.detections_from(boxes, quality, 1000, 1000);
+    CHECK(all.size() == 1);
+    CHECK(all[0].x1 == 500);
 
     QpDeltaMapBuilder qp_map;
     const auto grid = qp_map.build(1920, 1080, 32, rects);

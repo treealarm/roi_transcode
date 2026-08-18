@@ -1,6 +1,6 @@
 #include "job/roi_job_manager.h"
 
-#include "roi/transcoder.h"
+#include "roi/roi.h"
 
 #include <format>
 #include <stdexcept>
@@ -87,15 +87,15 @@ void RoiJobManager::prune_finished_locked(std::vector<std::thread>& to_join)
 std::optional<RoiJobStatus> RoiJobManager::start(
     RoiJobRequest req, std::string& error)
 {
-    if (req.options.input_path.empty() || req.options.output_path.empty()) {
+    if (req.input_path.empty() || req.output_path.empty()) {
         error = "input_path and output_path are required";
         return std::nullopt;
     }
 
     auto entry = std::make_shared<Job>();
     entry->status.job_id = make_job_id();
-    entry->status.input_path = req.options.input_path;
-    entry->status.output_path = req.options.output_path;
+    entry->status.input_path = req.input_path;
+    entry->status.output_path = req.output_path;
     entry->status.state = RoiJobState::Running;
     entry->status.start_ts = std::chrono::system_clock::now();
     entry->status.message = "running";
@@ -126,7 +126,9 @@ void RoiJobManager::run_job(const std::shared_ptr<Job>& entry, RoiJobRequest req
         if (entry->cancel.load()) {
             throw std::runtime_error("cancelled");
         }
-        const roi::Report report = Transcoder{}.run(req.options, &entry->cancel);
+        const roi::Report report = roi::transcode_file(
+            req.input_path, req.output_path, req.boxes, req.settings,
+            &entry->cancel);
         {
             std::lock_guard lock(mutex_);
             if (entry->cancel.load()) {

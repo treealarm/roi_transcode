@@ -12,6 +12,8 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 }
 
+namespace roi {
+
 class FrameDecoder {
 public:
     using FrameCb = std::function<void(AVFrame*)>;
@@ -41,3 +43,5 @@ public:
     FrameDecoder(const FrameDecoder&) = delete;
     FrameDecoder& operator=(const FrameDecoder&) = delete;
 };
+
+} // namespace roi

@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <vector>
 
+using namespace roi;
+
 #define CHECK(cond)                                                            \
     do {                                                                       \
         if (!(cond)) {                                                         \
@@ -15,10 +17,10 @@
 
 namespace {
 
-RoiMask mask_of(std::vector<uint8_t>& buf, int w, int h)
+Mask mask_of(std::vector<uint8_t>& buf, int w, int h)
 {
     buf.assign(static_cast<size_t>(w) * h, 0);
-    RoiMask m;
+    Mask m;
     m.data = buf.data();
     m.width = w;
     m.height = h;
@@ -26,7 +28,7 @@ RoiMask mask_of(std::vector<uint8_t>& buf, int w, int h)
     return m;
 }
 
-const RoiRect* find_rect(const std::vector<RoiRect>& v, int left, int top)
+const Rect* find_rect(const std::vector<Rect>& v, int left, int top)
 {
     for (const auto& r : v) {
         if (r.left == left && r.top == top) {
@@ -39,7 +41,7 @@ const RoiRect* find_rect(const std::vector<RoiRect>& v, int left, int top)
 void test_mapping_endpoints()
 {
     std::vector<uint8_t> buf;
-    RoiMask m = mask_of(buf, 64, 64);
+    Mask m = mask_of(buf, 64, 64);
     MaskMapping mp; // -6 at 255, +6 at 0, 4 levels
 
     // All background.
@@ -61,7 +63,7 @@ void test_mapping_endpoints()
 void test_block_takes_the_strongest()
 {
     std::vector<uint8_t> buf;
-    RoiMask m = mask_of(buf, 64, 64);
+    Mask m = mask_of(buf, 64, 64);
     MaskMapping mp;
 
     // A single lit pixel in the top-left block must carry that whole block:
@@ -79,7 +81,7 @@ void test_mask_is_sampled_not_resized()
     // Mask a quarter of the frame's size, lit on its left half. The lit half
     // must land on the frame's left half regardless of the scale difference.
     std::vector<uint8_t> buf;
-    RoiMask m = mask_of(buf, 16, 16);
+    Mask m = mask_of(buf, 16, 16);
     for (int y = 0; y < 16; ++y) {
         for (int x = 0; x < 8; ++x) {
             buf[static_cast<size_t>(y) * 16 + x] = 255;
@@ -184,11 +186,11 @@ void test_priority_order_and_truncation()
 void test_degenerate_input()
 {
     MaskMapping mp;
-    RoiMask empty;
+    Mask empty;
     CHECK(qp_map_from_mask(empty, mp, 64, 64, 32).deltas.empty());
 
     std::vector<uint8_t> buf;
-    RoiMask m = mask_of(buf, 8, 8);
+    Mask m = mask_of(buf, 8, 8);
     CHECK(qp_map_from_mask(m, mp, 0, 64, 32).deltas.empty());
     CHECK(qp_map_from_mask(m, mp, 64, 64, 0).deltas.empty());
     CHECK(rects_from_qp_map(QpDeltaMap{}, 32, nullptr).empty());

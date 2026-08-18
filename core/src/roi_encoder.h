@@ -5,11 +5,13 @@
 // this and nothing else around it.
 
 #include "av_raii.h"
-#include "roi/roi_types.h"
-#include "roi/transcoder.h"
+#include "roi/types.h"
+#include "roi/types.h"
 
 #include <string>
 #include <vector>
+namespace roi {
+
 
 class PacketSink;
 
@@ -21,7 +23,7 @@ struct EncoderParams {
     // Encoder time base. Left at den == 0 it follows the frame rate, which is
     // what a file wants; a pushed source usually has its own units instead.
     AVRational time_base{0, 0};
-    EncoderKind kind = EncoderKind::Auto;
+    Encoder kind = Encoder::Auto;
     int crf = 28;
     int gop = 0;
     std::string preset = "medium";
@@ -33,7 +35,12 @@ public:
     // calls sink.begin(). Throws if nothing opens.
     void open(const EncoderParams& params, PacketSink& sink);
 
-    EncoderKind kind() const { return m_kind; }
+    // The same in two steps, for a caller that must know which backend opened
+    // before the sink is told about it.
+    void open_deferred(const EncoderParams& params);
+    void attach(PacketSink& sink);
+
+    Encoder kind() const { return m_kind; }
     // Human-readable name of the backend that actually opened.
     const char* label() const;
     AVCodecContext* ctx() { return m_enc.p; }
@@ -42,7 +49,7 @@ public:
     // `frame` may be in any software pixel format and is converted to what the
     // encoder wants; `pts` is already in the encoder time base. `rects` are in
     // pixels, strongest first -- on overlap the lowest index wins.
-    void encode(AVFrame* frame, const std::vector<RoiRect>& rects, int64_t pts);
+    void encode(AVFrame* frame, const std::vector<Rect>& rects, int64_t pts);
     // Drains the encoder. Does not end the sink.
     void flush();
 
@@ -50,7 +57,7 @@ private:
     void drain();
     AVFrame* to_encoder_format(AVFrame* src);
 
-    EncoderKind m_kind = EncoderKind::X265;
+    Encoder m_kind = Encoder::X265;
     roiav::CodecCtx m_enc;
     roiav::Buffer m_hw_device;
     roiav::Buffer m_hw_frames;
@@ -69,3 +76,5 @@ private:
     int64_t m_frame_duration = 0;
     PacketSink* m_sink = nullptr;
 };
+
+} // namespace roi

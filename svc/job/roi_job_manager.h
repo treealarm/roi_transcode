@@ -1,7 +1,6 @@
 #pragma once
 
-#include "roi/roi_types.h"
-#include "roi/transcoder.h"
+#include "roi/roi.h"
 
 #include <atomic>
 #include <chrono>
@@ -33,7 +32,10 @@ struct RoiJobStatus {
 };
 
 struct RoiJobRequest {
-    TranscodeOptions options;
+    std::string input_path;
+    std::string output_path;
+    std::vector<roi::Box> boxes;
+    roi::Settings settings;
 };
 
 class RoiJobManager {

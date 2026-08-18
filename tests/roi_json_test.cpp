@@ -50,10 +50,10 @@ int main()
     // Defaults when only the required samples[] is present.
     {
         const auto doc = load_roi_json(write_json("min.json", R"({"samples":[]})"));
-        CHECK(doc.background_qp_delta == 6);
-        CHECK(doc.hold_sec == 0.25);
-        CHECK(doc.kinds.empty());
-        CHECK(doc.samples.empty());
+        CHECK(doc.quality.background_qp_delta == 6);
+        CHECK(doc.quality.hold_sec == 0.25);
+        CHECK(doc.quality.kinds.empty());
+        CHECK(doc.boxes.empty());
     }
 
     // background_qp_delta 0 means "leave the background alone" and must survive
@@ -62,7 +62,7 @@ int main()
     {
         const auto doc = load_roi_json(
             write_json("bg0.json", R"({"background_qp_delta":0,"samples":[]})"));
-        CHECK(doc.background_qp_delta == 0);
+        CHECK(doc.quality.background_qp_delta == 0);
     }
 
     // hold_sec 0 likewise stays 0 at parse time; the builder is what treats a
@@ -70,7 +70,7 @@ int main()
     {
         const auto doc = load_roi_json(
             write_json("hold0.json", R"({"hold_sec":0,"samples":[]})"));
-        CHECK(doc.hold_sec == 0.0);
+        CHECK(doc.quality.hold_sec == 0.0);
     }
 
     // Full document.
@@ -86,21 +86,21 @@ int main()
             {"t": 2.0, "kind": "face"}
           ]
         })"));
-        CHECK(doc.background_qp_delta == 20);
-        CHECK(doc.hold_sec == 1.5);
-        CHECK(doc.kinds.size() == 2);
-        CHECK(doc.kinds.at("plate").qp_delta == -8);
-        CHECK(doc.kinds.at("plate").pad_norm == 0.01);
+        CHECK(doc.quality.background_qp_delta == 20);
+        CHECK(doc.quality.hold_sec == 1.5);
+        CHECK(doc.quality.kinds.size() == 2);
+        CHECK(doc.quality.kinds.at("plate").qp_delta == -8);
+        CHECK(doc.quality.kinds.at("plate").pad == 0.01);
         // A kind that omits pad_norm takes the default, not zero.
-        CHECK(doc.kinds.at("face").qp_delta == -4);
-        CHECK(doc.kinds.at("face").pad_norm == 0.02);
-        CHECK(doc.samples.size() == 2);
-        CHECK(doc.samples[0].kind == "plate");
-        CHECK(doc.samples[0].t == 1.25);
-        CHECK(doc.samples[0].bbox_w == 0.3f);
+        CHECK(doc.quality.kinds.at("face").qp_delta == -4);
+        CHECK(doc.quality.kinds.at("face").pad == 0.02);
+        CHECK(doc.boxes.size() == 2);
+        CHECK(doc.boxes[0].kind == "plate");
+        CHECK(doc.boxes[0].t_sec == 1.25);
+        CHECK(doc.boxes[0].width == 0.3f);
         // A sample with no geometry parses to an empty box rather than failing.
-        CHECK(doc.samples[1].kind == "face");
-        CHECK(doc.samples[1].bbox_w == 0.0f);
+        CHECK(doc.boxes[1].kind == "face");
+        CHECK(doc.boxes[1].width == 0.0f);
     }
 
     // samples[] is required: without it the caller asked for nothing, and
