@@ -13,6 +13,8 @@ QpDeltaMap QpDeltaMapBuilder::build(
         return m;
     }
     m.block = block;
+    m.width = width;
+    m.height = height;
     m.cols = (width + block - 1) / block;
     m.rows = (height + block - 1) / block;
     m.deltas.assign(static_cast<size_t>(m.cols) * static_cast<size_t>(m.rows), 0);

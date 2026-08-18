@@ -48,6 +48,7 @@ set(ROI_WARNINGS
 # ---------------------------------------------------------------------------
 add_library(roi_geometry STATIC
     core/src/roi_map_builder.cpp
+    core/src/geometry.cpp
     core/src/qp_delta_map.cpp
 )
 target_include_directories(roi_geometry
@@ -107,6 +108,11 @@ add_executable(roi_map_builder_test tests/roi_map_builder_test.cpp)
 target_link_libraries(roi_map_builder_test PRIVATE roi_geometry)
 target_compile_options(roi_map_builder_test PRIVATE ${ROI_WARNINGS})
 add_test(NAME roi_map_builder COMMAND roi_map_builder_test)
+
+add_executable(geometry_test tests/geometry_test.cpp)
+target_link_libraries(geometry_test PRIVATE roi_geometry)
+target_compile_options(geometry_test PRIVATE ${ROI_WARNINGS})
+add_test(NAME geometry COMMAND geometry_test)
 
 # Optional gRPC + Dapr service (needs vcpkg toolchain with grpc/protobuf).
 option(ROI_BUILD_SVC "Build roi-transcode-svc (gRPC/Dapr)" ON)
