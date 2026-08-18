@@ -1,0 +1,20 @@
+{
+  "background_qp_delta": 0,
+  "hold_sec": 20,
+  "kinds": {
+    "plate": {
+      "qp_delta": -8,
+      "pad_norm": 0.01
+    }
+  },
+  "samples": [
+    {
+      "t": 0,
+      "kind": "plate",
+      "bbox_x": 0.35,
+      "bbox_y": 0.4,
+      "bbox_w": 0.3,
+      "bbox_h": 0.2
+    }
+  ]
+}

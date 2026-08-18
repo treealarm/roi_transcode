@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package roi.transcode;
+
+// Offline ROI HEVC job API. Same shape as media_server EdgeImport: start returns a job
+// immediately, poll with Get, cancel best-effort, list recent jobs. Job state is in-process
+// memory; the durable result is the output file.
+
+service RoiTranscodeService {
+  rpc StartRoiTranscode(RoiTranscodeRequest) returns (RoiTranscodeJob);
+  rpc GetRoiTranscodeJob(RoiTranscodeJobKey) returns (RoiTranscodeJob);
+  rpc CancelRoiTranscode(RoiTranscodeJobKey) returns (OperationStatus);
+  rpc ListRoiTranscodeJobs(ListRoiTranscodeJobsRequest) returns (ListRoiTranscodeJobsResponse);
+}
+
+enum RoiTranscodeState {
+  ROI_TRANSCODE_STATE_UNSPECIFIED = 0;
+  ROI_TRANSCODE_STATE_RUNNING = 1;
+  ROI_TRANSCODE_STATE_COMPLETED = 2;
+  ROI_TRANSCODE_STATE_FAILED = 3;
+  ROI_TRANSCODE_STATE_CANCELLED = 4;
+}
+
+message RoiBox {
+  // Seconds from start of the input file (same as track_samples / roi.json `t`).
+  double t = 1;
+  string kind = 2;
+  // Normalized 0..1, same as VMS track_samples.
+  float bbox_x = 3;
+  float bbox_y = 4;
+  float bbox_w = 5;
+  float bbox_h = 6;
+}
+
+message RoiKindConfig {
+  string kind = 1;
+  optional int32 qp_delta = 2;
+  optional double pad_norm = 3;
+}
+
+message RoiTranscodeRequest {
+  string input_path = 1;
+  string output_path = 2;
+  // Optional path to roi.json. If set, samples/kinds below are ignored unless empty.
+  string roi_json_path = 3;
+  repeated RoiBox boxes = 4;
+  repeated RoiKindConfig kinds = 5;
+  // optional so 0 can disable the full-frame background ROI (proto3 default 0 is unset).
+  optional int32 background_qp_delta = 6;
+  optional double hold_sec = 7;
+  // auto | qsv | vaapi | nvenc | x265
+  string encoder = 8;
+  int32 crf = 9;
+  int32 gop = 10;
+  string preset = 11;
+}
+
+message RoiTranscodeJobKey {
+  string job_id = 1;
+}
+
+message ListRoiTranscodeJobsRequest {
+  // Reserved for future filters; empty lists all remembered jobs.
+}
+
+message RoiTranscodeJob {
+  string job_id = 1;
+  string input_path = 2;
+  string output_path = 3;
+  RoiTranscodeState state = 4;
+  int64 start_unix_ms = 5;
+  int64 end_unix_ms = 6;
+  string message = 7;
+  string encoder_used = 8;
+}
+
+message ListRoiTranscodeJobsResponse {
+  repeated RoiTranscodeJob jobs = 1;
+}
+
+message OperationStatus {
+  bool success = 1;
+  string message = 2;
+}

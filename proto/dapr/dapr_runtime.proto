@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package dapr.proto.runtime.v1;
+import "google/protobuf/empty.proto";
+
+// Slim Dapr runtime stub used by media_server for PublishEvent only.
+service Dapr {
+  rpc PublishEvent(PublishEventRequest) returns (google.protobuf.Empty) {}
+}
+
+message PublishEventRequest {
+  string pubsub_name = 1;
+  string topic = 2;
+  bytes data = 3;
+  string data_content_type = 4;
+  map<string, string> metadata = 5;
+}
