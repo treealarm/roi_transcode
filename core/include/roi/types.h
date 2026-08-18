@@ -9,6 +9,9 @@
 
 namespace roi {
 
+// Which backend does the encoding. Says nothing about the codec -- the same
+// silicon encodes both, and conflating the two is what made the old X265 name
+// wrong the moment H.264 output existed.
 enum class Encoder {
     // Tries Quick Sync, then VA-API, then the CPU. Which one opened is reported
     // back, because on this hardware the difference is worth knowing.
@@ -16,7 +19,16 @@ enum class Encoder {
     Qsv,
     Vaapi,
     Nvenc,
-    X265,
+    // libx264 or libx265, whichever the codec asks for.
+    Cpu,
+};
+
+// What comes out. HEVC saves more, but a ta_vms archive is H.264 and one HLS
+// playlist stitches many clips: re-encoding some of them to HEVC would leave a
+// single playlist carrying two codecs, which browsers handle badly.
+enum class Codec {
+    H264,
+    H265,
 };
 
 enum class InputCodec {
@@ -71,6 +83,7 @@ struct Quality {
 
 struct Settings {
     Encoder encoder = Encoder::Auto;
+    Codec codec = Codec::H265;
     // Constant quantizer / CRF.
     int crf = 28;
     // Keyframe interval in frames; 0 means two seconds.

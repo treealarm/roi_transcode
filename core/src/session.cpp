@@ -216,6 +216,7 @@ Session::Session(const SessionParams& params, PacketHandler* handler)
     ep.time_base =
         AVRational{params.time_base_num, std::max(params.time_base_den, 1)};
     ep.kind = params.settings.encoder;
+    ep.codec = params.settings.codec;
     ep.crf = params.settings.crf;
     ep.gop = params.settings.gop;
     ep.preset = params.settings.preset;

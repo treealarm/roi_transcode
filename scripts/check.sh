@@ -67,10 +67,12 @@ declare -A BYTES SSIM_ROI SSIM_BG SSIM_RING
 LAST_OUT=""
 encode() { # name roi.json encoder extra-args...
     local name="$1" roi="$2" enc="$3"; shift 3
+    local codec="${CODEC:-h265}"
     local out="${WORK}/${name}.mp4"
     LAST_OUT="$out"
     if ! "${BUILD}/roi-transcode" --in "$SRC" --roi "${ROOT}/testdata/${roi}" \
-        --out "$out" --encoder "$enc" --crf 28 --gop 1 "$@" >"${WORK}/${name}.log" 2>&1; then
+        --out "$out" --encoder "$enc" --codec "$codec" --crf 28 --gop 1 "$@" \
+        >"${WORK}/${name}.log" 2>&1; then
         fail "encode ${name} (${enc})"; sed 's/^/      /' "${WORK}/${name}.log" >&2; return 1
     fi
     BYTES[$name]=$(stat -c %s "$out")
@@ -125,7 +127,7 @@ src_frames=$(count_packets "$SRC" 2>/dev/null || echo 0)
 encode base synth_roi.json x265 || true
 out="$LAST_OUT"
 if [[ -n "${BYTES[base]:-}" ]]; then
-    assert_eq "codec is hevc" "$(probe stream=codec_name "$out")" "hevc"
+    assert_eq "codec is hevc by default" "$(probe stream=codec_name "$out")" "hevc"
     assert_eq "resolution kept" "$(probe stream=width,height "$out" | tr '\n' 'x' | sed 's/x$//')" \
         "$(probe stream=width,height "$SRC" | tr '\n' 'x' | sed 's/x$//')"
     assert_eq "frame count kept" "$(count_packets "$out")" "$src_frames"
@@ -145,12 +147,13 @@ fi
 # control couples the regions -- spending bits on the plate demonstrably costs
 # the background -- so there the same assertion would be false for a legitimate
 # reason, and only the direction is checked.
-mechanism_checks() { # encoder cqp
+mechanism_checks() { # label cqp   (encoder taken from $ENC, codec from $CODEC)
     local enc="$1" cqp="$2"
-    encode "noroi_${enc}"     synth_noroi.json     "$enc" || return
-    encode "plateonly_${enc}" synth_plateonly.json "$enc" || return
-    encode "bgonly_${enc}"    synth_bgonly.json    "$enc" || return
-    encode "roi_${enc}"       synth_roi.json       "$enc" || return
+    local backend="${ENC:-cpu}"
+    encode "noroi_${enc}"     synth_noroi.json     "$backend" || return
+    encode "plateonly_${enc}" synth_plateonly.json "$backend" || return
+    encode "bgonly_${enc}"    synth_bgonly.json    "$backend" || return
+    encode "roi_${enc}"       synth_roi.json       "$backend" || return
 
     assert_gt "[${enc}] a boost lifts the zone" \
         "${SSIM_ROI[plateonly_${enc}]}" "${SSIM_ROI[noroi_${enc}]}"
@@ -175,8 +178,14 @@ mechanism_checks() { # encoder cqp
     fi
 }
 
-step "the ROI mechanism does what it claims (x265, CRF)"
-mechanism_checks x265 no
+# Both codecs, because the archive this feeds is H.264 while the module defaults
+# to HEVC: an H.264 path that silently stopped applying ROI would look fine here
+# and cost quality in the only place the feature is actually used.
+step "the ROI mechanism does what it claims (CPU, CRF, HEVC)"
+CODEC=h265 mechanism_checks cpu_h265 no
+
+step "the ROI mechanism does what it claims (CPU, CRF, H.264)"
+CODEC=h264 mechanism_checks cpu_h264 no
 
 step "frame mode agrees with file mode"
 # Compares the encode, not the container. The two CLIs legitimately declare
@@ -226,10 +235,16 @@ if [[ -e /dev/dri/renderD128 ]]; then
         encode qsv_auto synth_roi.json auto || true
         got=$(grep -oE 'encoded with [^ ]+' "${WORK}/qsv_auto.log" | head -1 | cut -d' ' -f3)
         assert_eq "auto picks QSV with the Intel runtime" "${got:-none}" "hevc_qsv"
+        CODEC=h264 encode qsv_auto_h264 synth_roi.json auto || true
+        got=$(grep -oE 'encoded with [^ ]+' "${WORK}/qsv_auto_h264.log" | head -1 | cut -d' ' -f3)
+        assert_eq "auto picks QSV for H.264 too" "${got:-none}" "h264_qsv"
         # QSV is the primary path and it is CQP, so the strict form of the
         # mechanism checks runs here.
-        step "the ROI mechanism does what it claims (QSV, CQP)"
-        mechanism_checks qsv yes
+        step "the ROI mechanism does what it claims (QSV, CQP, HEVC)"
+        ENC=auto CODEC=h265 mechanism_checks qsv_h265 yes
+
+        step "the ROI mechanism does what it claims (QSV, CQP, H.264)"
+        ENC=auto CODEC=h264 mechanism_checks qsv_h264 yes
     else
         printf '  skip  Intel runtime not fetched (scripts/fetch-intel-qsv.sh)\n'
     fi

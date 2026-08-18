@@ -64,8 +64,8 @@ roi::Encoder from_proto(roi::transcode::Encoder e)
         return roi::Encoder::Vaapi;
     case roi::transcode::ENCODER_NVENC:
         return roi::Encoder::Nvenc;
-    case roi::transcode::ENCODER_X265:
-        return roi::Encoder::X265;
+    case roi::transcode::ENCODER_CPU:
+        return roi::Encoder::Cpu;
     default:
         return roi::Encoder::Auto;
     }
@@ -80,8 +80,8 @@ roi::transcode::Encoder to_proto(roi::Encoder k)
         return roi::transcode::ENCODER_VAAPI;
     case roi::Encoder::Nvenc:
         return roi::transcode::ENCODER_NVENC;
-    case roi::Encoder::X265:
-        return roi::transcode::ENCODER_X265;
+    case roi::Encoder::Cpu:
+        return roi::transcode::ENCODER_CPU;
     default:
         return roi::transcode::ENCODER_AUTO;
     }
@@ -92,6 +92,8 @@ roi::transcode::Encoder to_proto(roi::Encoder k)
 void apply_settings(const roi::transcode::Settings& in, roi::Settings& out)
 {
     out.encoder = from_proto(in.encoder());
+    out.codec = in.codec() == roi::transcode::CODEC_H264 ? roi::Codec::H264
+                                                         : roi::Codec::H265;
     if (in.crf() > 0) {
         out.crf = in.crf();
     }

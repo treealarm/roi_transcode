@@ -78,6 +78,7 @@ Report transcode_file(const std::string& input_path,
     ep.height = dec.p->height;
     ep.fps = guess_fps(in_v, dec.p);
     ep.kind = settings.encoder;
+    ep.codec = settings.codec;
     ep.crf = settings.crf;
     ep.gop = settings.gop;
     ep.preset = settings.preset;
@@ -110,10 +111,11 @@ Report transcode_file(const std::string& input_path,
         }
 
         if (!logged_roi) {
-            const auto grid = qp_map.build(ep.width, ep.height, 32, rects);
-            std::fprintf(stderr,
-                "ROI: %zu rects, HEVC qpDeltaMap %dx%d CTU (32x32)\n",
-                rects.size(), grid.cols, grid.rows);
+            // H.264 partitions into 16x16 macroblocks, HEVC into 32x32 CTUs.
+            const int block = settings.codec == Codec::H264 ? 16 : 32;
+            const auto grid = qp_map.build(ep.width, ep.height, block, rects);
+            std::fprintf(stderr, "ROI: %zu rects, qpDeltaMap %dx%d blocks of %d\n",
+                rects.size(), grid.cols, grid.rows, block);
             if (enc.kind() == Encoder::Nvenc) {
                 std::fprintf(stderr,
                     "warning: stock FFmpeg hevc_nvenc ignores ROI; "

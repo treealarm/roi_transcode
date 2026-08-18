@@ -42,10 +42,19 @@ source scripts/qsv-env.sh
 ./build/roi-transcode --in clip.mp4 --roi testdata/roi.json --out out.mp4 \
   --encoder vaapi
 ./build/roi-transcode --in clip.mp4 --roi testdata/roi.json --out out.mp4 \
-  --encoder x265
+  --encoder cpu
+./build/roi-transcode --in clip.mp4 --roi testdata/roi.json --out out.mp4 \
+  --codec h264
 ```
 
-`--encoder auto` (default): `hevc_qsv` → `hevc_vaapi` → `libx265`.
+`--encoder auto` (default): Quick Sync → VA-API → CPU. `--codec` picks what comes
+out; the backend chain is spelled for it, so `--codec h264` gives
+`h264_qsv` → `h264_vaapi` → `libx264`.
+
+HEVC saves more and is the default. H.264 exists because a ta_vms archive is
+H.264 and one HLS playlist stitches many clips: re-encoding only some of them to
+HEVC would leave a single playlist carrying two codecs, which browsers handle
+badly.
 
 Quick Sync HEVC on Alder Lake is **EncSliceLP** (VDENC): CQP + `low_power`.
 That is also the mode where `mfxExtEncoderROI` `DeltaQP` applies.

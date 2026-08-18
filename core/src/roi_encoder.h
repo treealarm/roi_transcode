@@ -24,6 +24,7 @@ struct EncoderParams {
     // what a file wants; a pushed source usually has its own units instead.
     AVRational time_base{0, 0};
     Encoder kind = Encoder::Auto;
+    Codec codec = Codec::H265;
     int crf = 28;
     int gop = 0;
     std::string preset = "medium";
@@ -41,7 +42,7 @@ public:
     void attach(PacketSink& sink);
 
     Encoder kind() const { return m_kind; }
-    // Human-readable name of the backend that actually opened.
+    // Human-readable name of the backend that actually opened, codec included.
     const char* label() const;
     AVCodecContext* ctx() { return m_enc.p; }
     AVRational time_base() const { return m_enc.p->time_base; }
@@ -57,7 +58,8 @@ private:
     void drain();
     AVFrame* to_encoder_format(AVFrame* src);
 
-    Encoder m_kind = Encoder::X265;
+    Encoder m_kind = Encoder::Cpu;
+    Codec m_codec = Codec::H265;
     roiav::CodecCtx m_enc;
     roiav::Buffer m_hw_device;
     roiav::Buffer m_hw_frames;

@@ -126,7 +126,7 @@ int run_stream(rt::RoiTranscode::Stub& stub, const std::string& in,
     }
     open->set_output_path(out);
     auto* s = open->mutable_settings();
-    s->set_encoder(rt::ENCODER_X265);
+    s->set_encoder(rt::ENCODER_CPU);
     s->set_crf(28);
     s->set_gop(1);
     auto* q = s->mutable_roi();

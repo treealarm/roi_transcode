@@ -69,26 +69,30 @@ bool init_vaapi_frames(roiav::Buffer& hw, roiav::Buffer& frames, int w, int h)
 
 const char* RoiEncoder::label() const
 {
+    const bool h264 = m_codec == Codec::H264;
     switch (m_kind) {
     case Encoder::Qsv:
-        return "hevc_qsv (Intel VPL mfxExtEncoderROI)";
+        return h264 ? "h264_qsv (Intel VPL mfxExtEncoderROI)"
+                    : "hevc_qsv (Intel VPL mfxExtEncoderROI)";
     case Encoder::Vaapi:
-        return "hevc_vaapi (Intel iHD VAEncROI)";
+        return h264 ? "h264_vaapi (Intel iHD VAEncROI)"
+                    : "hevc_vaapi (Intel iHD VAEncROI)";
     case Encoder::Nvenc:
-        return "hevc_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)";
+        return h264 ? "h264_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)"
+                    : "hevc_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)";
     default:
-        return "libx265 (CPU fallback)";
+        return h264 ? "libx264 (CPU fallback)" : "libx265 (CPU fallback)";
     }
 }
 
 namespace {
 
 // One attempt at one backend. `probe` asks for a throwaway encode of a single
-// frame before the context is handed back: Ubuntu's older iHD opens hevc_qsv
-// happily and then returns empty packets, and only an actual encode tells the
-// difference.
+// frame before the context is handed back: Ubuntu's older iHD opens the QSV
+// encoder happily and then returns empty packets, and only an actual encode
+// tells the difference.
 struct Attempt {
-    Encoder kind = Encoder::X265;
+    Encoder kind = Encoder::Cpu;
     roiav::CodecCtx enc;
     roiav::Buffer hw_device;
     roiav::Buffer hw_frames;
@@ -169,10 +173,16 @@ bool try_open(Attempt& out, Encoder kind, const AVCodec* codec,
         out.enc.p->pix_fmt = AV_PIX_FMT_NV12;
         out.enc.p->hw_device_ctx = av_buffer_ref(out.hw_device.p);
         out.sw_pix = AV_PIX_FMT_NV12;
-        // Alder Lake HEVC is EncSliceLP only: VDENC + CQP. ICQ/global_quality fails.
-        // CQP is also the mode where mfxExtEncoderROI DeltaQP applies.
+        // Alder Lake encodes through EncSliceLP only: VDENC + CQP. ICQ and
+        // global_quality fail there, and CQP is also the one mode where
+        // mfxExtEncoderROI DeltaQP applies -- so this holds for H.264 too.
         av_opt_set(out.enc.p->priv_data, "low_power", "1", 0);
-        av_opt_set(out.enc.p->priv_data, "gpb", "0", 0);
+        if (p.codec == Codec::H265) {
+            // Generalized P/B frames: an HEVC-only option. h264_qsv would just
+            // reject it, but asking for something that does not exist is worth
+            // not doing.
+            av_opt_set(out.enc.p->priv_data, "gpb", "0", 0);
+        }
         av_opt_set(out.enc.p->priv_data, "preset", p.preset.c_str(), 0);
         out.enc.p->flags |= AV_CODEC_FLAG_QSCALE;
         out.enc.p->global_quality = p.crf * FF_QP2LAMBDA;
@@ -209,6 +219,8 @@ bool try_open(Attempt& out, Encoder kind, const AVCodec* codec,
         out.sw_pix = AV_PIX_FMT_YUV420P;
         av_opt_set(out.enc.p->priv_data, "preset", p.preset.c_str(), 0);
         av_opt_set(out.enc.p->priv_data, "crf", std::to_string(p.crf).c_str(), 0);
+        // Both libx264 and libx265 apply the ROI offsets through their adaptive
+        // quantization, and ignore them outright when aq-mode is 0.
         av_opt_set(out.enc.p->priv_data, "aq-mode", "1", 0);
     }
 
@@ -243,6 +255,14 @@ void RoiEncoder::attach(PacketSink& sink)
 
 void RoiEncoder::open_deferred(const EncoderParams& params)
 {
+    const bool h264 = params.codec == Codec::H264;
+    // The backend names differ only by the codec prefix, so the chain is one
+    // list picked by the requested backend and spelled by the requested codec.
+    const char* qsv = h264 ? "h264_qsv" : "hevc_qsv";
+    const char* vaapi = h264 ? "h264_vaapi" : "hevc_vaapi";
+    const char* nvenc = h264 ? "h264_nvenc" : "hevc_nvenc";
+    const char* cpu = h264 ? "libx264" : "libx265";
+
     struct Candidate {
         Encoder kind;
         const char* name;
@@ -251,22 +271,22 @@ void RoiEncoder::open_deferred(const EncoderParams& params)
     switch (params.kind) {
     case Encoder::Auto:
         order = {
-            {Encoder::Qsv, "hevc_qsv"},
-            {Encoder::Vaapi, "hevc_vaapi"},
-            {Encoder::X265, "libx265"},
+            {Encoder::Qsv, qsv},
+            {Encoder::Vaapi, vaapi},
+            {Encoder::Cpu, cpu},
         };
         break;
     case Encoder::Qsv:
-        order = {{Encoder::Qsv, "hevc_qsv"}};
+        order = {{Encoder::Qsv, qsv}};
         break;
     case Encoder::Vaapi:
-        order = {{Encoder::Vaapi, "hevc_vaapi"}};
+        order = {{Encoder::Vaapi, vaapi}};
         break;
     case Encoder::Nvenc:
-        order = {{Encoder::Nvenc, "hevc_nvenc"}};
+        order = {{Encoder::Nvenc, nvenc}};
         break;
     default:
-        order = {{Encoder::X265, "libx265"}};
+        order = {{Encoder::Cpu, cpu}};
         break;
     }
 
@@ -275,8 +295,11 @@ void RoiEncoder::open_deferred(const EncoderParams& params)
     bool got = false;
     for (const auto& c : order) {
         const AVCodec* codec = avcodec_find_encoder_by_name(c.name);
-        if (!codec && c.kind == Encoder::X265) {
-            codec = avcodec_find_encoder(AV_CODEC_ID_HEVC);
+        if (!codec && c.kind == Encoder::Cpu) {
+            // A build without libx264/libx265 may still have some other encoder
+            // for the codec; better that than refusing to run at all.
+            codec = avcodec_find_encoder(
+                h264 ? AV_CODEC_ID_H264 : AV_CODEC_ID_HEVC);
         }
         if (!codec) {
             errors += std::format(" {}: not in FFmpeg;", c.name);
@@ -289,10 +312,12 @@ void RoiEncoder::open_deferred(const EncoderParams& params)
         errors += std::format(" {}: open failed;", c.name);
     }
     if (!got) {
-        fail("no HEVC encoder available:" + errors);
+        fail(std::format(
+            "no {} encoder available:{}", h264 ? "H.264" : "HEVC", errors));
     }
 
     m_kind = opened.kind;
+    m_codec = params.codec;
     m_enc = std::move(opened.enc);
     m_hw_device = std::move(opened.hw_device);
     m_hw_frames = std::move(opened.hw_frames);

@@ -26,7 +26,8 @@ void usage()
 {
     std::fprintf(stderr,
         "Usage: roi-frame-push --in CLIP --roi roi.json --out OUT.mp4\n"
-        "         [--push raw|bitstream] [--mask] [--encoder auto|qsv|vaapi|nvenc|x265]\n"
+        "         [--push raw|bitstream] [--mask] [--encoder auto|qsv|vaapi|nvenc|cpu]\n"
+        "         [--codec h265|h264]\n"
         "         [--crf 28] [--gop N] [--preset medium]\n"
         "\n"
         "Pushes frames into roi::Session instead of transcoding a path.\n"
@@ -41,8 +42,10 @@ roi::Encoder parse_encoder(const char* s)
     if (std::strcmp(s, "qsv") == 0) return roi::Encoder::Qsv;
     if (std::strcmp(s, "vaapi") == 0) return roi::Encoder::Vaapi;
     if (std::strcmp(s, "nvenc") == 0) return roi::Encoder::Nvenc;
-    if (std::strcmp(s, "x265") == 0) return roi::Encoder::X265;
-    throw std::runtime_error("unknown --encoder (auto|qsv|vaapi|nvenc|x265)");
+    if (std::strcmp(s, "cpu") == 0) return roi::Encoder::Cpu;
+    // The old spelling, kept so existing scripts keep working.
+    if (std::strcmp(s, "x265") == 0) return roi::Encoder::Cpu;
+    throw std::runtime_error("unknown --encoder (auto|qsv|vaapi|nvenc|cpu)");
 }
 
 roi::InputCodec codec_of(AVCodecID id)
@@ -99,6 +102,7 @@ struct Args {
     bool bitstream = false;
     bool use_mask = false;
     roi::Encoder encoder = roi::Encoder::Auto;
+    roi::Codec codec = roi::Codec::H265;
     int crf = 28;
     int gop = 0;
     std::string preset = "medium";
@@ -140,6 +144,7 @@ int run(const Args& args)
         sp.fps_den = vs->avg_frame_rate.den;
     }
     sp.settings.encoder = args.encoder;
+    sp.settings.codec = args.codec;
     sp.settings.crf = args.crf;
     sp.settings.gop = args.gop;
     sp.settings.preset = args.preset;
@@ -278,6 +283,13 @@ int run(const Args& args)
     return 0;
 }
 
+roi::Codec parse_codec(const char* s)
+{
+    if (std::strcmp(s, "h264") == 0) return roi::Codec::H264;
+    if (std::strcmp(s, "h265") == 0 || std::strcmp(s, "hevc") == 0)
+        return roi::Codec::H265;
+    throw std::runtime_error("unknown --codec (h264|h265)");
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -313,6 +325,8 @@ int main(int argc, char** argv)
                 args.use_mask = true;
             } else if (std::strcmp(a, "--encoder") == 0) {
                 args.encoder = parse_encoder(need("--encoder"));
+            } else if (std::strcmp(a, "--codec") == 0) {
+                args.codec = parse_codec(need("--codec"));
             } else if (std::strcmp(a, "--crf") == 0) {
                 args.crf = std::stoi(need("--crf"));
             } else if (std::strcmp(a, "--gop") == 0) {
