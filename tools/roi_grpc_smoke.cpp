@@ -17,13 +17,14 @@ extern "C" {
 #include <libavformat/avformat.h>
 }
 
+#include "roi_json.h"
 #include "roi_transcode.grpc.pb.h"
 
 namespace rt = roi::transcode;
 
 namespace {
 
-int run_file_job(rt::RoiTranscode::Stub& stub, const std::string& in,
+int run_file_job(rt::RoiFileTranscode::Stub& stub, const std::string& in,
     const std::string& out, const std::string& roi_json)
 {
     {
@@ -40,11 +41,40 @@ int run_file_job(rt::RoiTranscode::Stub& stub, const std::string& in,
     rt::FileJobRequest req;
     req.set_input_path(in);
     req.set_output_path(out);
-    req.set_roi_json_path(roi_json);
     auto* s = req.mutable_settings();
-    s->set_encoder(rt::ENCODER_QSV);
+    // AUTO and H.264, deliberately. Forcing a backend makes this fail on any
+    // machine that lacks it, for a reason it is not testing -- and the backend
+    // that opened comes back in Job.encoder_used anyway, so a fall back to the
+    // CPU is still visible, just as information rather than as a crash.
+    s->set_encoder(rt::ENCODER_AUTO);
+    s->set_codec(rt::CODEC_H264);
     s->set_crf(28);
     s->set_gop(1);
+
+    // The service takes boxes and quality, never a path: reading the file is the
+    // caller's job, which is what any integrator would be doing anyway.
+    if (!roi_json.empty()) {
+        const RoiJson doc = load_roi_json(roi_json);
+        auto* q = s->mutable_roi();
+        q->set_background_qp_delta(doc.quality.background_qp_delta);
+        q->set_hold_sec(doc.quality.hold_sec);
+        q->set_max_regions(doc.quality.max_regions);
+        for (const auto& [kind, cfg] : doc.quality.kinds) {
+            auto* k = q->add_kinds();
+            k->set_kind(kind);
+            k->set_qp_delta(cfg.qp_delta);
+            k->set_pad(cfg.pad);
+        }
+        for (const auto& b : doc.boxes) {
+            auto* pb = req.add_boxes();
+            pb->set_t(b.t_sec);
+            pb->set_kind(b.kind);
+            pb->set_x(b.x);
+            pb->set_y(b.y);
+            pb->set_width(b.width);
+            pb->set_height(b.height);
+        }
+    }
 
     rt::Job job;
     {
@@ -83,7 +113,7 @@ int run_file_job(rt::RoiTranscode::Stub& stub, const std::string& in,
     return 3;
 }
 
-int run_stream(rt::RoiTranscode::Stub& stub, const std::string& in,
+int run_stream(rt::RoiStreamTranscode::Stub& stub, const std::string& in,
     const std::string& out)
 {
     AVFormatContext* fmt = nullptr;
@@ -109,7 +139,7 @@ int run_stream(rt::RoiTranscode::Stub& stub, const std::string& in,
     grpc::ClientContext ctx;
     auto stream = stub.EncodeStream(&ctx);
 
-    rt::StreamRequest msg;
+    rt::EncodeStreamRequest msg;
     auto* open = msg.mutable_open();
     open->set_width(vs->codecpar->width);
     open->set_height(vs->codecpar->height);
@@ -145,7 +175,7 @@ int run_stream(rt::RoiTranscode::Stub& stub, const std::string& in,
     int sent = 0;
     while (av_read_frame(fmt, pkt) >= 0) {
         if (pkt->stream_index == vindex) {
-            rt::StreamRequest fmsg;
+            rt::EncodeStreamRequest fmsg;
             auto* f = fmsg.mutable_frame();
             f->set_pts(pkt->pts != AV_NOPTS_VALUE ? pkt->pts : 0);
             f->set_data(pkt->data, static_cast<size_t>(pkt->size));
@@ -166,7 +196,7 @@ int run_stream(rt::RoiTranscode::Stub& stub, const std::string& in,
     avformat_close_input(&fmt);
     stream->WritesDone();
 
-    rt::StreamResponse resp;
+    rt::EncodeStreamResponse resp;
     int packets = 0;
     while (stream->Read(&resp)) {
         if (resp.has_opened()) {
@@ -213,8 +243,11 @@ int main(int argc, char** argv)
         }
     }
 
-    auto stub = rt::RoiTranscode::NewStub(
-        grpc::CreateChannel(target, grpc::InsecureChannelCredentials()));
-    return use_stream ? run_stream(*stub, in, out)
-                      : run_file_job(*stub, in, out, roi_json);
+    auto channel = grpc::CreateChannel(target, grpc::InsecureChannelCredentials());
+    if (use_stream) {
+        auto stub = rt::RoiStreamTranscode::NewStub(channel);
+        return run_stream(*stub, in, out);
+    }
+    auto stub = rt::RoiFileTranscode::NewStub(channel);
+    return run_file_job(*stub, in, out, roi_json);
 }

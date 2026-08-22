@@ -5,8 +5,10 @@
 
 #include <grpcpp/grpcpp.h>
 
-class RoiTranscodeServiceImpl final
-    : public roi::transcode::RoiTranscode::Service {
+// The two services are separate in the proto because they will diverge; they
+// share a process because today they share a machine and a GPU.
+class RoiFileTranscodeServiceImpl final
+    : public roi::transcode::RoiFileTranscode::Service {
 public:
     grpc::Status StartFileJob(
         grpc::ServerContext* context,
@@ -21,15 +23,19 @@ public:
     grpc::Status CancelJob(
         grpc::ServerContext* context,
         const roi::transcode::JobId* request,
-        roi::transcode::Status* response) override;
+        roi::transcode::Job* response) override;
 
     grpc::Status ListJobs(
         grpc::ServerContext* context,
         const roi::transcode::ListJobsRequest* request,
         roi::transcode::ListJobsResponse* response) override;
+};
 
+class RoiStreamTranscodeServiceImpl final
+    : public roi::transcode::RoiStreamTranscode::Service {
+public:
     grpc::Status EncodeStream(
         grpc::ServerContext* context,
-        grpc::ServerReaderWriter<roi::transcode::StreamResponse,
-            roi::transcode::StreamRequest>* stream) override;
+        grpc::ServerReaderWriter<roi::transcode::EncodeStreamResponse,
+            roi::transcode::EncodeStreamRequest>* stream) override;
 };

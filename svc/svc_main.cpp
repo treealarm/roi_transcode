@@ -131,10 +131,14 @@ int run()
     RoiJobManager::instance().set_status_hook(
         [publisher](const RoiJobStatus& st) { on_job_status(st, *publisher); });
 
-    RoiTranscodeServiceImpl service;
+    // Two services on one port. They are separate contracts, not separate
+    // deployments: a caller picks one by name, and both reach the same GPU.
+    RoiFileTranscodeServiceImpl file_service;
+    RoiStreamTranscodeServiceImpl stream_service;
     grpc::ServerBuilder builder;
     builder.AddListeningPort(listen, grpc::InsecureServerCredentials());
-    builder.RegisterService(&service);
+    builder.RegisterService(&file_service);
+    builder.RegisterService(&stream_service);
 
     std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
     if (!server) {

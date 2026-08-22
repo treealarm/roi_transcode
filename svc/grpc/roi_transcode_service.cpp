@@ -4,7 +4,6 @@
 #include "job/roi_job_manager.h"
 #include "packet_sink.h"
 #include "roi/session.h"
-#include "roi_json.h"
 
 #include <chrono>
 #include <cstring>
@@ -89,7 +88,10 @@ roi::transcode::Encoder to_proto(roi::Encoder k)
 
 // Encoder knobs are shared by both entry points, so unpacking them is too.
 // One Settings serves both entry points, so unpacking it is written once.
-void apply_settings(const roi::transcode::Settings& in, roi::Settings& out)
+// FileSettings and StreamSettings are distinct types with identical fields, so
+// one template serves both and they cannot drift apart by accident.
+template <typename ProtoSettings>
+void apply_settings(const ProtoSettings& in, roi::Settings& out)
 {
     out.encoder = from_proto(in.encoder());
     out.codec = in.codec() == roi::transcode::CODEC_H264 ? roi::Codec::H264
@@ -124,11 +126,20 @@ void apply_settings(const roi::transcode::Settings& in, roi::Settings& out)
         }
         out.quality.kinds.emplace(k.kind(), cfg);
     }
-    // A mask carries one strength, so it takes the strongest kind on offer.
-    for (const auto& [name, cfg] : out.quality.kinds) {
-        (void)name;
-        out.quality.mask_qp_delta_at_255 =
-            std::min(out.quality.mask_qp_delta_at_255, cfg.qp_delta);
+    if (q.has_mask_levels() && q.mask_levels() > 0) {
+        out.quality.mask_levels = q.mask_levels();
+    }
+    if (q.has_mask_qp_delta_at_255()) {
+        out.quality.mask_qp_delta_at_255 = q.mask_qp_delta_at_255();
+    } else {
+        // Not asked for: a mask carries one strength, so it takes the strongest
+        // kind on offer. Sending boxes and a mask with consistent settings is
+        // then one less thing to get right.
+        for (const auto& [name, cfg] : out.quality.kinds) {
+            (void)name;
+            out.quality.mask_qp_delta_at_255 =
+                std::min(out.quality.mask_qp_delta_at_255, cfg.qp_delta);
+        }
     }
 }
 
@@ -152,14 +163,6 @@ RoiJobRequest build_request(const roi::transcode::FileJobRequest& req)
     apply_settings(req.settings(), out.settings);
     out.settings.movflags = req.movflags();
 
-    if (!req.roi_json_path().empty()) {
-        RoiJson doc = load_roi_json(
-            require_allowed_path(req.roi_json_path(), "roi_json_path"));
-        out.settings.quality = doc.quality;
-        out.boxes = std::move(doc.boxes);
-        return out;
-    }
-
     for (const auto& b : req.boxes()) {
         out.boxes.push_back(box_from_proto(b));
     }
@@ -168,7 +171,7 @@ RoiJobRequest build_request(const roi::transcode::FileJobRequest& req)
 
 } // namespace
 
-grpc::Status RoiTranscodeServiceImpl::StartFileJob(
+grpc::Status RoiFileTranscodeServiceImpl::StartFileJob(
     grpc::ServerContext*,
     const roi::transcode::FileJobRequest* request,
     roi::transcode::Job* response)
@@ -187,7 +190,7 @@ grpc::Status RoiTranscodeServiceImpl::StartFileJob(
     }
 }
 
-grpc::Status RoiTranscodeServiceImpl::GetJob(
+grpc::Status RoiFileTranscodeServiceImpl::GetJob(
     grpc::ServerContext*,
     const roi::transcode::JobId* request,
     roi::transcode::Job* response)
@@ -200,18 +203,24 @@ grpc::Status RoiTranscodeServiceImpl::GetJob(
     return grpc::Status::OK;
 }
 
-grpc::Status RoiTranscodeServiceImpl::CancelJob(
+grpc::Status RoiFileTranscodeServiceImpl::CancelJob(
     grpc::ServerContext*,
     const roi::transcode::JobId* request,
-    roi::transcode::Status* response)
+    roi::transcode::Job* response)
 {
-    const bool ok = RoiJobManager::instance().cancel(request->job_id());
-    response->set_success(ok);
-    response->set_message(ok ? "cancelling" : "job unknown or already finished");
+    // Returning the job rather than a bool: the caller wanted to know where the
+    // job ended up, and "already COMPLETED" is a different answer from
+    // "CANCELLED" that a success flag cannot carry.
+    RoiJobManager::instance().cancel(request->job_id());
+    const auto st = RoiJobManager::instance().get(request->job_id());
+    if (!st) {
+        return {grpc::StatusCode::NOT_FOUND, "unknown job"};
+    }
+    fill_job(*st, response);
     return grpc::Status::OK;
 }
 
-grpc::Status RoiTranscodeServiceImpl::ListJobs(
+grpc::Status RoiFileTranscodeServiceImpl::ListJobs(
     grpc::ServerContext*,
     const roi::transcode::ListJobsRequest*,
     roi::transcode::ListJobsResponse* response)
@@ -228,14 +237,14 @@ namespace {
 // case the session muxes and only the summary comes back.
 class StreamSink : public roi::PacketHandler {
 public:
-    using Writer = grpc::ServerReaderWriter<roi::transcode::StreamResponse,
-        roi::transcode::StreamRequest>;
+    using Writer = grpc::ServerReaderWriter<roi::transcode::EncodeStreamResponse,
+        roi::transcode::EncodeStreamRequest>;
 
     explicit StreamSink(Writer* w) : m_writer(w) {}
 
     void on_open(const roi::StreamInfo& info) override
     {
-        roi::transcode::StreamResponse msg;
+        roi::transcode::EncodeStreamResponse msg;
         auto* opened = msg.mutable_opened();
         opened->set_encoder_used(to_proto(info.encoder_used));
         opened->set_encoder_name(info.encoder_name);
@@ -247,7 +256,7 @@ public:
 
     void on_packet(const roi::EncodedPacket& pkt) override
     {
-        roi::transcode::StreamResponse msg;
+        roi::transcode::EncodeStreamResponse msg;
         auto* out = msg.mutable_packet();
         out->set_pts(pkt.pts);
         out->set_dts(pkt.dts);
@@ -298,11 +307,11 @@ roi::SessionParams params_from_open(const roi::transcode::StreamOpen& open)
 
 } // namespace
 
-grpc::Status RoiTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
-    grpc::ServerReaderWriter<roi::transcode::StreamResponse,
-        roi::transcode::StreamRequest>* stream)
+grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
+    grpc::ServerReaderWriter<roi::transcode::EncodeStreamResponse,
+        roi::transcode::EncodeStreamRequest>* stream)
 {
-    roi::transcode::StreamRequest req;
+    roi::transcode::EncodeStreamRequest req;
     if (!stream->Read(&req)) {
         return {grpc::StatusCode::INVALID_ARGUMENT, "empty stream"};
     }
@@ -389,7 +398,7 @@ grpc::Status RoiTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
         }
 
         const roi::Report rep = session.finish();
-        roi::transcode::StreamResponse msg;
+        roi::transcode::EncodeStreamResponse msg;
         auto* done = msg.mutable_done();
         done->set_frames(rep.frames);
         done->set_packets(rep.packets);

@@ -113,7 +113,6 @@ if(ROI_BUILD_SVC)
 
     target_link_libraries(roi-transcode-svc PRIVATE
         roi_core
-        roi_json
         protobuf::libprotobuf
         gRPC::grpc
         gRPC::grpc++
@@ -147,6 +146,7 @@ if(ROI_BUILD_SVC)
         target_link_directories(roi_grpc_smoke PRIVATE ${FFMPEG_LIBRARY_DIRS})
     endif()
     target_link_libraries(roi_grpc_smoke PRIVATE
+        roi_json
         ${FFMPEG_LIBRARIES}
         protobuf::libprotobuf
         gRPC::grpc
