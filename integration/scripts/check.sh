@@ -330,6 +330,59 @@ else
     printf '  skip  scenes not generated (benchmarks/synthetic/make-scenes.py)\n'
 fi
 
+step "adaptive encoding puts the quality where it was asked for"
+# The acceptance criterion of §48, in miniature: at the same nominal bitrate, quality
+# inside the regions must be better with ROI than without. Both numbers are reported --
+# §40 is explicit that a global score cannot decide this, because the encoder degrades the
+# background deliberately and one number cannot tell that apart from degrading everything.
+if [[ -x "${BUILD}/roi_metrics" && -f "${SCENES}/moving/source.mp4" ]]; then
+    src="${SCENES}/moving/source.mp4"
+    truth="${SCENES}/moving/truth.json"
+    python3 - "${SCENES}/moving/roi.json" "${WORK}/flat_roi.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+# The baseline is the same encoder with nothing to protect and nothing to punish, so the
+# only difference measured is the region handling itself.
+d["samples"] = []
+d["background_qp_delta"] = 0
+json.dump(d, open(sys.argv[2], "w"))
+PY
+    "${BUILD}/roi-transcode" --in "$src" --roi "${SCENES}/moving/roi.json" \
+        --out "${WORK}/adaptive.mp4" --encoder cpu --codec h264 --crf 32 >/dev/null 2>&1
+    "${BUILD}/roi-transcode" --in "$src" --roi "${WORK}/flat_roi.json" \
+        --out "${WORK}/baseline.mp4" --encoder cpu --codec h264 --crf 32 >/dev/null 2>&1
+
+    read_metric() {  # file, key
+        "${BUILD}/roi_metrics" "$src" "$1" "$truth" m 2>/dev/null \
+            | grep -oE "$2=[-0-9.]+" | head -1 | cut -d= -f2
+    }
+    a_roi=$(read_metric "${WORK}/adaptive.mp4" roi_psnr)
+    b_roi=$(read_metric "${WORK}/baseline.mp4" roi_psnr)
+    a_bg=$(read_metric "${WORK}/adaptive.mp4" bg_psnr)
+    b_bg=$(read_metric "${WORK}/baseline.mp4" bg_psnr)
+    a_size=$(stat -c %s "${WORK}/adaptive.mp4")
+    b_size=$(stat -c %s "${WORK}/baseline.mp4")
+
+    if awk -v a="$a_roi" -v b="$b_roi" 'BEGIN{exit !(a > b)}'; then
+        pass "ROI quality improves ($b_roi -> $a_roi dB)"
+    else
+        fail "ROI quality did not improve ($b_roi -> $a_roi dB)"
+    fi
+    # The background is expected to get worse -- that is where the bits came from. What
+    # would be wrong is the background improving too, which would mean the regions changed
+    # nothing and the bitrate simply went up.
+    if awk -v a="$a_bg" -v b="$b_bg" 'BEGIN{exit !(a < b)}'; then
+        pass "background gave up quality for it ($b_bg -> $a_bg dB)"
+    else
+        fail "background did not pay for the regions ($b_bg -> $a_bg dB)"
+    fi
+    printf '  info  sizes: baseline %s, adaptive %s bytes\n' "$b_size" "$a_size"
+    printf 'moving,adaptive,roi_psnr,%s\nmoving,baseline,roi_psnr,%s\n' \
+        "$a_roi" "$b_roi" >> "${EVAL}/metrics.csv"
+else
+    printf '  skip  roi_metrics or the synthetic scenes are missing\n'
+fi
+
 step "gRPC: both entry points, and the sandbox"
 if [[ -x "${BUILD}/roi-transcode-svc" && -x "${BUILD}/roi_grpc_smoke" ]]; then
     port=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')

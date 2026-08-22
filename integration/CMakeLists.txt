@@ -35,6 +35,17 @@ target_link_libraries(roi-frame-push PRIVATE smartvideo roi_json)
 target_compile_definitions(roi-frame-push PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_compile_options(roi-frame-push PRIVATE ${SVE_WARNINGS})
 
+# Quality metrics (TZ v2.0 §40, §43, §44). Lives with the integration rather than the
+# library because it reads the synthetic corpus's JSON ground truth, and the library does
+# not depend on a JSON parser -- that separation is what check.sh verifies on every run.
+add_executable(roi_metrics ${CMAKE_SOURCE_DIR}/tests/quality/roi_metrics.cpp)
+target_include_directories(roi_metrics SYSTEM PRIVATE ${FFMPEG_INCLUDE_DIRS})
+if(FFMPEG_LIBRARY_DIRS)
+    target_link_directories(roi_metrics PRIVATE ${FFMPEG_LIBRARY_DIRS})
+endif()
+target_link_libraries(roi_metrics PRIVATE ${FFMPEG_LIBRARIES} nlohmann_json::nlohmann_json)
+target_compile_options(roi_metrics PRIVATE ${SVE_WARNINGS})
+
 if(SVE_BUILD_TESTS)
     add_executable(roi_json_test ${CMAKE_SOURCE_DIR}/tests/integration/roi_json_test.cpp)
     target_link_libraries(roi_json_test PRIVATE roi_json)
