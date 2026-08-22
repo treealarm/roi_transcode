@@ -125,9 +125,60 @@ double psnr_from_mse(double mse)
     return mse <= 1e-9 ? 100.0 : 10.0 * std::log10(255.0 * 255.0 / mse);
 }
 
+/// Zone ids for §44, from outside inwards.
+enum Zone : int8_t {
+    ZONE_OUTSIDE = 0,
+    ZONE_BOUNDARY_OUTER = 1,
+    ZONE_BOUNDARY = 2,
+    ZONE_BOUNDARY_INNER = 3,
+    ZONE_INTERIOR = 4,
+};
+
+/// Bands are one coding block wide. Narrower and the zone would say more about the block
+/// grid than about the edge.
+constexpr int BAND = 8;
+
+/// Paints the zone of every pixel once per frame.
+///
+/// The obvious version -- ask each pixel for its distance to every region -- costs width x
+/// height x regions with a square root in the middle, which on a 720p clip of 300 frames
+/// is hundreds of millions of calls and made this tool unusable in CI. Only the
+/// neighbourhood of a region can be anything but "outside", so only that is walked, and a
+/// pixel covered by two regions keeps the innermost zone.
+void paint_zones(std::vector<int8_t>& zone, int w, int h, const std::vector<Rect>& rois)
+{
+    zone.assign(static_cast<size_t>(w) * h, ZONE_OUTSIDE);
+    for (const Rect& r : rois) {
+        const int x0 = std::max(0, r.x - BAND);
+        const int x1 = std::min(w - 1, r.x + r.w - 1 + BAND);
+        const int y0 = std::max(0, r.y - BAND);
+        const int y1 = std::min(h - 1, r.y + r.h - 1 + BAND);
+        for (int y = y0; y <= y1; ++y) {
+            int8_t* row = zone.data() + static_cast<size_t>(y) * w;
+            for (int x = x0; x <= x1; ++x) {
+                const int dx = std::max({r.x - x, x - (r.x + r.w - 1), 0});
+                const int dy = std::max({r.y - y, y - (r.y + r.h - 1), 0});
+                int8_t z;
+                if (dx == 0 && dy == 0) {
+                    const int to_edge = std::min({x - r.x, r.x + r.w - 1 - x,
+                                                  y - r.y, r.y + r.h - 1 - y});
+                    z = to_edge == 0 ? ZONE_BOUNDARY
+                        : (to_edge < BAND ? ZONE_BOUNDARY_INNER : ZONE_INTERIOR);
+                } else {
+                    // Chebyshev rather than Euclidean: the bands are a ring around a
+                    // rectangle, and a square ring is what the encoder's blocks see.
+                    const int d = std::max(dx, dy);
+                    z = d <= BAND ? ZONE_BOUNDARY_OUTER : ZONE_OUTSIDE;
+                }
+                row[x] = std::max(row[x], z);
+            }
+        }
+    }
+}
+
 /// 8x8 windowed SSIM on luma, averaged over the windows whose centre `keep` accepts.
 double ssim_masked(const Plane& a, const Plane& b,
-    const std::function<bool(int, int)>& keep)
+    const std::vector<int8_t>& zone, bool want_inside)
 {
     constexpr int W = 8;
     const double c1 = 6.5025, c2 = 58.5225;
@@ -135,7 +186,10 @@ double ssim_masked(const Plane& a, const Plane& b,
     long windows = 0;
     for (int y = 0; y + W <= a.h; y += 4) {
         for (int x = 0; x + W <= a.w; x += 4) {
-            if (!keep(x + W / 2, y + W / 2)) {
+            const int cx = x + W / 2, cy = y + W / 2;
+            const bool inside =
+                zone[static_cast<size_t>(cy) * a.w + cx] >= ZONE_BOUNDARY;
+            if (inside != want_inside) {
                 continue;
             }
             double sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
@@ -161,25 +215,6 @@ double ssim_masked(const Plane& a, const Plane& b,
     return windows > 0 ? total / static_cast<double>(windows) : 0.0;
 }
 
-/// Distance from the nearest ROI edge, negative inside. Used for the boundary zones of §44.
-int signed_distance(const std::vector<Rect>& rois, int x, int y)
-{
-    int best = std::numeric_limits<int>::max();
-    bool inside = false;
-    for (const Rect& r : rois) {
-        const int dx = std::max({r.x - x, x - (r.x + r.w - 1), 0});
-        const int dy = std::max({r.y - y, y - (r.y + r.h - 1), 0});
-        if (dx == 0 && dy == 0) {
-            inside = true;
-            const int to_edge = std::min({x - r.x, r.x + r.w - 1 - x,
-                                          y - r.y, r.y + r.h - 1 - y});
-            best = std::min(best, -to_edge);
-        } else if (!inside) {
-            best = std::min(best, static_cast<int>(std::hypot(dx, dy)));
-        }
-    }
-    return rois.empty() ? std::numeric_limits<int>::max() : best;
-}
 
 } // namespace
 
@@ -221,6 +256,7 @@ int main(int argc, char** argv)
         }
     }
 
+    std::vector<int8_t> zone;
     std::vector<double> roi_psnr_series, bg_psnr_series;
     double roi_ssim_sum = 0, bg_ssim_sum = 0;
     long roi_frames = 0;
@@ -240,31 +276,28 @@ int main(int argc, char** argv)
 
         const Plane& a = ref[fi];
         const Plane& b = dis[fi];
+        paint_zones(zone, a.w, a.h, rois);
+
         double roi_se = 0, bg_se = 0;
         long roi_px = 0, bg_px = 0;
 
         for (int y = 0; y < a.h; ++y) {
             const uint8_t* ra = a.at(y);
             const uint8_t* rb = b.at(y);
+            const int8_t* rz = zone.data() + static_cast<size_t>(y) * a.w;
             for (int x = 0; x < a.w; ++x) {
                 const double d = static_cast<double>(ra[x]) - rb[x];
                 const double se = d * d;
-                const int sd = signed_distance(rois, x, y);
-                if (sd <= 0) {
+                const int8_t z = rz[x];
+                // Inside means the region proper -- the edge counts as inside, because a
+                // pixel on the border of a plate is part of the plate.
+                if (z >= ZONE_BOUNDARY) {
                     roi_se += se;
                     ++roi_px;
                 } else {
                     bg_se += se;
                     ++bg_px;
                 }
-                // Zones are eight pixels wide, which is one coding block: narrower than
-                // that and the zone says more about the block grid than about the edge.
-                int z;
-                if (sd > 8)        z = 0;
-                else if (sd > 0)   z = 1;
-                else if (sd == 0)  z = 2;
-                else if (sd > -8)  z = 3;
-                else               z = 4;
                 zone_mse[z] += se;
                 ++zone_px[z];
             }
@@ -272,14 +305,12 @@ int main(int argc, char** argv)
 
         if (roi_px > 0) {
             roi_psnr_series.push_back(psnr_from_mse(roi_se / static_cast<double>(roi_px)));
-            roi_ssim_sum += ssim_masked(a, b,
-                [&](int x, int y) { return signed_distance(rois, x, y) <= 0; });
+            roi_ssim_sum += ssim_masked(a, b, zone, true);
             ++roi_frames;
         }
         if (bg_px > 0) {
             bg_psnr_series.push_back(psnr_from_mse(bg_se / static_cast<double>(bg_px)));
-            bg_ssim_sum += ssim_masked(a, b,
-                [&](int x, int y) { return signed_distance(rois, x, y) > 0; });
+            bg_ssim_sum += ssim_masked(a, b, zone, false);
         }
     }
 
