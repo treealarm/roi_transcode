@@ -87,20 +87,11 @@ const char* RoiEncoder::label() const
 
 namespace {
 
-// One attempt at one backend. `probe` asks for a throwaway encode of a single
-// frame before the context is handed back: Ubuntu's older iHD opens the QSV
-// encoder happily and then returns empty packets, and only an actual encode
-// tells the difference.
-struct Attempt {
-    Encoder kind = Encoder::Cpu;
-    roiav::CodecCtx enc;
-    roiav::Buffer hw_device;
-    roiav::Buffer hw_frames;
-    AVPixelFormat sw_pix = AV_PIX_FMT_YUV420P;
-    bool hw_upload = false;
-};
-
-bool probe_one_frame(Attempt& a)
+// A throwaway encode of a single frame, for backends that ask for it. Ubuntu's older iHD
+// opens the QSV encoder happily and then returns empty packets, and only an actual encode
+// tells the two apart -- which is why IEncoderBackend::NeedsProbe exists rather than the
+// caller guessing which backends lie.
+bool probe_one_frame(BackendSession& a)
 {
     roiav::Frame f;
     f.p->format = a.sw_pix;
@@ -142,99 +133,38 @@ bool probe_one_frame(Attempt& a)
     return r >= 0;
 }
 
-bool try_open(Attempt& out, Encoder kind, const AVCodec* codec,
-    const EncoderParams& p, bool probe)
+
+// Allocates the context, lets the backend configure it, opens it, and honours a probe.
+// Everything here is the same whichever backend answered -- what differs is inside
+// Configure, which is the whole reason the interface exists.
+// `probe` is what stops the recursion below: the reopen after a successful probe must not
+// probe again, or the backend that asks for one never finishes opening.
+bool open_with(BackendSession& out, const IEncoderBackend& backend,
+    const AVCodec* codec, const EncoderParams& p, bool probe = true)
 {
-    out = Attempt{};
-    out.kind = kind;
+    out = BackendSession{};
+    out.kind = backend.kind();
     out.enc.p = avcodec_alloc_context3(codec);
     if (!out.enc.p) {
         return false;
     }
-    out.enc.p->width = p.width;
-    out.enc.p->height = p.height;
-    out.enc.p->time_base =
-        p.time_base.den > 0 ? p.time_base : av_inv_q(p.fps);
-    out.enc.p->framerate = p.fps;
-    const int gop_auto = std::max(p.fps.num / std::max(p.fps.den, 1), 1) * 2;
-    out.enc.p->gop_size = p.gop > 0 ? p.gop : gop_auto;
-    out.enc.p->max_b_frames = 0;
-
-    if (kind == Encoder::Qsv) {
-        AVDictionary* opts = nullptr;
-        av_dict_set(&opts, "child_device_type", "vaapi", 0);
-        const int derr = av_hwdevice_ctx_create(
-            &out.hw_device.p, AV_HWDEVICE_TYPE_QSV, "auto", opts, 0);
-        av_dict_free(&opts);
-        if (derr < 0
-            && !open_hw_device(out.hw_device, AV_HWDEVICE_TYPE_QSV, nullptr)) {
-            return false;
-        }
-        out.enc.p->pix_fmt = AV_PIX_FMT_NV12;
-        out.enc.p->hw_device_ctx = av_buffer_ref(out.hw_device.p);
-        out.sw_pix = AV_PIX_FMT_NV12;
-        // Alder Lake encodes through EncSliceLP only: VDENC + CQP. ICQ and
-        // global_quality fail there, and CQP is also the one mode where
-        // mfxExtEncoderROI DeltaQP applies -- so this holds for H.264 too.
-        av_opt_set(out.enc.p->priv_data, "low_power", "1", 0);
-        if (p.codec == Codec::H265) {
-            // Generalized P/B frames: an HEVC-only option. h264_qsv would just
-            // reject it, but asking for something that does not exist is worth
-            // not doing.
-            av_opt_set(out.enc.p->priv_data, "gpb", "0", 0);
-        }
-        av_opt_set(out.enc.p->priv_data, "preset", p.preset.c_str(), 0);
-        out.enc.p->flags |= AV_CODEC_FLAG_QSCALE;
-        out.enc.p->global_quality = p.crf * FF_QP2LAMBDA;
-    } else if (kind == Encoder::Vaapi) {
-        if (!open_hw_device(
-                out.hw_device, AV_HWDEVICE_TYPE_VAAPI, "/dev/dri/renderD128")
-            && !open_hw_device(out.hw_device, AV_HWDEVICE_TYPE_VAAPI, nullptr)) {
-            return false;
-        }
-        if (!init_vaapi_frames(
-                out.hw_device, out.hw_frames, p.width, p.height)) {
-            return false;
-        }
-        out.enc.p->pix_fmt = AV_PIX_FMT_VAAPI;
-        out.enc.p->hw_frames_ctx = av_buffer_ref(out.hw_frames.p);
-        out.sw_pix = AV_PIX_FMT_NV12;
-        out.hw_upload = true;
-        av_opt_set_int(out.enc.p->priv_data, "qp", p.crf, 0);
-        av_opt_set(out.enc.p->priv_data, "rc_mode", "CQP", 0);
-    } else if (kind == Encoder::Nvenc) {
-        open_hw_device(out.hw_device, AV_HWDEVICE_TYPE_CUDA, nullptr);
-        if (out.hw_device.p) {
-            out.enc.p->hw_device_ctx = av_buffer_ref(out.hw_device.p);
-        }
-        out.enc.p->pix_fmt = AV_PIX_FMT_NV12;
-        out.sw_pix = AV_PIX_FMT_NV12;
-        av_opt_set(out.enc.p->priv_data, "preset", p.preset.c_str(), 0);
-        av_opt_set(out.enc.p->priv_data, "rc", "constqp", 0);
-        av_opt_set_int(out.enc.p->priv_data, "qp", p.crf, 0);
-        av_opt_set(out.enc.p->priv_data, "spatial-aq", "0", 0);
-        av_opt_set(out.enc.p->priv_data, "temporal-aq", "0", 0);
-    } else {
-        out.enc.p->pix_fmt = AV_PIX_FMT_YUV420P;
-        out.sw_pix = AV_PIX_FMT_YUV420P;
-        av_opt_set(out.enc.p->priv_data, "preset", p.preset.c_str(), 0);
-        av_opt_set(out.enc.p->priv_data, "crf", std::to_string(p.crf).c_str(), 0);
-        // Both libx264 and libx265 apply the ROI offsets through their adaptive
-        // quantization, and ignore them outright when aq-mode is 0.
-        av_opt_set(out.enc.p->priv_data, "aq-mode", "1", 0);
-    }
-
-    if (avcodec_open2(out.enc.p, codec, nullptr) < 0) {
-        out = Attempt{};
+    if (!backend.Configure(out, p)) {
+        out = BackendSession{};
         return false;
     }
-    if (kind == Encoder::Qsv && probe) {
+    if (avcodec_open2(out.enc.p, codec, nullptr) < 0) {
+        out = BackendSession{};
+        return false;
+    }
+    if (probe && backend.NeedsProbe()) {
         const bool ok = probe_one_frame(out);
-        out = Attempt{};
+        // The probe consumed the context either way: an encoder that has seen a frame
+        // cannot be handed back as fresh.
+        out = BackendSession{};
         if (!ok) {
             return false;
         }
-        return try_open(out, kind, codec, p, false);
+        return open_with(out, backend, codec, p, false);
     }
     return true;
 }
@@ -253,63 +183,46 @@ void RoiEncoder::attach(PacketSink& sink)
     m_sink->begin(m_enc.p);
 }
 
+EncoderCapabilities RoiEncoder::capabilities() const
+{
+    const IEncoderBackend* b = backend_for(m_kind);
+    return b ? b->GetCapabilities(m_codec) : EncoderCapabilities{};
+}
+
 void RoiEncoder::open_deferred(const EncoderParams& params)
 {
     const bool h264 = params.codec == Codec::H264;
-    // The backend names differ only by the codec prefix, so the chain is one
-    // list picked by the requested backend and spelled by the requested codec.
-    const char* qsv = h264 ? "h264_qsv" : "hevc_qsv";
-    const char* vaapi = h264 ? "h264_vaapi" : "hevc_vaapi";
-    const char* nvenc = h264 ? "h264_nvenc" : "hevc_nvenc";
-    const char* cpu = h264 ? "libx264" : "libx265";
-
-    struct Candidate {
-        Encoder kind;
-        const char* name;
+    // Which backends to try, and their libavcodec names. The order is the registry's
+    // (backend/common/backend_registry.cpp); the names differ only by the codec prefix.
+    auto codec_name = [h264](Encoder kind) -> const char* {
+        switch (kind) {
+        case Encoder::Qsv:   return h264 ? "h264_qsv"   : "hevc_qsv";
+        case Encoder::Vaapi: return h264 ? "h264_vaapi" : "hevc_vaapi";
+        case Encoder::Nvenc: return h264 ? "h264_nvenc" : "hevc_nvenc";
+        default:             return h264 ? "libx264"    : "libx265";
+        }
     };
-    std::vector<Candidate> order;
-    switch (params.kind) {
-    case Encoder::Auto:
-        order = {
-            {Encoder::Qsv, qsv},
-            {Encoder::Vaapi, vaapi},
-            {Encoder::Cpu, cpu},
-        };
-        break;
-    case Encoder::Qsv:
-        order = {{Encoder::Qsv, qsv}};
-        break;
-    case Encoder::Vaapi:
-        order = {{Encoder::Vaapi, vaapi}};
-        break;
-    case Encoder::Nvenc:
-        order = {{Encoder::Nvenc, nvenc}};
-        break;
-    default:
-        order = {{Encoder::Cpu, cpu}};
-        break;
-    }
 
-    Attempt opened;
+    BackendSession opened;
     std::string errors;
     bool got = false;
-    for (const auto& c : order) {
-        const AVCodec* codec = avcodec_find_encoder_by_name(c.name);
-        if (!codec && c.kind == Encoder::Cpu) {
-            // A build without libx264/libx265 may still have some other encoder
-            // for the codec; better that than refusing to run at all.
-            codec = avcodec_find_encoder(
-                h264 ? AV_CODEC_ID_H264 : AV_CODEC_ID_HEVC);
+    for (const IEncoderBackend* backend : backend_chain(params.kind)) {
+        const char* name = codec_name(backend->kind());
+        const AVCodec* codec = avcodec_find_encoder_by_name(name);
+        if (!codec && backend->kind() == Encoder::Cpu) {
+            // A build without libx264/libx265 may still have some other encoder for the
+            // codec; better that than refusing to run at all.
+            codec = avcodec_find_encoder(h264 ? AV_CODEC_ID_H264 : AV_CODEC_ID_HEVC);
         }
         if (!codec) {
-            errors += std::format(" {}: not in FFmpeg;", c.name);
+            errors += std::format(" {}: not in FFmpeg;", name);
             continue;
         }
-        if (try_open(opened, c.kind, codec, params, true)) {
+        if (open_with(opened, *backend, codec, params)) {
             got = true;
             break;
         }
-        errors += std::format(" {}: open failed;", c.name);
+        errors += std::format(" {}: open failed;", name);
     }
     if (!got) {
         fail(std::format(

@@ -55,6 +55,12 @@ target_compile_options(smartvideo_adaptive PRIVATE ${SVE_WARNINGS})
 # encoder and nothing else. Its only dependency is an FFmpeg that pkg-config can find.
 # ---------------------------------------------------------------------------
 add_library(smartvideo STATIC
+    src/backend/common/backend_common.cpp
+    src/backend/common/backend_registry.cpp
+    src/backend/onevpl/onevpl_backend.cpp
+    src/backend/ffmpeg/vaapi_backend.cpp
+    src/backend/nvenc/nvenc_backend.cpp
+    src/backend/software/software_backend.cpp
     src/core/transcode_file.cpp
     src/core/roi_encoder.cpp
     src/core/file_mux_sink.cpp
@@ -64,6 +70,7 @@ add_library(smartvideo STATIC
 target_include_directories(smartvideo
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_include_directories(smartvideo SYSTEM PUBLIC ${FFMPEG_INCLUDE_DIRS})
 if(FFMPEG_LIBRARY_DIRS)

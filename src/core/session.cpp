@@ -144,6 +144,24 @@ struct Session::Impl : PacketSink {
         }
     }
 
+    /// How many regions may actually be sent this frame.
+    ///
+    /// Two numbers meet here: what the caller asked for, and what the backend that opened
+    /// will accept (TZ v2.0 §6.4). The smaller wins. Before this the setting was obeyed
+    /// alone, which meant a request for 200 regions was silently truncated by the driver
+    /// instead of by us -- and the count in Report.regions_dropped was wrong, because we
+    /// did not know the loss had happened.
+    int region_budget() const
+    {
+        const int asked = params.settings.quality.max_regions;
+        const uint32_t limit = encoder.capabilities().max_roi_regions;
+        if (limit == 0) {
+            return asked;  // the backend names no limit; the caller's word stands
+        }
+        const int cap = static_cast<int>(limit);
+        return asked > 0 ? std::min(asked, cap) : cap;
+    }
+
     std::vector<Rect> rects_for(const Regions& regions)
     {
         const int w = params.width;
@@ -158,8 +176,7 @@ struct Session::Impl : PacketSink {
             mapping.levels = params.settings.quality.mask_levels;
             const QpDeltaMap grid = qp_map_from_mask(*regions.mask, mapping, w, h);
             int dropped = 0;
-            auto rects = rects_from_qp_map(
-                grid, params.settings.quality.max_regions, &dropped);
+            auto rects = rects_from_qp_map(grid, region_budget(), &dropped);
             report.regions_dropped += dropped;
             return rects;
         }
@@ -172,11 +189,10 @@ struct Session::Impl : PacketSink {
             builder.detections_from(box_list, params.settings.quality, w, h);
         auto rects =
             builder.build(w, h, dets, params.settings.quality.background_qp_delta);
-        if (params.settings.quality.max_regions > 0
-            && static_cast<int>(rects.size()) > params.settings.quality.max_regions) {
-            report.regions_dropped +=
-                static_cast<int>(rects.size()) - params.settings.quality.max_regions;
-            rects.resize(static_cast<size_t>(params.settings.quality.max_regions));
+        const int budget = region_budget();
+        if (budget > 0 && static_cast<int>(rects.size()) > budget) {
+            report.regions_dropped += static_cast<int>(rects.size()) - budget;
+            rects.resize(static_cast<size_t>(budget));
         }
         return rects;
     }

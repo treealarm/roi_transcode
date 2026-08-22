@@ -4,7 +4,7 @@
 // frames came from. A file pipeline and a caller pushing frames want exactly
 // this and nothing else around it.
 
-#include "av_raii.h"
+#include "backend/common/encoder_backend.h"
 #include "smartvideo/types.h"
 #include "smartvideo/types.h"
 
@@ -15,20 +15,6 @@ namespace smartvideo {
 
 class PacketSink;
 
-struct EncoderParams {
-    int width = 0;
-    int height = 0;
-    // Frame rate. Also picks the default GOP (two seconds) when gop == 0.
-    AVRational fps{25, 1};
-    // Encoder time base. Left at den == 0 it follows the frame rate, which is
-    // what a file wants; a pushed source usually has its own units instead.
-    AVRational time_base{0, 0};
-    Encoder kind = Encoder::Auto;
-    Codec codec = Codec::H265;
-    int crf = 28;
-    int gop = 0;
-    std::string preset = "medium";
-};
 
 class RoiEncoder {
 public:
@@ -42,6 +28,9 @@ public:
     void attach(PacketSink& sink);
 
     Encoder kind() const { return m_kind; }
+    /// What the backend that actually opened is able to do. Only meaningful after open;
+    /// before that there is no backend to ask.
+    EncoderCapabilities capabilities() const;
     // Human-readable name of the backend that actually opened, codec included.
     const char* label() const;
     AVCodecContext* ctx() { return m_enc.p; }
