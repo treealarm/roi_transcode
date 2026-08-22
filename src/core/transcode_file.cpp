@@ -9,7 +9,7 @@
 #include <cstdio>
 #include <vector>
 
-namespace roi {
+namespace smartvideo {
 
 using roiav::check;
 using roiav::fail;
@@ -178,4 +178,4 @@ Report transcode_file(const std::string& input_path,
     return report;
 }
 
-} // namespace roi
+} // namespace smartvideo

@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <vector>
 
-using namespace roi;
+using namespace smartvideo;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \

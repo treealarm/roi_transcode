@@ -5,7 +5,7 @@
 
 #include <cstdint>
 #include <vector>
-namespace roi {
+namespace smartvideo {
 
 
 // NVIDIA NVENC qpDeltaMap: signed QP delta per CTU/MB, raster order.
@@ -20,4 +20,4 @@ public:
         const std::vector<Rect>& rects) const;
 };
 
-} // namespace roi
+} // namespace smartvideo

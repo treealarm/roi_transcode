@@ -12,7 +12,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 }
 
-namespace roi {
+namespace smartvideo {
 
 class FrameDecoder {
 public:
@@ -20,7 +20,7 @@ public:
 
     // `extradata` may be null; for H.264/H.265 in AVCC/HVCC form it is required
     // for the decoder to make sense of the first access unit.
-    void open(roi::InputCodec codec, const uint8_t* extradata, int extradata_size);
+    void open(smartvideo::InputCodec codec, const uint8_t* extradata, int extradata_size);
 
     // Feeds one buffer. Calls `cb` for every frame that comes out -- usually one,
     // sometimes none while the decoder builds up state.
@@ -31,7 +31,7 @@ public:
 private:
     void receive(const FrameCb& cb);
 
-    roi::InputCodec m_codec = roi::InputCodec::Raw;
+    smartvideo::InputCodec m_codec = smartvideo::InputCodec::Raw;
     roiav::CodecCtx m_dec;
     AVCodecParserContext* m_parser = nullptr;
     roiav::Frame m_frame;
@@ -44,4 +44,4 @@ public:
     FrameDecoder& operator=(const FrameDecoder&) = delete;
 };
 
-} // namespace roi
+} // namespace smartvideo

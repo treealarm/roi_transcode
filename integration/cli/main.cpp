@@ -23,22 +23,22 @@ void usage()
         "libx265 is the CPU fallback (needs aq-mode).\n");
 }
 
-roi::Encoder parse_encoder(const char* s)
+smartvideo::Encoder parse_encoder(const char* s)
 {
-    if (std::strcmp(s, "auto") == 0) return roi::Encoder::Auto;
-    if (std::strcmp(s, "qsv") == 0) return roi::Encoder::Qsv;
-    if (std::strcmp(s, "vaapi") == 0) return roi::Encoder::Vaapi;
-    if (std::strcmp(s, "nvenc") == 0) return roi::Encoder::Nvenc;
-    if (std::strcmp(s, "cpu") == 0) return roi::Encoder::Cpu;
+    if (std::strcmp(s, "auto") == 0) return smartvideo::Encoder::Auto;
+    if (std::strcmp(s, "qsv") == 0) return smartvideo::Encoder::Qsv;
+    if (std::strcmp(s, "vaapi") == 0) return smartvideo::Encoder::Vaapi;
+    if (std::strcmp(s, "nvenc") == 0) return smartvideo::Encoder::Nvenc;
+    if (std::strcmp(s, "cpu") == 0) return smartvideo::Encoder::Cpu;
     // The old spelling, kept so existing scripts keep working.
-    if (std::strcmp(s, "x265") == 0) return roi::Encoder::Cpu;
+    if (std::strcmp(s, "x265") == 0) return smartvideo::Encoder::Cpu;
     throw std::runtime_error("unknown --encoder (auto|qsv|vaapi|nvenc|cpu)");
 }
-roi::Codec parse_codec(const char* s)
+smartvideo::Codec parse_codec(const char* s)
 {
-    if (std::strcmp(s, "h264") == 0) return roi::Codec::H264;
+    if (std::strcmp(s, "h264") == 0) return smartvideo::Codec::H264;
     if (std::strcmp(s, "h265") == 0 || std::strcmp(s, "hevc") == 0)
-        return roi::Codec::H265;
+        return smartvideo::Codec::H265;
     throw std::runtime_error("unknown --codec (h264|h265)");
 }
 } // namespace
@@ -49,7 +49,7 @@ int main(int argc, char** argv)
     std::string output_path;
     RoiJson roi_doc;
     bool have_roi = false;
-    roi::Settings settings;
+    smartvideo::Settings settings;
 
     try {
         for (int i = 1; i < argc; ++i) {
@@ -91,7 +91,7 @@ int main(int argc, char** argv)
             return 2;
         }
         settings.quality = roi_doc.quality;
-        roi::transcode_file(input_path, output_path, roi_doc.boxes, settings);
+        smartvideo::transcode_file(input_path, output_path, roi_doc.boxes, settings);
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "error: %s\n", ex.what());
         return 1;

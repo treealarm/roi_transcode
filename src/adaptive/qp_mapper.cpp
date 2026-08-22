@@ -10,7 +10,7 @@
 #include <cstdlib>
 #include <map>
 
-namespace roi {
+namespace smartvideo {
 
 std::vector<Rect> rects_from_qp_map(
     const QpDeltaMap& map, int max_regions, int* dropped)
@@ -108,4 +108,4 @@ std::vector<Rect> rects_from_qp_map(
     return out;
 }
 
-} // namespace roi
+} // namespace smartvideo

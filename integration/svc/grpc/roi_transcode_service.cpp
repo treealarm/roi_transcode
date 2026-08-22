@@ -54,32 +54,32 @@ void fill_job(const RoiJobStatus& st, roi::transcode::Job* out)
     out->set_encoder_used(st.encoder_used);
 }
 
-roi::Encoder from_proto(roi::transcode::Encoder e)
+smartvideo::Encoder from_proto(roi::transcode::Encoder e)
 {
     switch (e) {
     case roi::transcode::ENCODER_QSV:
-        return roi::Encoder::Qsv;
+        return smartvideo::Encoder::Qsv;
     case roi::transcode::ENCODER_VAAPI:
-        return roi::Encoder::Vaapi;
+        return smartvideo::Encoder::Vaapi;
     case roi::transcode::ENCODER_NVENC:
-        return roi::Encoder::Nvenc;
+        return smartvideo::Encoder::Nvenc;
     case roi::transcode::ENCODER_CPU:
-        return roi::Encoder::Cpu;
+        return smartvideo::Encoder::Cpu;
     default:
-        return roi::Encoder::Auto;
+        return smartvideo::Encoder::Auto;
     }
 }
 
-roi::transcode::Encoder to_proto(roi::Encoder k)
+roi::transcode::Encoder to_proto(smartvideo::Encoder k)
 {
     switch (k) {
-    case roi::Encoder::Qsv:
+    case smartvideo::Encoder::Qsv:
         return roi::transcode::ENCODER_QSV;
-    case roi::Encoder::Vaapi:
+    case smartvideo::Encoder::Vaapi:
         return roi::transcode::ENCODER_VAAPI;
-    case roi::Encoder::Nvenc:
+    case smartvideo::Encoder::Nvenc:
         return roi::transcode::ENCODER_NVENC;
-    case roi::Encoder::Cpu:
+    case smartvideo::Encoder::Cpu:
         return roi::transcode::ENCODER_CPU;
     default:
         return roi::transcode::ENCODER_AUTO;
@@ -91,11 +91,11 @@ roi::transcode::Encoder to_proto(roi::Encoder k)
 // FileSettings and StreamSettings are distinct types with identical fields, so
 // one template serves both and they cannot drift apart by accident.
 template <typename ProtoSettings>
-void apply_settings(const ProtoSettings& in, roi::Settings& out)
+void apply_settings(const ProtoSettings& in, smartvideo::Settings& out)
 {
     out.encoder = from_proto(in.encoder());
-    out.codec = in.codec() == roi::transcode::CODEC_H264 ? roi::Codec::H264
-                                                         : roi::Codec::H265;
+    out.codec = in.codec() == roi::transcode::CODEC_H264 ? smartvideo::Codec::H264
+                                                         : smartvideo::Codec::H265;
     if (in.crf() > 0) {
         out.crf = in.crf();
     }
@@ -117,7 +117,7 @@ void apply_settings(const ProtoSettings& in, roi::Settings& out)
         out.quality.max_regions = q.max_regions();
     }
     for (const auto& k : q.kinds()) {
-        roi::KindQuality cfg;
+        smartvideo::KindQuality cfg;
         if (k.has_qp_delta()) {
             cfg.qp_delta = k.qp_delta();
         }
@@ -143,9 +143,9 @@ void apply_settings(const ProtoSettings& in, roi::Settings& out)
     }
 }
 
-roi::Box box_from_proto(const roi::transcode::Box& b)
+smartvideo::Box box_from_proto(const roi::transcode::Box& b)
 {
-    roi::Box out;
+    smartvideo::Box out;
     out.t_sec = b.t();
     out.kind = b.kind();
     out.x = b.x();
@@ -235,14 +235,14 @@ namespace {
 
 // Ships packets back over the stream. The alternative is output_path, in which
 // case the session muxes and only the summary comes back.
-class StreamSink : public roi::PacketHandler {
+class StreamSink : public smartvideo::PacketHandler {
 public:
     using Writer = grpc::ServerReaderWriter<roi::transcode::EncodeStreamResponse,
         roi::transcode::EncodeStreamRequest>;
 
     explicit StreamSink(Writer* w) : m_writer(w) {}
 
-    void on_open(const roi::StreamInfo& info) override
+    void on_open(const smartvideo::StreamInfo& info) override
     {
         roi::transcode::EncodeStreamResponse msg;
         auto* opened = msg.mutable_opened();
@@ -254,7 +254,7 @@ public:
         m_writer->Write(msg);
     }
 
-    void on_packet(const roi::EncodedPacket& pkt) override
+    void on_packet(const smartvideo::EncodedPacket& pkt) override
     {
         roi::transcode::EncodeStreamResponse msg;
         auto* out = msg.mutable_packet();
@@ -269,23 +269,23 @@ private:
     Writer* m_writer;
 };
 
-roi::InputCodec codec_from_proto(roi::transcode::InputCodec c)
+smartvideo::InputCodec codec_from_proto(roi::transcode::InputCodec c)
 {
     switch (c) {
     case roi::transcode::INPUT_CODEC_H264:
-        return roi::InputCodec::H264;
+        return smartvideo::InputCodec::H264;
     case roi::transcode::INPUT_CODEC_H265:
-        return roi::InputCodec::H265;
+        return smartvideo::InputCodec::H265;
     case roi::transcode::INPUT_CODEC_JPEG:
-        return roi::InputCodec::Jpeg;
+        return smartvideo::InputCodec::Jpeg;
     default:
-        return roi::InputCodec::Raw;
+        return smartvideo::InputCodec::Raw;
     }
 }
 
-roi::SessionParams params_from_open(const roi::transcode::StreamOpen& open)
+smartvideo::SessionParams params_from_open(const roi::transcode::StreamOpen& open)
 {
-    roi::SessionParams sp;
+    smartvideo::SessionParams sp;
     sp.width = open.width();
     sp.height = open.height();
     if (open.time_base_num() > 0 && open.time_base_den() > 0) {
@@ -326,7 +326,7 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
             return {grpc::StatusCode::INVALID_ARGUMENT,
                 "open needs a frame size"};
         }
-        roi::SessionParams sp = params_from_open(open);
+        smartvideo::SessionParams sp = params_from_open(open);
 
         // Either the session muxes into a sandboxed path, or packets come back
         // over the stream. Opened is sent by the handler, on_open.
@@ -337,13 +337,13 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
             streaming = std::make_unique<StreamSink>(stream);
         }
 
-        roi::Session session(sp, streaming.get());
+        smartvideo::Session session(sp, streaming.get());
 
         // Raw planes arrive tightly packed, so the plane pointers are derived
         // rather than sent: one layout, described once in `open`.
         const auto pix = static_cast<AVPixelFormat>(open.pix_fmt());
-        std::vector<roi::Box> boxes;
-        roi::Mask mask;
+        std::vector<smartvideo::Box> boxes;
+        smartvideo::Mask mask;
 
         while (stream->Read(&req)) {
             if (!req.has_frame()) {
@@ -352,7 +352,7 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
             }
             const auto& in = req.frame();
 
-            roi::Regions regions;
+            smartvideo::Regions regions;
             boxes.clear();
             if (in.has_mask()) {
                 mask.data =
@@ -369,11 +369,11 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
                 regions.box_count = boxes.size();
             }
 
-            roi::Frame f;
+            smartvideo::Frame f;
             f.pts = in.pts();
             const auto* bytes =
                 reinterpret_cast<const uint8_t*>(in.data().data());
-            if (sp.codec == roi::InputCodec::Raw) {
+            if (sp.codec == smartvideo::InputCodec::Raw) {
                 uint8_t* planes[4] = {nullptr, nullptr, nullptr, nullptr};
                 int strides[4] = {0, 0, 0, 0};
                 const int needed = av_image_fill_arrays(planes, strides,
@@ -397,7 +397,7 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
             session.submit(f, regions);
         }
 
-        const roi::Report rep = session.finish();
+        const smartvideo::Report rep = session.finish();
         roi::transcode::EncodeStreamResponse msg;
         auto* done = msg.mutable_done();
         done->set_frames(rep.frames);

@@ -10,7 +10,7 @@
 
 #include <string>
 #include <vector>
-namespace roi {
+namespace smartvideo {
 
 
 class PacketSink;
@@ -79,4 +79,4 @@ private:
     PacketSink* m_sink = nullptr;
 };
 
-} // namespace roi
+} // namespace smartvideo

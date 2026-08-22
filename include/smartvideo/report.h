@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <string>
 
-namespace roi {
+namespace smartvideo {
 
 struct Report {
     Encoder encoder_used = Encoder::Cpu;
@@ -21,4 +21,4 @@ struct Report {
     int64_t regions_dropped = 0;
 };
 
-} // namespace roi
+} // namespace smartvideo

@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace roi {
+namespace smartvideo {
 
 namespace {
 
@@ -126,4 +126,4 @@ std::vector<Detection> RoiMapBuilder::detections_from(
     return out;
 }
 
-} // namespace roi
+} // namespace smartvideo

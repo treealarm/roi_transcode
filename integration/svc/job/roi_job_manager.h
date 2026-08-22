@@ -34,8 +34,8 @@ struct RoiJobStatus {
 struct RoiJobRequest {
     std::string input_path;
     std::string output_path;
-    std::vector<roi::Box> boxes;
-    roi::Settings settings;
+    std::vector<smartvideo::Box> boxes;
+    smartvideo::Settings settings;
 };
 
 class RoiJobManager {

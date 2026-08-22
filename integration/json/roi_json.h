@@ -10,8 +10,8 @@
 #include <vector>
 
 struct RoiJson {
-    roi::Quality quality;
-    std::vector<roi::Box> boxes;
+    smartvideo::Quality quality;
+    std::vector<smartvideo::Box> boxes;
 };
 
 RoiJson load_roi_json(const std::string& path);

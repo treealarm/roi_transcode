@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace roi {
+namespace smartvideo {
 
 // One frame on its way in: either raw planes or one encoded access unit.
 struct Frame {
@@ -85,4 +85,4 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace roi
+} // namespace smartvideo

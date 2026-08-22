@@ -1,4 +1,4 @@
-// Drives roi::Session from a file: demuxes, then pushes frames in rather than
+// Drives smartvideo::Session from a file: demuxes, then pushes frames in rather than
 // handing the path to the file pipeline. Two reasons it exists. It is the only
 // way to exercise the frame mode without a gRPC client in between, and running
 // it against roi-transcode on the same input is the check that both modes agree.
@@ -30,30 +30,30 @@ void usage()
         "         [--codec h265|h264]\n"
         "         [--crf 28] [--gop N] [--preset medium]\n"
         "\n"
-        "Pushes frames into roi::Session instead of transcoding a path.\n"
+        "Pushes frames into smartvideo::Session instead of transcoding a path.\n"
         "  --push raw        decode here, submit raw planes (default)\n"
         "  --push bitstream  submit compressed access units, Session decodes\n"
         "  --mask            rasterize the boxes into a grayscale mask\n");
 }
 
-roi::Encoder parse_encoder(const char* s)
+smartvideo::Encoder parse_encoder(const char* s)
 {
-    if (std::strcmp(s, "auto") == 0) return roi::Encoder::Auto;
-    if (std::strcmp(s, "qsv") == 0) return roi::Encoder::Qsv;
-    if (std::strcmp(s, "vaapi") == 0) return roi::Encoder::Vaapi;
-    if (std::strcmp(s, "nvenc") == 0) return roi::Encoder::Nvenc;
-    if (std::strcmp(s, "cpu") == 0) return roi::Encoder::Cpu;
+    if (std::strcmp(s, "auto") == 0) return smartvideo::Encoder::Auto;
+    if (std::strcmp(s, "qsv") == 0) return smartvideo::Encoder::Qsv;
+    if (std::strcmp(s, "vaapi") == 0) return smartvideo::Encoder::Vaapi;
+    if (std::strcmp(s, "nvenc") == 0) return smartvideo::Encoder::Nvenc;
+    if (std::strcmp(s, "cpu") == 0) return smartvideo::Encoder::Cpu;
     // The old spelling, kept so existing scripts keep working.
-    if (std::strcmp(s, "x265") == 0) return roi::Encoder::Cpu;
+    if (std::strcmp(s, "x265") == 0) return smartvideo::Encoder::Cpu;
     throw std::runtime_error("unknown --encoder (auto|qsv|vaapi|nvenc|cpu)");
 }
 
-roi::InputCodec codec_of(AVCodecID id)
+smartvideo::InputCodec codec_of(AVCodecID id)
 {
     switch (id) {
-    case AV_CODEC_ID_H264: return roi::InputCodec::H264;
-    case AV_CODEC_ID_HEVC: return roi::InputCodec::H265;
-    case AV_CODEC_ID_MJPEG: return roi::InputCodec::Jpeg;
+    case AV_CODEC_ID_H264: return smartvideo::InputCodec::H264;
+    case AV_CODEC_ID_HEVC: return smartvideo::InputCodec::H265;
+    case AV_CODEC_ID_MJPEG: return smartvideo::InputCodec::Jpeg;
     default:
         throw std::runtime_error(
             "--push bitstream needs H.264, H.265 or JPEG input");
@@ -62,11 +62,11 @@ roi::InputCodec codec_of(AVCodecID id)
 
 // Boxes live on the timeline; a submitted frame wants the ones around its own
 // instant. Same hold window the file pipeline applies.
-std::vector<roi::Box> boxes_at(
-    const std::vector<roi::Box>& boxes, double hold_sec, double t_sec)
+std::vector<smartvideo::Box> boxes_at(
+    const std::vector<smartvideo::Box>& boxes, double hold_sec, double t_sec)
 {
     const double hold = hold_sec > 0 ? hold_sec : 0.25;
-    std::vector<roi::Box> out;
+    std::vector<smartvideo::Box> out;
     for (const auto& b : boxes) {
         if (std::abs(b.t_sec - t_sec) <= hold) {
             out.push_back(b);
@@ -76,7 +76,7 @@ std::vector<roi::Box> boxes_at(
 }
 
 void rasterize(std::vector<uint8_t>& mask, int w, int h,
-    const std::vector<roi::Box>& boxes)
+    const std::vector<smartvideo::Box>& boxes)
 {
     std::fill(mask.begin(), mask.end(), static_cast<uint8_t>(0));
     for (const auto& s : boxes) {
@@ -101,8 +101,8 @@ struct Args {
     bool have_roi = false;
     bool bitstream = false;
     bool use_mask = false;
-    roi::Encoder encoder = roi::Encoder::Auto;
-    roi::Codec codec = roi::Codec::H265;
+    smartvideo::Encoder encoder = smartvideo::Encoder::Auto;
+    smartvideo::Codec codec = smartvideo::Codec::H265;
     int crf = 28;
     int gop = 0;
     std::string preset = "medium";
@@ -134,7 +134,7 @@ int run(const Args& args)
     }
     AVStream* vs = fmt->streams[vindex];
 
-    roi::SessionParams sp;
+    smartvideo::SessionParams sp;
     sp.width = vs->codecpar->width;
     sp.height = vs->codecpar->height;
     sp.time_base_num = vs->time_base.num;
@@ -163,19 +163,19 @@ int run(const Args& args)
     }
 
     sp.output_path = args.out;
-    roi::Session session(sp);
+    smartvideo::Session session(sp);
 
     std::vector<uint8_t> mask_buf(
         static_cast<size_t>(sp.width) * static_cast<size_t>(sp.height));
-    roi::Mask mask;
+    smartvideo::Mask mask;
     mask.data = mask_buf.data();
     mask.width = sp.width;
     mask.height = sp.height;
     mask.stride = sp.width;
 
-    auto regions_for = [&](double t_sec, std::vector<roi::Box>& keep) {
+    auto regions_for = [&](double t_sec, std::vector<smartvideo::Box>& keep) {
         keep = boxes_at(args.roi_doc.boxes, args.roi_doc.quality.hold_sec, t_sec);
-        roi::Regions r;
+        smartvideo::Regions r;
         if (args.use_mask) {
             rasterize(mask_buf, sp.width, sp.height, keep);
             r.mask = &mask;
@@ -197,9 +197,9 @@ int run(const Args& args)
             if (pkt->stream_index == vindex) {
                 const int64_t pts = pkt->pts != AV_NOPTS_VALUE ? pkt->pts : 0;
                 const double t = static_cast<double>(pts) * av_q2d(vs->time_base);
-                std::vector<roi::Box> keep;
-                const roi::Regions r = regions_for(t, keep);
-                roi::Frame f;
+                std::vector<smartvideo::Box> keep;
+                const smartvideo::Regions r = regions_for(t, keep);
+                smartvideo::Frame f;
                 f.encoded = pkt->data;
                 f.encoded_size = static_cast<size_t>(pkt->size);
                 f.pts = pts;
@@ -241,9 +241,9 @@ int run(const Args& args)
                     ? frame->best_effort_timestamp
                     : 0;
                 const double t = static_cast<double>(pts) * av_q2d(vs->time_base);
-                std::vector<roi::Box> keep;
-                const roi::Regions rg = regions_for(t, keep);
-                roi::Frame f;
+                std::vector<smartvideo::Box> keep;
+                const smartvideo::Regions rg = regions_for(t, keep);
+                smartvideo::Frame f;
                 for (int i = 0; i < 4; ++i) {
                     f.plane[i] = frame->data[i];
                     f.stride[i] = frame->linesize[i];
@@ -270,7 +270,7 @@ int run(const Args& args)
         drain();
     }
 
-    const roi::Report rep = session.finish();
+    const smartvideo::Report rep = session.finish();
     std::fprintf(stderr,
         "pushed %lld frames -> %lld packets, %lld bytes, %s%s\n",
         static_cast<long long>(rep.frames), static_cast<long long>(rep.packets),
@@ -283,11 +283,11 @@ int run(const Args& args)
     return 0;
 }
 
-roi::Codec parse_codec(const char* s)
+smartvideo::Codec parse_codec(const char* s)
 {
-    if (std::strcmp(s, "h264") == 0) return roi::Codec::H264;
+    if (std::strcmp(s, "h264") == 0) return smartvideo::Codec::H264;
     if (std::strcmp(s, "h265") == 0 || std::strcmp(s, "hevc") == 0)
-        return roi::Codec::H265;
+        return smartvideo::Codec::H265;
     throw std::runtime_error("unknown --codec (h264|h265)");
 }
 } // namespace

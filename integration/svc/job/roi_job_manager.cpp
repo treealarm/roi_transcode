@@ -126,7 +126,7 @@ void RoiJobManager::run_job(const std::shared_ptr<Job>& entry, RoiJobRequest req
         if (entry->cancel.load()) {
             throw std::runtime_error("cancelled");
         }
-        const roi::Report report = roi::transcode_file(
+        const smartvideo::Report report = smartvideo::transcode_file(
             req.input_path, req.output_path, req.boxes, req.settings,
             &entry->cancel);
         {

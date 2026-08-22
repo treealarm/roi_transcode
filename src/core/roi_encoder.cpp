@@ -10,7 +10,7 @@ extern "C" {
 #include <libavutil/hwcontext.h>
 #include <libavutil/opt.h>
 }
-namespace roi {
+namespace smartvideo {
 
 
 using roiav::check;
@@ -419,4 +419,4 @@ void RoiEncoder::flush()
     drain();
 }
 
-} // namespace roi
+} // namespace smartvideo

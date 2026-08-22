@@ -4,7 +4,7 @@
 
 #include <vector>
 
-namespace roi {
+namespace smartvideo {
 
 class RoiMapBuilder {
 public:
@@ -22,4 +22,4 @@ public:
         const Quality& quality, int width, int height) const;
 };
 
-} // namespace roi
+} // namespace smartvideo

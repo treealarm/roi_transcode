@@ -1,7 +1,7 @@
 #include "frame_input.h"
 
 #include <cstring>
-namespace roi {
+namespace smartvideo {
 
 
 using roiav::check;
@@ -9,14 +9,14 @@ using roiav::fail;
 
 namespace {
 
-AVCodecID codec_id_of(roi::InputCodec c)
+AVCodecID codec_id_of(smartvideo::InputCodec c)
 {
     switch (c) {
-    case roi::InputCodec::H264:
+    case smartvideo::InputCodec::H264:
         return AV_CODEC_ID_H264;
-    case roi::InputCodec::H265:
+    case smartvideo::InputCodec::H265:
         return AV_CODEC_ID_HEVC;
-    case roi::InputCodec::Jpeg:
+    case smartvideo::InputCodec::Jpeg:
         return AV_CODEC_ID_MJPEG;
     default:
         return AV_CODEC_ID_NONE;
@@ -34,10 +34,10 @@ FrameDecoder::~FrameDecoder()
 }
 
 void FrameDecoder::open(
-    roi::InputCodec codec, const uint8_t* extradata, int extradata_size)
+    smartvideo::InputCodec codec, const uint8_t* extradata, int extradata_size)
 {
     m_codec = codec;
-    if (codec == roi::InputCodec::Raw) {
+    if (codec == smartvideo::InputCodec::Raw) {
         return;
     }
 
@@ -64,7 +64,7 @@ void FrameDecoder::open(
     // A caller promising whole frames is usually right, but an Annex-B stream
     // arriving in arbitrary chunks is common enough that going without a parser
     // would fail quietly and confusingly. JPEG is self-delimiting.
-    if (codec == roi::InputCodec::H264 || codec == roi::InputCodec::H265) {
+    if (codec == smartvideo::InputCodec::H264 || codec == smartvideo::InputCodec::H265) {
         m_parser = av_parser_init(id);
     }
 }
@@ -85,7 +85,7 @@ void FrameDecoder::receive(const FrameCb& cb)
 void FrameDecoder::push(
     const uint8_t* data, size_t size, int64_t pts, const FrameCb& cb)
 {
-    if (m_codec == roi::InputCodec::Raw) {
+    if (m_codec == smartvideo::InputCodec::Raw) {
         fail("FrameDecoder::push called on a raw session");
     }
     if (!data || size == 0) {
@@ -134,11 +134,11 @@ void FrameDecoder::push(
 
 void FrameDecoder::flush(const FrameCb& cb)
 {
-    if (m_codec == roi::InputCodec::Raw || !m_dec.p) {
+    if (m_codec == smartvideo::InputCodec::Raw || !m_dec.p) {
         return;
     }
     check(avcodec_send_packet(m_dec.p, nullptr), "flush decoder");
     receive(cb);
 }
 
-} // namespace roi
+} // namespace smartvideo

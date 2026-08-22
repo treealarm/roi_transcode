@@ -9,11 +9,11 @@
 // dependency is FFmpeg, so another project can add_subdirectory(core) and link
 // roi_core.
 //
-//   roi::Report r = roi::transcode_file("in.mp4", "out.mp4", boxes, settings);
+//   smartvideo::Report r = smartvideo::transcode_file("in.mp4", "out.mp4", boxes, settings);
 //
-//   roi::Session s(params, &handler);   // or params.output_path for a file
+//   smartvideo::Session s(params, &handler);   // or params.output_path for a file
 //   s.submit(frame, regions);
-//   roi::Report r = s.finish();
+//   smartvideo::Report r = s.finish();
 
 #include "smartvideo/geometry.h"
 #include "smartvideo/packet_handler.h"
@@ -25,7 +25,7 @@
 #include <string>
 #include <vector>
 
-namespace roi {
+namespace smartvideo {
 
 // Transcodes `input_path` to `output_path`, keeping `boxes` sharp. Boxes lie on
 // the input's timeline and apply for Quality::hold_sec around their own moment.
@@ -35,4 +35,4 @@ Report transcode_file(const std::string& input_path,
     const std::string& output_path, const std::vector<Box>& boxes,
     const Settings& settings, std::atomic_bool* cancel = nullptr);
 
-} // namespace roi
+} // namespace smartvideo

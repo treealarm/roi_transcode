@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <map>
 
-namespace roi {
+namespace smartvideo {
 
 namespace {
 
@@ -286,4 +286,4 @@ Report Session::finish()
     return m_impl->report;
 }
 
-} // namespace roi
+} // namespace smartvideo

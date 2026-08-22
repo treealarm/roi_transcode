@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace roi {
+namespace smartvideo {
 
 // Signed QP delta per coding block, raster order. HEVC uses 32x32 CTUs,
 // H.264 16x16 macroblocks. This is the common representation a mask and a
@@ -57,4 +57,4 @@ QpDeltaMap qp_map_from_mask(const Mask& mask, const MaskMapping& mapping,
 std::vector<Rect> rects_from_qp_map(
     const QpDeltaMap& map, int max_regions, int* dropped = nullptr);
 
-} // namespace roi
+} // namespace smartvideo

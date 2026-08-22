@@ -28,7 +28,7 @@ RoiJson load_roi_json(const std::string& path)
 
     if (root.contains("kinds") && root["kinds"].is_object()) {
         for (auto it = root["kinds"].begin(); it != root["kinds"].end(); ++it) {
-            roi::KindQuality cfg;
+            smartvideo::KindQuality cfg;
             cfg.qp_delta = it.value().value("qp_delta", -6);
             cfg.pad = it.value().value("pad_norm", 0.02);
             doc.quality.kinds.emplace(it.key(), cfg);
@@ -47,7 +47,7 @@ RoiJson load_roi_json(const std::string& path)
     }
 
     for (const auto& row : root["samples"]) {
-        roi::Box b;
+        smartvideo::Box b;
         b.t_sec = row.value("t", 0.0);
         b.kind = row.value("kind", std::string{});
         b.x = row.value("bbox_x", 0.0f);

@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace roi {
+namespace smartvideo {
 
 // Which backend does the encoding. Says nothing about the codec -- the same
 // silicon encodes both, and conflating the two is what made the old X265 name
@@ -118,4 +118,4 @@ struct Rect {
     int qp_delta = 0;
 };
 
-} // namespace roi
+} // namespace smartvideo

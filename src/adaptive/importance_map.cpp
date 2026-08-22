@@ -11,7 +11,7 @@
 #include <cmath>
 #include <cstdlib>
 
-namespace roi {
+namespace smartvideo {
 
 namespace {
 
@@ -114,4 +114,4 @@ QpDeltaMap QpDeltaMapBuilder::build(
     return m;
 }
 
-} // namespace roi
+} // namespace smartvideo

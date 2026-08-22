@@ -12,7 +12,7 @@
 #include <cstdint>
 #include <string>
 
-namespace roi {
+namespace smartvideo {
 
 struct EncodedPacket {
     const uint8_t* data = nullptr;
@@ -45,4 +45,4 @@ public:
     virtual void on_end() {}
 };
 
-} // namespace roi
+} // namespace smartvideo
