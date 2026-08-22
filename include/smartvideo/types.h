@@ -2,6 +2,8 @@
 
 // The vocabulary both entry points share.
 
+#include "smartvideo/policy.h"
+
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -90,6 +92,15 @@ struct Settings {
     int gop = 0;
     std::string preset = "medium";
     Quality quality;
+
+    /// §14. Only OBJECT_FIRST is implemented; the others are refused at open rather than
+    /// treated as the default, so asking for one and getting the other cannot happen.
+    QualityPolicy policy = QualityPolicy::OBJECT_FIRST;
+
+    /// §13 and §15. Declared so a caller has somewhere to put values it already has;
+    /// neither is acted on yet, and both structs document what that means.
+    TemporalROIConfig temporal;
+    RateControlPolicy rate_control;
     // Muxer "movflags", file output only. Empty leaves the container default;
     // a ta_vms archive clip needs fragmented mp4 to stay playable.
     std::string movflags;

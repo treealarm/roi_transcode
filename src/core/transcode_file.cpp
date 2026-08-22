@@ -78,6 +78,7 @@ Report transcode_file(const std::string& input_path,
     ep.height = dec.p->height;
     ep.fps = guess_fps(in_v, dec.p);
     ep.kind = settings.encoder;
+    ep.policy = settings.policy;
     ep.codec = settings.codec;
     ep.crf = settings.crf;
     ep.gop = settings.gop;

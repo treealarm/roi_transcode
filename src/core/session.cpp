@@ -232,6 +232,7 @@ Session::Session(const SessionParams& params, PacketHandler* handler)
     ep.time_base =
         AVRational{params.time_base_num, std::max(params.time_base_den, 1)};
     ep.kind = params.settings.encoder;
+    ep.policy = params.settings.policy;
     ep.codec = params.settings.codec;
     ep.crf = params.settings.crf;
     ep.gop = params.settings.gop;
@@ -259,6 +260,14 @@ std::string Session::encoder_name() const
 
 void Session::submit(const Frame& frame, const Regions& regions)
 {
+    // Refused here rather than further in: a memory type the encoder cannot read would
+    // otherwise be interpreted as whatever it happens to look like, and the caller would
+    // get a picture instead of an answer.
+    if (!memory_type_supported(frame.memory)) {
+        roiav::fail(std::string("frame memory type not supported: ")
+            + memory_type_name(frame.memory));
+    }
+
     if (m_impl->params.codec == InputCodec::Raw) {
         AVFrame* f = m_impl->wrapper.p;
         av_frame_unref(f);

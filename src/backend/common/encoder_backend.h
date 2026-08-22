@@ -36,6 +36,8 @@ struct EncoderParams {
     int crf = 28;
     int gop = 0;
     std::string preset = "medium";
+    /// §14; only OBJECT_FIRST opens, see RoiEncoder::open_deferred.
+    QualityPolicy policy = QualityPolicy::OBJECT_FIRST;
 };
 
 /// An encoder that opened, plus whatever the backend needed to open it. Ownership lives

@@ -3,6 +3,7 @@
 // Frames in, encoded packets out -- for a caller that has no file to hand over.
 
 #include "smartvideo/geometry.h"
+#include "smartvideo/memory.h"
 #include "smartvideo/packet_handler.h"
 #include "smartvideo/report.h"
 #include "smartvideo/types.h"
@@ -17,6 +18,10 @@ namespace smartvideo {
 
 // One frame on its way in: either raw planes or one encoded access unit.
 struct Frame {
+    /// Where the pixels are. Only CPU and AVFRAME are accepted today; anything else is
+    /// refused by submit() with the type named, rather than encoded as noise.
+    MemoryType memory = MemoryType::CPU;
+
     // Raw form. `pix_fmt` is an AVPixelFormat value; planes are not copied.
     const uint8_t* plane[4] = {nullptr, nullptr, nullptr, nullptr};
     int stride[4] = {0, 0, 0, 0};

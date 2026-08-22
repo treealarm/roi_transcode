@@ -104,7 +104,7 @@ if [[ ! -f "$SRC" ]]; then
 fi
 
 step "unit tests"
-for t in object_normalizer_test geometry_test public_api_test; do
+for t in object_normalizer_test object_geometry_test geometry_test public_api_test; do
     if [[ -x "${LIBBUILD}/${t}" ]]; then
         if "${LIBBUILD}/${t}" >/dev/null 2>&1; then pass "$t"; else fail "$t"; fi
     else

@@ -39,6 +39,7 @@ message(STATUS "smart-video-encoder FFmpeg: ${FFMPEG_INCLUDE_DIRS}")
 # ---------------------------------------------------------------------------
 add_library(smartvideo_adaptive STATIC
     src/adaptive/object_normalizer.cpp
+    src/adaptive/object_geometry.cpp
     src/adaptive/importance_map.cpp
     src/adaptive/qp_mapper.cpp
 )
@@ -61,6 +62,7 @@ add_library(smartvideo STATIC
     src/backend/ffmpeg/vaapi_backend.cpp
     src/backend/nvenc/nvenc_backend.cpp
     src/backend/software/software_backend.cpp
+    src/core/memory_type.cpp
     src/core/transcode_file.cpp
     src/core/roi_encoder.cpp
     src/core/file_mux_sink.cpp
@@ -94,6 +96,11 @@ if(SVE_BUILD_TESTS)
     target_link_libraries(object_normalizer_test PRIVATE smartvideo_adaptive)
     target_compile_options(object_normalizer_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME object_normalizer COMMAND object_normalizer_test)
+
+    add_executable(object_geometry_test tests/unit/object_geometry_test.cpp)
+    target_link_libraries(object_geometry_test PRIVATE smartvideo_adaptive)
+    target_compile_options(object_geometry_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME object_geometry COMMAND object_geometry_test)
 
     add_executable(geometry_test tests/unit/geometry_test.cpp)
     target_link_libraries(geometry_test PRIVATE smartvideo_adaptive)

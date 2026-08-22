@@ -191,6 +191,14 @@ EncoderCapabilities RoiEncoder::capabilities() const
 
 void RoiEncoder::open_deferred(const EncoderParams& params)
 {
+    if (params.policy != QualityPolicy::OBJECT_FIRST) {
+        // Refused rather than approximated. BALANCED and BITRATE_FIRST both need the
+        // bitrate budget of §15, and running OBJECT_FIRST while reporting otherwise would
+        // make every measurement taken against it wrong.
+        fail(std::format("quality policy {} is not implemented",
+            quality_policy_name(params.policy)));
+    }
+
     const bool h264 = params.codec == Codec::H264;
     // Which backends to try, and their libavcodec names. The order is the registry's
     // (backend/common/backend_registry.cpp); the names differ only by the codec prefix.
