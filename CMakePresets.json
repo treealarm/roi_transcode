@@ -2,41 +2,76 @@
   "version": 3,
   "configurePresets": [
     {
-      "name": "linux-default",
-      "displayName": "Linux Debug (vcpkg grpc)",
+      "name": "vcpkg-base",
+      "hidden": true,
       "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": {
+          "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+          "type": "FILEPATH"
+        }
+      }
+    },
+    {
+      "name": "linux-dev",
+      "inherits": "vcpkg-base",
+      "displayName": "Linux Debug, classic vcpkg (fast inner loop)",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "/mnt/wdblue/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "CMAKE_BUILD_TYPE": "Debug",
-        "ROI_BUILD_SVC": "ON"
+        "SVE_BUILD_INTEGRATION": "ON",
+        "$comment": "Manifest mode off deliberately: this preset reuses the tree already installed in VCPKG_ROOT, which is what makes a reconfigure take a second instead of rebuilding gRPC. The manifest presets are what a fresh checkout and the acceptance criteria use.",
+        "VCPKG_MANIFEST_MODE": "OFF"
+      }
+    },
+    {
+      "name": "linux-default",
+      "inherits": "vcpkg-base",
+      "displayName": "Linux Debug (library + tools + gRPC service)",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SVE_BUILD_INTEGRATION": "ON",
+        "VCPKG_MANIFEST_FEATURES": "intel;tools;service"
       }
     },
     {
       "name": "linux-release",
-      "displayName": "Linux Release (vcpkg grpc)",
-      "generator": "Ninja",
+      "inherits": "vcpkg-base",
+      "displayName": "Linux Release (library + tools + gRPC service)",
       "binaryDir": "${sourceDir}/build-release",
       "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "/mnt/wdblue/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "CMAKE_BUILD_TYPE": "Release",
-        "ROI_BUILD_SVC": "ON"
+        "SVE_BUILD_INTEGRATION": "ON",
+        "VCPKG_MANIFEST_FEATURES": "intel;tools;service"
       }
     },
     {
       "name": "linux-cli-only",
-      "displayName": "Linux CLI only (no gRPC, no repo protos)",
-      "generator": "Ninja",
+      "inherits": "vcpkg-base",
+      "displayName": "Linux Release, no gRPC (library + CLI)",
       "binaryDir": "${sourceDir}/build-cli",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "ROI_BUILD_SVC": "OFF"
+        "SVE_BUILD_INTEGRATION": "OFF",
+        "VCPKG_MANIFEST_FEATURES": "intel;tools"
+      }
+    },
+    {
+      "name": "linux-software-only",
+      "inherits": "vcpkg-base",
+      "displayName": "Linux Release, software encoders only (no Intel hardware)",
+      "binaryDir": "${sourceDir}/build-software",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SVE_BUILD_INTEGRATION": "OFF",
+        "VCPKG_MANIFEST_FEATURES": "tools"
       }
     },
     {
       "name": "windows-default",
+      "inherits": "vcpkg-base",
       "displayName": "Windows x64 Debug",
-      "generator": "Ninja",
       "binaryDir": "${sourceDir}/build",
       "architecture": {
         "value": "x64",
@@ -44,11 +79,8 @@
       },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_TOOLCHAIN_FILE": {
-          "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-          "type": "FILEPATH"
-        },
-        "ROI_BUILD_SVC": "ON"
+        "SVE_BUILD_INTEGRATION": "ON",
+        "VCPKG_MANIFEST_FEATURES": "tools;service"
       }
     }
   ]

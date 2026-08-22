@@ -1,0 +1,71 @@
+{
+  "$comment": [
+    "Manifest mode, required by the acceptance criteria (TZ v2.0 §48): the project must",
+    "configure through CMake + CMake Presets + vcpkg manifest on Ubuntu 24.04, amd64 and",
+    "arm64. Before this the toolchain path was hardcoded to one developer's machine and the",
+    "project configured nowhere else.",
+    "",
+    "The default dependency set is FFmpeg alone, and that is deliberate: the encoder library",
+    "depends on nothing else, which is what lets another project embed it with",
+    "add_subdirectory(). Everything past that -- gRPC, JSON, the service -- is our integration",
+    "and lives behind a feature."
+  ],
+  "name": "smart-video-encoder",
+  "version": "2.0.0",
+  "$comment-baseline": [
+    "builtin-baseline rather than a git default-registry in vcpkg-configuration.json: the",
+    "latter makes vcpkg fetch the whole registry over the network on first configure, even",
+    "when VCPKG_ROOT already is that clone. Measured here at over seven minutes and still",
+    "running. builtin-baseline pins the same versions using the checkout that is already",
+    "there, which every consumer has anyway.",
+    "",
+    "Add vcpkg-configuration.json when there is something for it to carry -- an overlay port",
+    "or a second registry. A file that exists only to match a directory listing, and costs a",
+    "network clone to do it, is worse than its absence."
+  ],
+  "builtin-baseline": "c5a15727ee70fddf0296f0d8aafc3f58916fefac",
+  "description": "Adaptive video encoding that distributes quality across a frame from external CV results",
+  "dependencies": [
+    {
+      "name": "ffmpeg",
+      "$comment": "Default features are avcodec/avdevice/avfilter/avformat/swresample/swscale; the ones listed here are added to them. gpl is required by x264 and x265.",
+      "features": [
+        "gpl",
+        "x264",
+        "x265",
+        "opus",
+        "vpx",
+        "aom",
+        "openssl"
+      ]
+    }
+  ],
+  "features": {
+    "intel": {
+      "description": "Intel hardware encoding: oneVPL/QSV with VA-API as the fallback path to the same iGPU",
+      "dependencies": [
+        {
+          "name": "ffmpeg",
+          "features": [
+            "qsv",
+            "vaapi"
+          ]
+        }
+      ]
+    },
+    "tools": {
+      "description": "The CLI and the smoke tool, which read roi.json. Not needed to embed the library",
+      "dependencies": [
+        "nlohmann-json"
+      ]
+    },
+    "service": {
+      "description": "The gRPC service -- ta_vms integration, not part of the library",
+      "dependencies": [
+        "grpc",
+        "nlohmann-json",
+        "protobuf"
+      ]
+    }
+  }
+}

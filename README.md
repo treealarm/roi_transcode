@@ -23,27 +23,48 @@ Everything comes from vcpkg: FFmpeg (with `qsv` and `vaapi`), nlohmann-json,
 protobuf and gRPC. Nothing is vendored.
 
 ```bash
-cmake -S . -B build
+export VCPKG_ROOT=/path/to/vcpkg
+cmake --preset linux-default
 cmake --build build -j
-./build/roi_map_builder_test
-./scripts/fetch-intel-qsv.sh   # once: iHD 25.2.4 + libmfx-gen, no sudo
+ctest --test-dir build
+./integration/scripts/fetch-intel-qsv.sh   # once: iHD 25.2.4 + libmfx-gen, no sudo
 ```
 
-Presets: `linux-default` (Debug + gRPC), `linux-release`, `linux-cli-only`
-(no gRPC, no toolchain, no repo protos -- the module builds on its own).
+Presets:
+
+| Preset | vcpkg | Builds |
+|---|---|---|
+| `linux-default` | manifest | library + integration, Debug |
+| `linux-release` | manifest | library + integration, Release |
+| `linux-cli-only` | manifest | library + CLI, no gRPC |
+| `linux-software-only` | manifest | library only, no Intel hardware |
+| `linux-dev` | classic (reuses `VCPKG_ROOT`) | library + integration, Debug |
+
+`linux-dev` is the inner loop: it reuses the tree already installed in `VCPKG_ROOT`, so a
+reconfigure takes a second. The manifest presets are what a fresh checkout gets, and what
+the acceptance criteria ask for -- the first configure with them builds the dependency tree
+once.
+
+## Layout
+
+The tree follows TZ v2.0 §52, which describes the **library**. Everything of ours that the
+specification does not mention -- the gRPC service, its JSON adapter, the CLI, the ta_vms
+scripts -- lives under `integration/` and is built only with `SVE_BUILD_INTEGRATION=ON`.
+`check.sh` verifies that separation on every run by configuring the library with the
+integration switched off.
 
 ## Run
 
 ```bash
-source scripts/qsv-env.sh
-./build/roi-transcode --in clip.mp4 --roi testdata/roi.json --out out.mp4
-./scripts/roi-transcode --in clip.mp4 --roi testdata/roi.json --out out.mp4 \
+source integration/scripts/qsv-env.sh
+./build/integration/roi-transcode --in clip.mp4 --roi testdata/roi.json --out out.mp4
+./integration/scripts/roi-transcode --in clip.mp4 --roi testdata/roi.json --out out.mp4 \
   --encoder qsv --crf 28
-./build/roi-transcode --in clip.mp4 --roi testdata/roi.json --out out.mp4 \
+./build/integration/roi-transcode --in clip.mp4 --roi testdata/roi.json --out out.mp4 \
   --encoder vaapi
-./build/roi-transcode --in clip.mp4 --roi testdata/roi.json --out out.mp4 \
+./build/integration/roi-transcode --in clip.mp4 --roi testdata/roi.json --out out.mp4 \
   --encoder cpu
-./build/roi-transcode --in clip.mp4 --roi testdata/roi.json --out out.mp4 \
+./build/integration/roi-transcode --in clip.mp4 --roi testdata/roi.json --out out.mp4 \
   --codec h264
 ```
 
@@ -64,7 +85,7 @@ Ubuntu 24.04's iHD **24.1** + legacy MediaSDK returns empty HEVC packets
 **25.2.4** iHD + `libmfx-gen` into `runtime/` (no sudo). That is a GPU driver
 matched to the kernel and the card, which is why it is fetched rather than taken
 from vcpkg like everything else.
-With `source scripts/qsv-env.sh`, `--encoder qsv` encodes through
+With `source integration/scripts/qsv-env.sh`, `--encoder qsv` encodes through
 `hevc_qsv` → `mfxExtEncoderROI`. Without that env, auto falls back to
 `hevc_vaapi` (same iGPU, `VAEncMiscParameterBufferROI`).
 
@@ -78,7 +99,7 @@ Detector is not run here — pass boxes in JSON.
 ## Synth eval
 
 ```bash
-./scripts/make-synth.sh
+./integration/scripts/make-synth.sh
 ```
 
 Writes `testdata/synth.mp4` (plate `A123BC 77` on `testsrc2`) and
@@ -101,9 +122,9 @@ service contract).
 ```bash
 cmake --preset linux-default
 cmake --build build -j --target roi-transcode-svc
-source scripts/qsv-env.sh
+source integration/scripts/qsv-env.sh
 APP_ID=roitrc GRPC_ROI_BIND=127.0.0.1 GRPC_ROI_PORT=50061 \
-  ROI_ALLOWED_ROOTS="$PWD:/tmp" ./build/roi-transcode-svc
+  ROI_ALLOWED_ROOTS="$PWD:/tmp" ./build/integration/roi-transcode-svc
 ```
 
 | Env | Required | Meaning |
@@ -129,8 +150,8 @@ full-frame background ROI.
 Smoke (against a running svc) covers both:
 
 ```bash
-./build/roi_grpc_smoke 127.0.0.1:50061 clip.mp4 out.mp4 testdata/roi.json
-./build/roi_grpc_smoke 127.0.0.1:50061 clip.mp4 out.mp4 --stream
+./build/integration/roi_grpc_smoke 127.0.0.1:50061 clip.mp4 out.mp4 testdata/roi.json
+./build/integration/roi_grpc_smoke 127.0.0.1:50061 clip.mp4 out.mp4 --stream
 ```
 
 ## Using it from another project
@@ -171,9 +192,9 @@ if that stops being true.
 in between, and so the two modes can be checked against each other:
 
 ```bash
-./build/roi-frame-push --in clip.mp4 --roi roi.json --out out.mp4 --push raw
-./build/roi-frame-push --in clip.mp4 --roi roi.json --out out.mp4 --push bitstream
-./build/roi-frame-push --in clip.mp4 --roi roi.json --out out.mp4 --mask
+./build/integration/roi-frame-push --in clip.mp4 --roi roi.json --out out.mp4 --push raw
+./build/integration/roi-frame-push --in clip.mp4 --roi roi.json --out out.mp4 --push bitstream
+./build/integration/roi-frame-push --in clip.mp4 --roi roi.json --out out.mp4 --mask
 ```
 
 With boxes, `--push raw` and `--push bitstream` encode exactly the same pictures
@@ -188,8 +209,8 @@ deliberately differs in the encode itself.
 ## Synthetic scenes
 
 ```bash
-./scripts/make-scenes.py            # all of them, into testdata/scenes/
-./scripts/make-scenes.py moving
+./integration/scripts/make-scenes.py            # all of them, into testdata/scenes/
+./integration/scripts/make-scenes.py moving
 ```
 
 Five clips, each with a `truth.json` saying where the object is on every frame,
@@ -207,7 +228,7 @@ downstream would notice.
 ## Checks
 
 ```bash
-./scripts/check.sh
+./integration/scripts/check.sh
 ```
 
 One exit code, no step that needs a human to look at a picture: unit tests, the
