@@ -204,6 +204,16 @@ ABI libva между vcpkg и Ubuntu — ровно этот класс расх
 4. **NVENC — есть ли машина** для разработки и CI?
 5. **Датасеты:** кто и куда их кладёт. BVI-HD + BDD100K + MOT17 + UFPR-ALPR — это
    сотни гигабайт; ТЗ предлагает fast corpus 5–20 ГБ с checksum-манифестом (§26).
+7. **Согласны ли с расхождениями от §7?** Сверено с ТЗ построчно 2026-08-23; интерфейс
+   совпадает по составу, но отличается в четырёх местах, и все четыре перечислены в шапке
+   `include/smartvideo/encoder_backend.h`. Главное: **в §7 интерфейс stateful** (Configure,
+   затем SubmitFrame на том же объекте), у нас каждый метод принимает `BackendSession&`, а
+   `Configure` её возвращает. Причина продуктовая: один сервис перекодирует несколько
+   клипов одновременно, и stateful-бэкенд потребовал бы экземпляр на задание либо блокировку
+   вокруг общего. Остальные три — `GetCapabilities(Codec)` вместо без аргумента,
+   `SubmitFrame(IFrameBuffer&)` вместо `const Frame&`, и добавленный `CreateFrame`
+   (в §7 фабрики нет вовсе, а без неё каждый кадр стоит копии).
+
 6. **Какой глубины ждут от `IEncoderBackend` (§7)?** У нас все бэкенды идут через
    libavcodec: ROI уезжает в железо как side data `AV_FRAME_DATA_REGIONS_OF_INTEREST`,
    которую ffmpeg переводит в `mfxExtEncoderROI` (QSV), `VAEncMiscParameterBufferROI`

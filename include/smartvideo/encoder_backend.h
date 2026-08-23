@@ -13,6 +13,28 @@
 // accept. Submitting frames and draining packets is the same libavcodec pair for all of
 // them, so backend_common carries one implementation they inherit -- the interface matches
 // the specification without three copies of the same function behind it.
+//
+// Where this departs from the letter of §7, and why. Named here rather than discovered at
+// acceptance:
+//
+//   * §7's interface is stateful: Configure() then SubmitFrame() on the same object, with
+//     the open encoder held inside it. Every method here takes a BackendSession& instead,
+//     and Configure() returns one. A backend is therefore a stateless description of a way
+//     to encode, and one of them can serve many encodes at once -- which is what this
+//     library is for: a single service transcoding several clips concurrently would
+//     otherwise need a backend instance per job, or a lock around a shared one.
+//
+//   * GetCapabilities takes the output codec. §7 spells it without an argument; the answer
+//     genuinely differs per codec, see the comment on the method.
+//
+//   * SubmitFrame takes IFrameBuffer&, where §7 has `const Frame&`. Same idea, stricter
+//     shape: by the time a frame reaches a backend there is exactly one form of it, so
+//     there is nothing to be null and nothing to decide. See the comment on the method.
+//
+//   * CreateFrame is an addition. §7 has no frame factory; without one, a caller cannot
+//     write into the encoder's own memory and every submitted frame costs a copy.
+//
+//   * kind() is an addition, for reporting which backend opened under Encoder::Auto.
 
 #include "smartvideo/capabilities.h"
 #include "smartvideo/frame_buffer.h"
