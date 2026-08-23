@@ -6,6 +6,7 @@
 // aq-mode is 0 -- which is why it is set here and not left to the preset.
 
 #include "backend/common/backend_common.h"
+#include "preset.h"
 
 #include <string>
 
@@ -17,7 +18,7 @@ namespace smartvideo {
 
 namespace {
 
-class SoftwareBackend final : public IEncoderBackend {
+class SoftwareBackend final : public LibavBackend {
 public:
     Encoder kind() const override { return Encoder::Cpu; }
 
@@ -35,16 +36,19 @@ public:
         return c;
     }
 
-    bool Configure(BackendSession& out, const EncoderParams& p) const override
+    const char* codec_name(Codec codec) const override
     {
-        backend_common::apply_shared(out.enc.p, p);
+        return codec == Codec::H264 ? "libx264" : "libx265";
+    }
 
+    Status configure_context(LibavSession& out, const EncoderConfig& p) const override
+    {
         out.enc.p->pix_fmt = AV_PIX_FMT_YUV420P;
         out.sw_pix = AV_PIX_FMT_YUV420P;
-        av_opt_set(out.enc.p->priv_data, "preset", p.preset.c_str(), 0);
+        av_opt_set(out.enc.p->priv_data, "preset", libx26x_preset(p.preset), 0);
         av_opt_set(out.enc.p->priv_data, "crf", std::to_string(p.crf).c_str(), 0);
         av_opt_set(out.enc.p->priv_data, "aq-mode", "1", 0);
-        return true;
+        return Status::Ok();
     }
 };
 

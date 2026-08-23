@@ -3,7 +3,7 @@
 // way to exercise the frame mode without a gRPC client in between, and running
 // it against roi-transcode on the same input is the check that both modes agree.
 
-#include "smartvideo/roi.h"
+#include "smartvideo/smartvideo.h"
 #include "roi_json.h"
 
 #include <algorithm>
@@ -22,13 +22,27 @@ extern "C" {
 
 namespace {
 
+// AVPixelFormat to the library's own PixelFormat; the library does not know FFmpeg's
+// numbering, and this tool is on the FFmpeg side of that line.
+smartvideo::PixelFormat to_library_format(AVPixelFormat f)
+{
+    switch (f) {
+    case AV_PIX_FMT_YUV420P: return smartvideo::PixelFormat::YUV420P;
+    case AV_PIX_FMT_NV12:    return smartvideo::PixelFormat::NV12;
+    case AV_PIX_FMT_YUV422P: return smartvideo::PixelFormat::YUV422P;
+    case AV_PIX_FMT_YUV444P: return smartvideo::PixelFormat::YUV444P;
+    case AV_PIX_FMT_GRAY8:   return smartvideo::PixelFormat::GRAY8;
+    default:                 return smartvideo::PixelFormat::Unknown;
+    }
+}
+
 void usage()
 {
     std::fprintf(stderr,
         "Usage: roi-frame-push --in CLIP --roi roi.json --out OUT.mp4\n"
         "         [--push raw|bitstream] [--mask] [--encoder auto|qsv|vaapi|nvenc|cpu]\n"
         "         [--codec h265|h264]\n"
-        "         [--crf 28] [--gop N] [--preset medium]\n"
+        "         [--crf 28] [--gop N] [--preset balanced]\n"
         "\n"
         "Pushes frames into smartvideo::Session instead of transcoding a path.\n"
         "  --push raw        decode here, submit raw planes (default)\n"
@@ -105,7 +119,7 @@ struct Args {
     smartvideo::Codec codec = smartvideo::Codec::H265;
     int crf = 28;
     int gop = 0;
-    std::string preset = "medium";
+    std::string preset = "balanced";
 };
 
 int run(const Args& args)
@@ -147,7 +161,7 @@ int run(const Args& args)
     sp.settings.codec = args.codec;
     sp.settings.crf = args.crf;
     sp.settings.gop = args.gop;
-    sp.settings.preset = args.preset;
+    sp.settings.preset = smartvideo::preset_from_name(args.preset.c_str());
     sp.settings.quality = args.roi_doc.quality;
     // A rasterized box is on or off, so two levels is all the mask can express.
     if (args.use_mask) {
@@ -168,7 +182,7 @@ int run(const Args& args)
     std::vector<uint8_t> mask_buf(
         static_cast<size_t>(sp.width) * static_cast<size_t>(sp.height));
     smartvideo::Mask mask;
-    mask.data = mask_buf.data();
+    mask.data = mask_buf;
     mask.width = sp.width;
     mask.height = sp.height;
     mask.stride = sp.width;
@@ -178,10 +192,9 @@ int run(const Args& args)
         smartvideo::Regions r;
         if (args.use_mask) {
             rasterize(mask_buf, sp.width, sp.height, keep);
-            r.mask = &mask;
+            r.mask = mask;
         } else if (!keep.empty()) {
-            r.boxes = keep.data();
-            r.box_count = keep.size();
+            r.boxes = keep;
         }
         return r;
     };
@@ -199,11 +212,10 @@ int run(const Args& args)
                 const double t = static_cast<double>(pts) * av_q2d(vs->time_base);
                 std::vector<smartvideo::Box> keep;
                 const smartvideo::Regions r = regions_for(t, keep);
-                smartvideo::Frame f;
-                f.encoded = pkt->data;
-                f.encoded_size = static_cast<size_t>(pkt->size);
-                f.pts = pts;
-                session.submit(f, r);
+                session.submit(
+                    std::span<const uint8_t>(
+                        pkt->data, static_cast<size_t>(pkt->size)),
+                    r, pts);
             }
             av_packet_unref(pkt);
         }
@@ -243,16 +255,30 @@ int run(const Args& args)
                 const double t = static_cast<double>(pts) * av_q2d(vs->time_base);
                 std::vector<smartvideo::Box> keep;
                 const smartvideo::Regions rg = regions_for(t, keep);
-                smartvideo::Frame f;
+                smartvideo::PlaneBuffer::Plane planes[4];
                 for (int i = 0; i < 4; ++i) {
-                    f.plane[i] = frame->data[i];
-                    f.stride[i] = frame->linesize[i];
+                    if (!frame->data[i] || frame->linesize[i] <= 0) {
+                        continue;
+                    }
+                    // Chroma planes are shorter than the frame by the format's vertical
+                    // subsampling; claiming full height would hand the library a bound
+                    // wider than the buffer.
+                    int rows = frame->height;
+                    if (i > 0) {
+                        const AVPixFmtDescriptor* d = av_pix_fmt_desc_get(
+                            static_cast<AVPixelFormat>(frame->format));
+                        const int shift = d ? d->log2_chroma_h : 0;
+                        rows = (frame->height + (1 << shift) - 1) >> shift;
+                    }
+                    planes[i] = {std::span<uint8_t>(frame->data[i],
+                                     static_cast<size_t>(frame->linesize[i])
+                                         * static_cast<size_t>(rows)),
+                        frame->linesize[i]};
                 }
-                f.pix_fmt = frame->format;
-                f.width = frame->width;
-                f.height = frame->height;
-                f.pts = pts;
-                session.submit(f, rg);
+                smartvideo::PlaneBuffer pixels(frame->width, frame->height,
+                    to_library_format(static_cast<AVPixelFormat>(frame->format)),
+                    std::span<const smartvideo::PlaneBuffer::Plane>(planes, 4));
+                session.submit(pixels, rg, pts);
                 av_frame_unref(frame);
             }
         };

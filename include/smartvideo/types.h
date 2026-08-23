@@ -11,6 +11,13 @@
 
 namespace smartvideo {
 
+// A ratio, for frame rates and time bases. Spelled out here rather than borrowed from
+// FFmpeg so the public headers carry no libavutil types -- see encoder_backend.h.
+struct Rational {
+    int32_t num = 0;
+    int32_t den = 1;
+};
+
 // Which backend does the encoding. Says nothing about the codec -- the same
 // silicon encodes both, and conflating the two is what made the old X265 name
 // wrong the moment H.264 output existed.
@@ -24,6 +31,28 @@ enum class Encoder {
     // libx264 or libx265, whichever the codec asks for.
     Cpu,
 };
+
+// How much time the encoder may spend looking for a better answer.
+//
+// Five steps of our own, not the encoder's own word. Every backend names its presets
+// differently and the lists do not line up -- libx264 has ten from "ultrafast" to
+// "placebo", QSV has seven and no "ultrafast" at all, NVENC calls them p1 to p7. A string
+// passed straight through meant the caller had to know which backend would open before
+// they could name a preset, which is exactly what Encoder::Auto makes unknowable.
+//
+// So the caller says how much effort they are buying, and each backend spends it in its
+// own vocabulary.
+enum class Preset : int32_t {
+    Fastest,
+    Fast,
+    Balanced,
+    Slow,
+    Slowest,
+};
+
+const char* preset_name(Preset p);
+/// The name back, for a command line or a config file. Unknown text gives Balanced.
+Preset preset_from_name(const char* name);
 
 // What comes out. HEVC saves more, but a ta_vms archive is H.264 and one HLS
 // playlist stitches many clips: re-encoding some of them to HEVC would leave a
@@ -57,7 +86,7 @@ struct Box {
 // How much better than the background one kind of region gets.
 struct KindQuality {
     // Negative is sharper.
-    int qp_delta = -6;
+    int32_t qp_delta = -6;
     // Halo around the box as a fraction of the frame, encoded at half the box's
     // delta, which softens the QP step at the edge.
     double pad = 0.02;
@@ -68,29 +97,29 @@ struct KindQuality {
 // between the background and `mask_qp_delta_at_255`.
 struct Quality {
     // 0 leaves the background alone -- not the same as "unset".
-    int background_qp_delta = 6;
+    int32_t background_qp_delta = 6;
     // How long a box keeps applying after its sample, in seconds. Files only.
     double hold_sec = 0.25;
     // Cap on regions handed to the encoder: mfxExtEncoderROI takes at most 256
     // and a VA-API driver usually far fewer.
-    int max_regions = 32;
+    int32_t max_regions = 32;
     std::unordered_map<std::string, KindQuality> kinds;
 
     // Mask input only: the strength a mask value of 255 asks for, and how many
     // steps the 0..255 range is quantized into. Fewer steps means fewer
     // distinct deltas and so fewer rectangles to spend the budget on.
-    int mask_qp_delta_at_255 = -6;
-    int mask_levels = 4;
+    int32_t mask_qp_delta_at_255 = -6;
+    int32_t mask_levels = 4;
 };
 
 struct Settings {
     Encoder encoder = Encoder::Auto;
     Codec codec = Codec::H265;
     // Constant quantizer / CRF.
-    int crf = 28;
+    int32_t crf = 28;
     // Keyframe interval in frames; 0 means two seconds.
-    int gop = 0;
-    std::string preset = "medium";
+    int32_t gop = 0;
+    Preset preset = Preset::Balanced;
     Quality quality;
 
     /// §14. Only OBJECT_FIRST is implemented; the others are refused at open rather than
@@ -106,27 +135,14 @@ struct Settings {
     std::string movflags;
 };
 
-// A box resolved to pixels, with its halo. Internal to the geometry, but named
-// here because the geometry header is public for its tests.
-struct Detection {
-    int x1 = 0;
-    int y1 = 0;
-    int x2 = 0;
-    int y2 = 0;
-    int qp_delta = -6;
-    int pad_qp_delta = -3;
-    int pad_x = 0;
-    int pad_y = 0;
-};
-
 // What an encoder actually takes: a pixel rectangle and a QP delta. On overlap
 // the lowest index wins.
 struct Rect {
-    int top = 0;
-    int bottom = 0;
-    int left = 0;
-    int right = 0;
-    int qp_delta = 0;
+    int32_t top = 0;
+    int32_t bottom = 0;
+    int32_t left = 0;
+    int32_t right = 0;
+    int32_t qp_delta = 0;
 };
 
 } // namespace smartvideo

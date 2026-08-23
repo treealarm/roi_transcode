@@ -1,6 +1,6 @@
 #pragma once
 
-#include "smartvideo/roi.h"
+#include "smartvideo/smartvideo.h"
 
 #include <atomic>
 #include <chrono>

@@ -37,9 +37,22 @@ struct TemporalROIConfig {
     float temporal_smoothing = 0.0f;
     /// Ceiling on how fast a region's QP may move between frames, which is what stops the
     /// flicker §43 measures.
-    int max_qp_delta_per_frame = 0;
+    int32_t max_qp_delta_per_frame = 0;
     /// Extrapolate from the track's motion instead of holding the last box.
     bool use_track_prediction = false;
+
+    /// Whether the caller asked for any of this. All-zero means "unset", and a session
+    /// opens; anything else is refused at open with the field named.
+    ///
+    /// Declared-but-ignored is the worst state a setting can be in: the caller fills it,
+    /// nothing happens, and the encode looks like it worked. Refusing costs one comparison
+    /// and turns a silent no-op into an answer.
+    bool any_set() const
+    {
+        return max_missing_frames != 0 || confidence_decay != 1.0f
+            || spatial_smoothing != 0.0f || temporal_smoothing != 0.0f
+            || max_qp_delta_per_frame != 0 || use_track_prediction;
+    }
 };
 
 /// §15. The bitrate budget, spent on critical objects first.
@@ -56,6 +69,14 @@ struct RateControlPolicy {
     float max_peak_overshoot = 0.0f;
     /// How long the controller has to give back an overshoot.
     uint32_t recovery_window_ms = 0;
+
+    /// As TemporalROIConfig::any_set, and for the same reason. A caller who sets a target
+    /// bitrate and gets constant-quantizer output has been misled, not served.
+    bool any_set() const
+    {
+        return target_bitrate != 0 || max_average_overshoot != 0.0f
+            || max_peak_overshoot != 0.0f || recovery_window_ms != 0;
+    }
 };
 
 } // namespace smartvideo

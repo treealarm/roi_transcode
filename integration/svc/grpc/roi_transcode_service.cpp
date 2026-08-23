@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <span>
 #include <format>
 #include <algorithm>
 #include <memory>
@@ -15,9 +16,38 @@
 
 extern "C" {
 #include <libavutil/imgutils.h>
+#include <libavutil/pixfmt.h>
 }
 
 namespace {
+
+// AVPixelFormat to the library's own PixelFormat. The mapping lives on this side because
+// the wire format is ta_vms' contract with this service, not the library's -- the library
+// deliberately does not know FFmpeg's numbering, and this is the edge where that stops
+// mattering.
+smartvideo::PixelFormat to_library_format(AVPixelFormat f)
+{
+    switch (f) {
+    case AV_PIX_FMT_YUV420P: return smartvideo::PixelFormat::YUV420P;
+    case AV_PIX_FMT_NV12:    return smartvideo::PixelFormat::NV12;
+    case AV_PIX_FMT_YUV422P: return smartvideo::PixelFormat::YUV422P;
+    case AV_PIX_FMT_YUV444P: return smartvideo::PixelFormat::YUV444P;
+    case AV_PIX_FMT_GRAY8:   return smartvideo::PixelFormat::GRAY8;
+    default:                 return smartvideo::PixelFormat::Unknown;
+    }
+}
+
+smartvideo::Preset to_library_preset(roi::transcode::Preset p)
+{
+    switch (p) {
+    case roi::transcode::PRESET_FASTEST: return smartvideo::Preset::Fastest;
+    case roi::transcode::PRESET_FAST:    return smartvideo::Preset::Fast;
+    case roi::transcode::PRESET_SLOW:    return smartvideo::Preset::Slow;
+    case roi::transcode::PRESET_SLOWEST: return smartvideo::Preset::Slowest;
+    default:                             return smartvideo::Preset::Balanced;
+    }
+}
+
 int64_t to_unix_ms(std::chrono::system_clock::time_point tp)
 {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -102,9 +132,7 @@ void apply_settings(const ProtoSettings& in, smartvideo::Settings& out)
     if (in.gop() > 0) {
         out.gop = in.gop();
     }
-    if (!in.preset().empty()) {
-        out.preset = in.preset();
-    }
+    out.preset = to_library_preset(in.preset());
 
     const auto& q = in.roi();
     if (q.has_background_qp_delta()) {
@@ -248,8 +276,8 @@ public:
         auto* opened = msg.mutable_opened();
         opened->set_encoder_used(to_proto(info.encoder_used));
         opened->set_encoder_name(info.encoder_name);
-        if (info.extradata && info.extradata_size > 0) {
-            opened->set_extradata(info.extradata, info.extradata_size);
+        if (!info.extradata.empty()) {
+            opened->set_extradata(info.extradata.data(), info.extradata.size());
         }
         m_writer->Write(msg);
     }
@@ -261,7 +289,7 @@ public:
         out->set_pts(pkt.pts);
         out->set_dts(pkt.dts);
         out->set_key(pkt.key);
-        out->set_data(pkt.data, pkt.size);
+        out->set_data(pkt.data.data(), pkt.data.size());
         m_writer->Write(msg);
     }
 
@@ -342,6 +370,18 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
         // Raw planes arrive tightly packed, so the plane pointers are derived
         // rather than sent: one layout, described once in `open`.
         const auto pix = static_cast<AVPixelFormat>(open.pix_fmt());
+        // The wire still carries an AVPixelFormat number -- that is ta_vms' own contract
+        // with this service. The library has its own enum, so the translation happens here,
+        // at the edge, rather than leaking FFmpeg's numbering into the library's surface.
+        const smartvideo::PixelFormat frame_format =
+            sp.codec == smartvideo::InputCodec::Raw
+            ? to_library_format(pix)
+            : smartvideo::PixelFormat::Unknown;
+        if (sp.codec == smartvideo::InputCodec::Raw
+            && frame_format == smartvideo::PixelFormat::Unknown) {
+            return {grpc::StatusCode::INVALID_ARGUMENT,
+                "pix_fmt names a format this encoder does not take"};
+        }
         std::vector<smartvideo::Box> boxes;
         smartvideo::Mask mask;
 
@@ -355,22 +395,20 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
             smartvideo::Regions regions;
             boxes.clear();
             if (in.has_mask()) {
-                mask.data =
-                    reinterpret_cast<const uint8_t*>(in.mask().data().data());
+                mask.data = std::span<const uint8_t>(
+                    reinterpret_cast<const uint8_t*>(in.mask().data().data()),
+                    in.mask().data().size());
                 mask.width = in.mask().width();
                 mask.height = in.mask().height();
                 mask.stride = in.mask().width();
-                regions.mask = &mask;
+                regions.mask = mask;
             } else if (in.has_boxes()) {
                 for (const auto& b : in.boxes().boxes()) {
                     boxes.push_back(box_from_proto(b));
                 }
-                regions.boxes = boxes.data();
-                regions.box_count = boxes.size();
+                regions.boxes = boxes;
             }
 
-            smartvideo::Frame f;
-            f.pts = in.pts();
             const auto* bytes =
                 reinterpret_cast<const uint8_t*>(in.data().data());
             if (sp.codec == smartvideo::InputCodec::Raw) {
@@ -383,18 +421,32 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
                     return {grpc::StatusCode::INVALID_ARGUMENT,
                         "raw frame is smaller than the declared format needs"};
                 }
+                // Each plane's length is the distance to the next one, and for the last
+                // the remainder of what the frame occupies. Derived here rather than
+                // guessed inside the library, which is the point of PlaneBuffer asking.
+                smartvideo::PlaneBuffer::Plane described[4];
                 for (int i = 0; i < 4; ++i) {
-                    f.plane[i] = planes[i];
-                    f.stride[i] = strides[i];
+                    if (!planes[i]) {
+                        continue;
+                    }
+                    const uint8_t* next = nullptr;
+                    for (int j = i + 1; j < 4 && !next; ++j) {
+                        next = planes[j];
+                    }
+                    const std::size_t len = next
+                        ? static_cast<std::size_t>(next - planes[i])
+                        : static_cast<std::size_t>(needed)
+                            - static_cast<std::size_t>(planes[i] - bytes);
+                    described[i] = {std::span<uint8_t>(planes[i], len), strides[i]};
                 }
-                f.pix_fmt = pix;
-                f.width = sp.width;
-                f.height = sp.height;
+                smartvideo::PlaneBuffer pixels(sp.width, sp.height, frame_format,
+                    std::span<const smartvideo::PlaneBuffer::Plane>(described, 4));
+                session.submit(pixels, regions, in.pts());
             } else {
-                f.encoded = bytes;
-                f.encoded_size = in.data().size();
+                session.submit(
+                    std::span<const uint8_t>(bytes, in.data().size()), regions,
+                    in.pts());
             }
-            session.submit(f, regions);
         }
 
         const smartvideo::Report rep = session.finish();

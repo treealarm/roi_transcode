@@ -1,4 +1,4 @@
-#include "smartvideo/roi.h"
+#include "smartvideo/smartvideo.h"
 #include "roi_json.h"
 
 #include <cstdio>
@@ -12,7 +12,7 @@ void usage()
     std::fprintf(stderr,
         "Usage: roi-transcode --in CLIP --roi roi.json --out OUT.mp4\n"
         "         [--encoder auto|qsv|vaapi|nvenc|cpu] [--codec h265|h264]\n"
-        "         [--crf 28] [--gop N] [--preset medium]\n"
+        "         [--crf 28] [--gop N] [--preset balanced]\n"
         "\n"
         "ROI transcoder, HEVC by default. Target is Intel Quick Sync.\n"
         "--codec h264 keeps a ta_vms archive homogeneous, which matters because\n"
@@ -77,7 +77,7 @@ int main(int argc, char** argv)
             } else if (std::strcmp(a, "--gop") == 0) {
                 settings.gop = std::stoi(need("--gop"));
             } else if (std::strcmp(a, "--preset") == 0) {
-                settings.preset = need("--preset");
+                settings.preset = smartvideo::preset_from_name(need("--preset"));
             } else if (std::strcmp(a, "-h") == 0
                 || std::strcmp(a, "--help") == 0) {
                 usage();

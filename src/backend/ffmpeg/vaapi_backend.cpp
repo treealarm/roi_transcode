@@ -15,27 +15,7 @@ namespace smartvideo {
 
 namespace {
 
-bool init_vaapi_frames(roiav::Buffer& hw, roiav::Buffer& frames, int w, int h)
-{
-    av_buffer_unref(&frames.p);
-    frames.p = av_hwframe_ctx_alloc(hw.p);
-    if (!frames.p) {
-        return false;
-    }
-    auto* ctx = reinterpret_cast<AVHWFramesContext*>(frames.p->data);
-    ctx->format = AV_PIX_FMT_VAAPI;
-    ctx->sw_format = AV_PIX_FMT_NV12;
-    ctx->width = w;
-    ctx->height = h;
-    ctx->initial_pool_size = 20;
-    if (av_hwframe_ctx_init(frames.p) < 0) {
-        av_buffer_unref(&frames.p);
-        return false;
-    }
-    return true;
-}
-
-class VaapiBackend final : public IEncoderBackend {
+class VaapiBackend final : public LibavBackend {
 public:
     Encoder kind() const override { return Encoder::Vaapi; }
 
@@ -53,18 +33,22 @@ public:
         return c;
     }
 
-    bool Configure(BackendSession& out, const EncoderParams& p) const override
+    const char* codec_name(Codec codec) const override
     {
-        backend_common::apply_shared(out.enc.p, p);
+        return codec == Codec::H264 ? "h264_vaapi" : "hevc_vaapi";
+    }
 
+    Status configure_context(LibavSession& out, const EncoderConfig& p) const override
+    {
         if (!backend_common::open_hw_device(
                 out.hw_device, AV_HWDEVICE_TYPE_VAAPI, "/dev/dri/renderD128")
             && !backend_common::open_hw_device(
                 out.hw_device, AV_HWDEVICE_TYPE_VAAPI, nullptr)) {
-            return false;
+            return Status::Unavailable("no VA-API device on this machine");
         }
-        if (!init_vaapi_frames(out.hw_device, out.hw_frames, p.width, p.height)) {
-            return false;
+        if (!backend_common::init_hw_frames(out.hw_device, out.hw_frames,
+                AV_PIX_FMT_VAAPI, AV_PIX_FMT_NV12, p.width, p.height, 20)) {
+            return Status::Unavailable("VA-API device opened but allocates no frames");
         }
 
         out.enc.p->pix_fmt = AV_PIX_FMT_VAAPI;
@@ -73,7 +57,7 @@ public:
         out.hw_upload = true;
         av_opt_set_int(out.enc.p->priv_data, "qp", p.crf, 0);
         av_opt_set(out.enc.p->priv_data, "rc_mode", "CQP", 0);
-        return true;
+        return Status::Ok();
     }
 };
 

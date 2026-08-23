@@ -2,6 +2,7 @@
 
 // Frames in, encoded packets out -- for a caller that has no file to hand over.
 
+#include "smartvideo/frame_buffer.h"
 #include "smartvideo/geometry.h"
 #include "smartvideo/memory.h"
 #include "smartvideo/packet_handler.h"
@@ -11,48 +12,32 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
 namespace smartvideo {
 
-// One frame on its way in: either raw planes or one encoded access unit.
-struct Frame {
-    /// Where the pixels are. Only CPU and AVFRAME are accepted today; anything else is
-    /// refused by submit() with the type named, rather than encoded as noise.
-    MemoryType memory = MemoryType::CPU;
-
-    // Raw form. `pix_fmt` is an AVPixelFormat value; planes are not copied.
-    const uint8_t* plane[4] = {nullptr, nullptr, nullptr, nullptr};
-    int stride[4] = {0, 0, 0, 0};
-    int pix_fmt = -1;
-    int width = 0;
-    int height = 0;
-
-    // Compressed form, used when the session was opened with a codec.
-    const uint8_t* encoded = nullptr;
-    std::size_t encoded_size = 0;
-
-    // In the session's time base.
-    int64_t pts = 0;
-};
-
 // What to keep sharp in this frame: a mask, or boxes, or neither.
+//
+// Both carry their own length. The previous shape was a pointer and a count the caller
+// filled in separately, which meant a wrong count read past the end of their buffer and
+// nothing here could tell.
 struct Regions {
-    const Mask* mask = nullptr;
-    const Box* boxes = nullptr;
-    std::size_t box_count = 0;
+    /// Takes precedence over `boxes` when it holds a consistent mask.
+    Mask mask;
+    std::span<const Box> boxes;
 };
 
 struct SessionParams {
-    int width = 0;
-    int height = 0;
-    // Units of Frame::pts.
-    int time_base_num = 1;
-    int time_base_den = 1000;
+    int32_t width = 0;
+    int32_t height = 0;
+    // Units of the `pts` passed to submit().
+    int32_t time_base_num = 1;
+    int32_t time_base_den = 1000;
     // Only sets the encoder's frame rate and the default GOP.
-    int fps_num = 25;
-    int fps_den = 1;
+    int32_t fps_num = 25;
+    int32_t fps_den = 1;
 
     InputCodec codec = InputCodec::Raw;
     // Codec configuration for AVCC/HVCC input; empty for Annex-B or raw.
@@ -73,9 +58,21 @@ public:
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;
 
-    // One frame with its regions. A frame carrying neither a mask nor boxes is
-    // encoded with the background treatment alone.
-    void submit(const Frame& frame, const Regions& regions);
+    // One frame with its regions, in whichever form the caller has it. A frame carrying
+    // neither a mask nor boxes is encoded with the background treatment alone.
+    //
+    // Two overloads rather than one struct with three optional shapes in it. The struct
+    // could be filled wrongly in ways nothing could detect -- planes and an access unit at
+    // once, or neither -- and every caller paid for that ambiguity by reading submit() to
+    // find out which field mattered. There is nothing here that can be null.
+    //
+    // `pixels` is for a session opened with InputCodec::Raw; wrap planes you already have
+    // in a PlaneBuffer, or take a buffer from the encoder's own memory.
+    void submit(IFrameBuffer& pixels, const Regions& regions, int64_t pts);
+
+    // `access_unit` is for a session opened with a codec: one compressed frame, decoded
+    // here and re-encoded with the regions applied.
+    void submit(std::span<const uint8_t> access_unit, const Regions& regions, int64_t pts);
 
     // Which backend opened. Known as soon as the session exists, and with
     // Encoder::Auto that is the only way to find out.

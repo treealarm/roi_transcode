@@ -1,6 +1,6 @@
 #include "job/roi_job_manager.h"
 
-#include "smartvideo/roi.h"
+#include "smartvideo/smartvideo.h"
 
 #include <format>
 #include <stdexcept>

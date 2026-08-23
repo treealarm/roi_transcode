@@ -66,6 +66,16 @@ struct CodecCtx {
 struct Frame {
     AVFrame* p = nullptr;
     Frame() : p(av_frame_alloc()) {}
+    Frame(Frame&& o) noexcept : p(o.p) { o.p = nullptr; }
+    Frame& operator=(Frame&& o) noexcept
+    {
+        if (this != &o) {
+            av_frame_free(&p);
+            p = o.p;
+            o.p = nullptr;
+        }
+        return *this;
+    }
     ~Frame() { av_frame_free(&p); }
     Frame(const Frame&) = delete;
     Frame& operator=(const Frame&) = delete;
@@ -74,6 +84,16 @@ struct Frame {
 struct Packet {
     AVPacket* p = nullptr;
     Packet() : p(av_packet_alloc()) {}
+    Packet(Packet&& o) noexcept : p(o.p) { o.p = nullptr; }
+    Packet& operator=(Packet&& o) noexcept
+    {
+        if (this != &o) {
+            av_packet_free(&p);
+            p = o.p;
+            o.p = nullptr;
+        }
+        return *this;
+    }
     ~Packet() { av_packet_free(&p); }
     Packet(const Packet&) = delete;
     Packet& operator=(const Packet&) = delete;
@@ -82,6 +102,16 @@ struct Packet {
 struct Sws {
     SwsContext* p = nullptr;
     Sws() = default;
+    Sws(Sws&& o) noexcept : p(o.p) { o.p = nullptr; }
+    Sws& operator=(Sws&& o) noexcept
+    {
+        if (this != &o) {
+            reset();
+            p = o.p;
+            o.p = nullptr;
+        }
+        return *this;
+    }
     Sws(const Sws&) = delete;
     Sws& operator=(const Sws&) = delete;
     void reset()

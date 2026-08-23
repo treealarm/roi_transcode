@@ -19,6 +19,16 @@ struct Report {
     int64_t bytes = 0;
     // Regions the encoder's region budget could not take.
     int64_t regions_dropped = 0;
+
+    // How many frames had to be converted to the encoder's pixel format, and how many had
+    // to be uploaded to the GPU, before the encoder would take them.
+    //
+    // Reported rather than assumed. "Zero-copy" is otherwise a claim nobody can check: a
+    // frame from CreateFrame that the caller filled in place leaves both at zero, and a
+    // frame that merely looked like one leaves a count behind. Both being non-zero is not
+    // a fault -- it is what submitting ordinary planes to a hardware encoder costs.
+    int64_t frames_converted = 0;
+    int64_t frames_uploaded = 0;
 };
 
 } // namespace smartvideo

@@ -21,7 +21,7 @@ Mask mask_of(std::vector<uint8_t>& buf, int w, int h)
 {
     buf.assign(static_cast<size_t>(w) * h, 0);
     Mask m;
-    m.data = buf.data();
+    m.data = buf;
     m.width = w;
     m.height = h;
     m.stride = w;

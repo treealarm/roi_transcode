@@ -1,10 +1,26 @@
 #pragma once
 
-// ROI-aware HEVC encoding: keep the regions a detector found sharp, and spend
-// fewer bits on everything else.
+// smart-video-encoder: the one header to include.
+//
+//   #include "smartvideo/smartvideo.h"
+//
+// Adaptive encoding -- keep the regions a detector found sharp, and spend fewer bits on
+// everything else.
+//
+// Named after the library rather than after a feature. It was roi.h, from when the whole
+// thing was called roi_transcode; a consumer should not have to know that history to find
+// the door.
+//
+// Every other header here is self-contained and can be included on its own -- a caller who
+// only writes a PacketHandler needs packet_handler.h and nothing else. The
+// public_headers_selfcontained target is what keeps that true: one generated translation
+// unit per header, compiled against include/ and nothing else. This header exists so that
+// not knowing which one you need is also an answer.
 //
 // This is the whole public surface. Two ways in -- hand over a file, or push
 // frames -- and both take the same Settings and give back the same Report.
+// IEncoderBackend (TZ v2.0 §7) comes with it: a reader who wants to know what the
+// hardware paths look like should find them here, not by digging through src/.
 // Nothing here needs gRPC, Dapr, JSON or anything else from ta_vms; the only
 // dependency is FFmpeg, so another project can add_subdirectory(core) and link
 // roi_core.
@@ -15,7 +31,12 @@
 //   s.submit(frame, regions);
 //   smartvideo::Report r = s.finish();
 
+#include "smartvideo/capabilities.h"
+#include "smartvideo/encoder_backend.h"
+#include "smartvideo/frame_buffer.h"
 #include "smartvideo/geometry.h"
+#include "smartvideo/memory.h"
+#include "smartvideo/object.h"
 #include "smartvideo/packet_handler.h"
 #include "smartvideo/report.h"
 #include "smartvideo/session.h"

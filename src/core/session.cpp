@@ -7,6 +7,7 @@
 #include "object_normalizer.h"
 
 #include <algorithm>
+#include <span>
 #include <map>
 
 namespace smartvideo {
@@ -26,10 +27,9 @@ struct HeldRegions {
     {
         Regions r;
         if (has_mask) {
-            r.mask = &mask;
+            r.mask = mask;
         } else if (!boxes.empty()) {
-            r.boxes = boxes.data();
-            r.box_count = boxes.size();
+            r.boxes = boxes;
         }
         return r;
     }
@@ -38,22 +38,22 @@ struct HeldRegions {
 HeldRegions hold(const Regions& in)
 {
     HeldRegions h;
-    if (in.mask && in.mask->data && in.mask->width > 0 && in.mask->height > 0) {
-        const int stride = in.mask->stride > 0 ? in.mask->stride : in.mask->width;
+    if (in.mask.consistent()) {
+        const int32_t stride = in.mask.stride > 0 ? in.mask.stride : in.mask.width;
         h.mask_bytes.resize(
-            static_cast<size_t>(in.mask->width) * in.mask->height);
-        for (int y = 0; y < in.mask->height; ++y) {
-            std::copy_n(in.mask->data + static_cast<size_t>(y) * stride,
-                in.mask->width,
-                h.mask_bytes.begin() + static_cast<size_t>(y) * in.mask->width);
+            static_cast<size_t>(in.mask.width) * in.mask.height);
+        for (int32_t y = 0; y < in.mask.height; ++y) {
+            std::copy_n(in.mask.data.data() + static_cast<size_t>(y) * stride,
+                in.mask.width,
+                h.mask_bytes.begin() + static_cast<size_t>(y) * in.mask.width);
         }
-        h.mask.data = h.mask_bytes.data();
-        h.mask.width = in.mask->width;
-        h.mask.height = in.mask->height;
-        h.mask.stride = in.mask->width;
+        h.mask.data = h.mask_bytes;
+        h.mask.width = in.mask.width;
+        h.mask.height = in.mask.height;
+        h.mask.stride = in.mask.width;
         h.has_mask = true;
-    } else if (in.boxes && in.box_count > 0) {
-        h.boxes.assign(in.boxes, in.boxes + in.box_count);
+    } else if (!in.boxes.empty()) {
+        h.boxes.assign(in.boxes.begin(), in.boxes.end());
     }
     return h;
 }
@@ -107,9 +107,10 @@ struct Session::Impl : PacketSink {
             StreamInfo info;
             info.width = enc->width;
             info.height = enc->height;
-            info.extradata = enc->extradata;
-            info.extradata_size = static_cast<std::size_t>(
-                enc->extradata_size > 0 ? enc->extradata_size : 0);
+            if (enc->extradata && enc->extradata_size > 0) {
+                info.extradata = std::span<const uint8_t>(enc->extradata,
+                    static_cast<std::size_t>(enc->extradata_size));
+            }
             info.encoder_used = report.encoder_used;
             info.encoder_name = report.encoder_name;
             handler->on_open(info);
@@ -122,8 +123,8 @@ struct Session::Impl : PacketSink {
         report.bytes += pkt->size;
         if (handler) {
             EncodedPacket out;
-            out.data = pkt->data;
-            out.size = static_cast<std::size_t>(pkt->size);
+            out.data = std::span<const uint8_t>(
+                pkt->data, static_cast<std::size_t>(pkt->size));
             out.pts = pkt->pts;
             out.dts = pkt->dts;
             out.key = (pkt->flags & AV_PKT_FLAG_KEY) != 0;
@@ -164,27 +165,24 @@ struct Session::Impl : PacketSink {
 
     std::vector<Rect> rects_for(const Regions& regions)
     {
-        const int w = params.width;
-        const int h = params.height;
+        const int32_t w = params.width;
+        const int32_t h = params.height;
 
-        if (regions.mask && regions.mask->data) {
+        if (regions.mask.consistent()) {
             // The mask has no kind names: it interpolates between the
             // background and the strongest strength the settings name.
             MaskMapping mapping;
             mapping.qp_delta_at_0 = params.settings.quality.background_qp_delta;
             mapping.qp_delta_at_255 = params.settings.quality.mask_qp_delta_at_255;
             mapping.levels = params.settings.quality.mask_levels;
-            const QpDeltaMap grid = qp_map_from_mask(*regions.mask, mapping, w, h);
-            int dropped = 0;
+            const QpDeltaMap grid = qp_map_from_mask(regions.mask, mapping, w, h);
+            int32_t dropped = 0;
             auto rects = rects_from_qp_map(grid, region_budget(), &dropped);
             report.regions_dropped += dropped;
             return rects;
         }
 
-        std::vector<Box> box_list;
-        if (regions.boxes && regions.box_count > 0) {
-            box_list.assign(regions.boxes, regions.boxes + regions.box_count);
-        }
+        const std::vector<Box> box_list(regions.boxes.begin(), regions.boxes.end());
         const auto dets =
             builder.detections_from(box_list, params.settings.quality, w, h);
         auto rects =
@@ -195,6 +193,14 @@ struct Session::Impl : PacketSink {
             rects.resize(static_cast<size_t>(budget));
         }
         return rects;
+    }
+
+    // Pixels the caller owns, handed straight to the encoder. No decode, no wrapping:
+    // this is the path a factory frame takes, and the one where zero copies is possible.
+    void encode_buffer(IFrameBuffer& pixels, const Regions& regions, int64_t pts)
+    {
+        encoder.encode_buffer(pixels, rects_for(regions), pts);
+        ++report.frames;
     }
 
     void encode(AVFrame* frame, const Regions& regions, int64_t pts)
@@ -225,14 +231,16 @@ Session::Session(const SessionParams& params, PacketHandler* handler)
         params.extradata.empty() ? nullptr : params.extradata.data(),
         static_cast<int>(params.extradata.size()));
 
-    EncoderParams ep;
+    EncoderConfig ep;
     ep.width = params.width;
     ep.height = params.height;
-    ep.fps = AVRational{params.fps_num, std::max(params.fps_den, 1)};
+    ep.fps = Rational{params.fps_num, std::max(params.fps_den, 1)};
     ep.time_base =
-        AVRational{params.time_base_num, std::max(params.time_base_den, 1)};
+        Rational{params.time_base_num, std::max(params.time_base_den, 1)};
     ep.kind = params.settings.encoder;
     ep.policy = params.settings.policy;
+    ep.temporal = params.settings.temporal;
+    ep.rate_control = params.settings.rate_control;
     ep.codec = params.settings.codec;
     ep.crf = params.settings.crf;
     ep.gop = params.settings.gop;
@@ -258,39 +266,32 @@ std::string Session::encoder_name() const
     return m_impl->report.encoder_name;
 }
 
-void Session::submit(const Frame& frame, const Regions& regions)
+void Session::submit(IFrameBuffer& pixels, const Regions& regions, int64_t pts)
 {
-    // Refused here rather than further in: a memory type the encoder cannot read would
-    // otherwise be interpreted as whatever it happens to look like, and the caller would
-    // get a picture instead of an answer.
-    if (!memory_type_supported(frame.memory)) {
-        roiav::fail(std::string("frame memory type not supported: ")
-            + memory_type_name(frame.memory));
+    if (m_impl->params.codec != InputCodec::Raw) {
+        roiav::fail("this session was opened with a codec; submit an access unit");
     }
+    m_impl->encode_buffer(pixels, regions, pts);
+}
 
+void Session::submit(
+    std::span<const uint8_t> access_unit, const Regions& regions, int64_t pts)
+{
     if (m_impl->params.codec == InputCodec::Raw) {
-        AVFrame* f = m_impl->wrapper.p;
-        av_frame_unref(f);
-        f->format = frame.pix_fmt;
-        f->width = frame.width > 0 ? frame.width : m_impl->params.width;
-        f->height = frame.height > 0 ? frame.height : m_impl->params.height;
-        for (int i = 0; i < 4; ++i) {
-            f->data[i] = const_cast<uint8_t*>(frame.plane[i]);
-            f->linesize[i] = frame.stride[i];
-        }
-        m_impl->encode(f, regions, frame.pts);
+        roiav::fail("this session was opened for raw frames; submit pixels");
+    }
+    if (access_unit.empty()) {
         return;
     }
-
-    m_impl->pending.emplace(frame.pts, hold(regions));
-    m_impl->decoder.push(frame.encoded, frame.encoded_size, frame.pts,
+    m_impl->pending.emplace(pts, hold(regions));
+    m_impl->decoder.push(access_unit.data(), access_unit.size(), pts,
         [&](AVFrame* decoded) {
             const bool have_pts =
                 decoded->best_effort_timestamp != AV_NOPTS_VALUE;
-            const int64_t pts =
-                have_pts ? decoded->best_effort_timestamp : frame.pts;
-            const HeldRegions held = m_impl->take_pending(pts, have_pts);
-            m_impl->encode(decoded, held.view(), pts);
+            const int64_t decoded_pts =
+                have_pts ? decoded->best_effort_timestamp : pts;
+            const HeldRegions held = m_impl->take_pending(decoded_pts, have_pts);
+            m_impl->encode(decoded, held.view(), decoded_pts);
         });
 }
 
@@ -307,6 +308,8 @@ Report Session::finish()
         });
         m_impl->encoder.flush();
         m_impl->end();
+        m_impl->report.frames_converted = m_impl->encoder.frames_converted();
+        m_impl->report.frames_uploaded = m_impl->encoder.frames_uploaded();
     }
     return m_impl->report;
 }

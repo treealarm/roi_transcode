@@ -10,27 +10,34 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 
 namespace smartvideo {
 
+// One encoded access unit. `data` belongs to whoever handed it over and stays valid until
+// the next call on the same session -- copy it if you need it longer.
 struct EncodedPacket {
-    const uint8_t* data = nullptr;
-    std::size_t size = 0;
-    // In the session's time base.
+    // Borrowed: valid until the next call on the same session.
+    std::span<const uint8_t> data;
     int64_t pts = 0;
     int64_t dts = 0;
+    int64_t duration = 0;
     bool key = false;
+    // Units of pts, dts and duration. The session's time base on the way out to a handler,
+    // the encoder's on the way out of a backend -- which are the same thing unless the
+    // caller asked for their own.
+    Rational time_base{1, 1};
 };
 
 // Reported once, before any packet.
 struct StreamInfo {
-    int width = 0;
-    int height = 0;
+    int32_t width = 0;
+    int32_t height = 0;
     // Codec configuration for the output. A remote consumer needs it to decode
     // what follows.
-    const uint8_t* extradata = nullptr;
-    std::size_t extradata_size = 0;
+    // Borrowed for the length of the on_open call, and carrying its own length.
+    std::span<const uint8_t> extradata;
     // Which backend actually opened; with Encoder::Auto this is the only way
     // to find out.
     Encoder encoder_used = Encoder::Cpu;

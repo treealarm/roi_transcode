@@ -63,6 +63,8 @@ add_library(smartvideo STATIC
     src/backend/nvenc/nvenc_backend.cpp
     src/backend/software/software_backend.cpp
     src/core/memory_type.cpp
+    src/core/pixel_format.cpp
+    src/core/preset.cpp
     src/core/transcode_file.cpp
     src/core/roi_encoder.cpp
     src/core/file_mux_sink.cpp
@@ -113,6 +115,36 @@ if(SVE_BUILD_TESTS)
     target_link_libraries(public_api_test PRIVATE smartvideo)
     target_compile_options(public_api_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME public_api COMMAND public_api_test)
+
+    # Every public header on its own, compiled with include/ and nothing else in front of
+    # it. One translation unit per header, generated: a header that forgot an include of
+    # its own would still compile inside the umbrella, because whatever it needed had
+    # already been pulled in by a sibling above it. This is what makes "include only what
+    # you need" a property rather than an intention.
+    file(GLOB SVE_PUBLIC_HEADERS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/smartvideo/*.h)
+    set(SVE_SELFCONTAINED_SOURCES "")
+    foreach(header ${SVE_PUBLIC_HEADERS})
+        string(REPLACE "/" "_" stem "${header}")
+        string(REPLACE ".h" "" stem "${stem}")
+        set(generated "${CMAKE_CURRENT_BINARY_DIR}/selfcontained/${stem}.cpp")
+        file(WRITE "${generated}" "#include \"${header}\"\n")
+        list(APPEND SVE_SELFCONTAINED_SOURCES "${generated}")
+    endforeach()
+    add_library(public_headers_selfcontained OBJECT ${SVE_SELFCONTAINED_SOURCES})
+    target_include_directories(public_headers_selfcontained
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_options(public_headers_selfcontained PRIVATE ${SVE_WARNINGS})
+
+    # And this one holds the other half of that line. public_api_test links smartvideo, so
+    # it inherits ${FFMPEG_INCLUDE_DIRS} and would keep compiling if a public header
+    # started including libavcodec. This target sees include/ and nothing else, links
+    # nothing, and is the only place the "no FFmpeg in the public surface" claim is
+    # actually checked. It is a compile test: building it is passing it.
+    add_library(public_headers_isolated OBJECT tests/unit/public_headers_isolated.cpp)
+    target_include_directories(public_headers_isolated
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_options(public_headers_isolated PRIVATE ${SVE_WARNINGS})
 endif()
 
 if(SVE_BUILD_INTEGRATION)

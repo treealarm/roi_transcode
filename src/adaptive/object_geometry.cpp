@@ -31,13 +31,15 @@ BoundingBox extent_of(const Polygon& poly)
 
 BoundingBox extent_of(const Mask& mask)
 {
-    if (!mask.data || mask.width <= 0 || mask.height <= 0) {
+    // consistent() is the whole check: it says the span really holds the rows the
+    // dimensions claim, which is what the old pointer form could not express.
+    if (!mask.consistent()) {
         return {};
     }
     const int stride = mask.stride > 0 ? mask.stride : mask.width;
     int min_x = mask.width, max_x = -1, min_y = mask.height, max_y = -1;
     for (int y = 0; y < mask.height; ++y) {
-        const uint8_t* row = mask.data + static_cast<size_t>(y) * stride;
+        const uint8_t* row = mask.data.data() + static_cast<size_t>(y) * stride;
         for (int x = 0; x < mask.width; ++x) {
             if (row[x] == 0) {
                 continue;

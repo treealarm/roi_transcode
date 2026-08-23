@@ -1,71 +1,18 @@
 #include "roi_encoder.h"
 
+#include "backend/common/av_frame_buffer.h"
+#include "backend/common/backend_common.h"
 #include "packet_sink.h"
 
 #include <algorithm>
 #include <cstring>
 #include <format>
 
-extern "C" {
-#include <libavutil/hwcontext.h>
-#include <libavutil/opt.h>
-}
 namespace smartvideo {
 
 
 using roiav::check;
 using roiav::fail;
-
-namespace {
-
-void attach_roi(AVFrame* frame, const std::vector<Rect>& rects)
-{
-    av_frame_remove_side_data(frame, AV_FRAME_DATA_REGIONS_OF_INTEREST);
-    if (rects.empty()) {
-        return;
-    }
-    const int bytes =
-        static_cast<int>(sizeof(AVRegionOfInterest) * rects.size());
-    AVFrameSideData* sd = av_frame_new_side_data(
-        frame, AV_FRAME_DATA_REGIONS_OF_INTEREST, bytes);
-    if (!sd) {
-        fail("av_frame_new_side_data ROI");
-    }
-    auto* roi = reinterpret_cast<AVRegionOfInterest*>(sd->data);
-    for (size_t i = 0; i < rects.size(); ++i) {
-        roi[i].self_size = sizeof(AVRegionOfInterest);
-        roi[i].top = rects[i].top;
-        roi[i].bottom = rects[i].bottom;
-        roi[i].left = rects[i].left;
-        roi[i].right = rects[i].right;
-        const int qp = std::clamp(rects[i].qp_delta, -51, 51);
-        roi[i].qoffset = AVRational{qp, 51};
-    }
-}
-
-bool open_hw_device(roiav::Buffer& hw, AVHWDeviceType type, const char* device)
-{
-    av_buffer_unref(&hw.p);
-    return av_hwdevice_ctx_create(&hw.p, type, device, nullptr, 0) >= 0;
-}
-
-bool init_vaapi_frames(roiav::Buffer& hw, roiav::Buffer& frames, int w, int h)
-{
-    av_buffer_unref(&frames.p);
-    frames.p = av_hwframe_ctx_alloc(hw.p);
-    if (!frames.p) {
-        return false;
-    }
-    auto* ctx = reinterpret_cast<AVHWFramesContext*>(frames.p->data);
-    ctx->format = AV_PIX_FMT_VAAPI;
-    ctx->sw_format = AV_PIX_FMT_NV12;
-    ctx->width = w;
-    ctx->height = h;
-    ctx->initial_pool_size = 24;
-    return av_hwframe_ctx_init(frames.p) >= 0;
-}
-
-} // namespace
 
 const char* RoiEncoder::label() const
 {
@@ -87,256 +34,202 @@ const char* RoiEncoder::label() const
 
 namespace {
 
+const char* backend_name(Encoder kind)
+{
+    switch (kind) {
+    case Encoder::Qsv:   return "qsv";
+    case Encoder::Vaapi: return "vaapi";
+    case Encoder::Nvenc: return "nvenc";
+    default:             return "cpu";
+    }
+}
+
 // A throwaway encode of a single frame, for backends that ask for it. Ubuntu's older iHD
 // opens the QSV encoder happily and then returns empty packets, and only an actual encode
 // tells the two apart -- which is why IEncoderBackend::NeedsProbe exists rather than the
 // caller guessing which backends lie.
-bool probe_one_frame(BackendSession& a)
+//
+// Written entirely against the interface: a grey frame from the backend's own factory,
+// submitted and drained the way any caller would. It used to build an AVFrame by hand,
+// which meant the one piece of code whose job is to find out whether a backend works could
+// only ever have worked for libavcodec backends.
+bool probe_one_frame(const IEncoderBackend& backend, BackendSession& session)
 {
-    roiav::Frame f;
-    f.p->format = a.sw_pix;
-    f.p->width = a.enc.p->width;
-    f.p->height = a.enc.p->height;
-    if (av_frame_get_buffer(f.p, 32) < 0 || av_frame_make_writable(f.p) < 0) {
+    auto made = backend.CreateFrame(session, MemoryType::CPU);
+    if (!made) {
         return false;
     }
-    const int h = a.enc.p->height;
-    std::memset(f.p->data[0], 0, static_cast<size_t>(f.p->linesize[0]) * h);
-    if (f.p->data[1]) {
-        std::memset(f.p->data[1], 128,
-            static_cast<size_t>(f.p->linesize[1]) * ((h + 1) / 2));
-    }
-    f.p->pts = 0;
+    IFrameBuffer* buffer = made.value().get();
 
-    AVFrame* send = f.p;
-    roiav::Frame hw;
-    if (a.hw_upload) {
-        if (av_hwframe_get_buffer(a.enc.p->hw_frames_ctx, hw.p, 0) < 0
-            || av_hwframe_transfer_data(hw.p, f.p, 0) < 0) {
+    // Mid-grey: luma at 0, chroma at 128. Any content would do -- what is being tested is
+    // whether a frame comes back out at all. The spans carry their own length, so there is
+    // no height arithmetic here to get wrong.
+    const PlaneView y = buffer->plane(0);
+    std::fill(y.bytes.begin(), y.bytes.end(), uint8_t{0});
+    const PlaneView uv = buffer->plane(1);
+    std::fill(uv.bytes.begin(), uv.bytes.end(), uint8_t{128});
+    buffer->commit();
+
+    if (!backend.SubmitFrame(session, *buffer, BackendFrameControl{})) {
+        return false;
+    }
+    auto pkt = backend.ReceivePacket(session);
+    if (!pkt && pkt.status().code() == StatusCode::Again) {
+        if (!backend.Flush(session)) {
             return false;
         }
-        hw.p->pts = 0;
-        send = hw.p;
+        pkt = backend.ReceivePacket(session);
     }
-
-    if (avcodec_send_frame(a.enc.p, send) < 0) {
-        return false;
-    }
-    roiav::Packet pkt;
-    int r = avcodec_receive_packet(a.enc.p, pkt.p);
-    if (r == AVERROR(EAGAIN)) {
-        if (avcodec_send_frame(a.enc.p, nullptr) < 0) {
-            return false;
-        }
-        r = avcodec_receive_packet(a.enc.p, pkt.p);
-    }
-    return r >= 0;
-}
-
-
-// Allocates the context, lets the backend configure it, opens it, and honours a probe.
-// Everything here is the same whichever backend answered -- what differs is inside
-// Configure, which is the whole reason the interface exists.
-// `probe` is what stops the recursion below: the reopen after a successful probe must not
-// probe again, or the backend that asks for one never finishes opening.
-bool open_with(BackendSession& out, const IEncoderBackend& backend,
-    const AVCodec* codec, const EncoderParams& p, bool probe = true)
-{
-    out = BackendSession{};
-    out.kind = backend.kind();
-    out.enc.p = avcodec_alloc_context3(codec);
-    if (!out.enc.p) {
-        return false;
-    }
-    if (!backend.Configure(out, p)) {
-        out = BackendSession{};
-        return false;
-    }
-    if (avcodec_open2(out.enc.p, codec, nullptr) < 0) {
-        out = BackendSession{};
-        return false;
-    }
-    if (probe && backend.NeedsProbe()) {
-        const bool ok = probe_one_frame(out);
-        // The probe consumed the context either way: an encoder that has seen a frame
-        // cannot be handed back as fresh.
-        out = BackendSession{};
-        if (!ok) {
-            return false;
-        }
-        return open_with(out, backend, codec, p, false);
-    }
-    return true;
+    return pkt.ok();
 }
 
 } // namespace
 
-void RoiEncoder::open(const EncoderParams& params, PacketSink& sink)
+void RoiEncoder::open(const EncoderConfig& config, PacketSink& sink)
 {
-    open_deferred(params);
+    open_deferred(config);
     attach(sink);
 }
 
 void RoiEncoder::attach(PacketSink& sink)
 {
     m_sink = &sink;
-    m_sink->begin(m_enc.p);
+    m_sink->begin(session().enc.p);
 }
 
 EncoderCapabilities RoiEncoder::capabilities() const
 {
-    const IEncoderBackend* b = backend_for(m_kind);
-    return b ? b->GetCapabilities(m_codec) : EncoderCapabilities{};
+    return m_backend ? m_backend->GetCapabilities(m_codec) : EncoderCapabilities{};
 }
 
-void RoiEncoder::open_deferred(const EncoderParams& params)
+Result<FrameBufferPtr> RoiEncoder::create_frame(MemoryType memory)
 {
-    if (params.policy != QualityPolicy::OBJECT_FIRST) {
+    if (!m_backend || !m_session) {
+        return Status::Error("no encoder is open");
+    }
+    return m_backend->CreateFrame(*m_session.get(), memory);
+}
+
+void RoiEncoder::open_deferred(const EncoderConfig& config)
+{
+    if (config.policy != QualityPolicy::OBJECT_FIRST) {
         // Refused rather than approximated. BALANCED and BITRATE_FIRST both need the
         // bitrate budget of §15, and running OBJECT_FIRST while reporting otherwise would
         // make every measurement taken against it wrong.
         fail(std::format("quality policy {} is not implemented",
-            quality_policy_name(params.policy)));
+            quality_policy_name(config.policy)));
+    }
+    // Same rule for the two settings that exist only as declarations. A caller who asks
+    // for temporal smoothing or a bitrate target and gets neither has been misled; the
+    // encode would look like it worked, and any measurement taken against it would be
+    // wrong in a way nothing reveals.
+    if (config.temporal.any_set()) {
+        fail("TemporalROIConfig (TZ v2.0 section 13) is declared but not implemented; "
+             "leave it at its defaults");
+    }
+    if (config.rate_control.any_set()) {
+        fail("RateControlPolicy (TZ v2.0 section 15) is declared but not implemented; "
+             "the encoder runs at a constant quantizer");
     }
 
-    const bool h264 = params.codec == Codec::H264;
-    // Which backends to try, and their libavcodec names. The order is the registry's
-    // (backend/common/backend_registry.cpp); the names differ only by the codec prefix.
-    auto codec_name = [h264](Encoder kind) -> const char* {
-        switch (kind) {
-        case Encoder::Qsv:   return h264 ? "h264_qsv"   : "hevc_qsv";
-        case Encoder::Vaapi: return h264 ? "h264_vaapi" : "hevc_vaapi";
-        case Encoder::Nvenc: return h264 ? "h264_nvenc" : "hevc_nvenc";
-        default:             return h264 ? "libx264"    : "libx265";
-        }
-    };
-
-    BackendSession opened;
     std::string errors;
-    bool got = false;
-    for (const IEncoderBackend* backend : backend_chain(params.kind)) {
-        const char* name = codec_name(backend->kind());
-        const AVCodec* codec = avcodec_find_encoder_by_name(name);
-        if (!codec && backend->kind() == Encoder::Cpu) {
-            // A build without libx264/libx265 may still have some other encoder for the
-            // codec; better that than refusing to run at all.
-            codec = avcodec_find_encoder(h264 ? AV_CODEC_ID_H264 : AV_CODEC_ID_HEVC);
-        }
-        if (!codec) {
-            errors += std::format(" {}: not in FFmpeg;", name);
+    for (const IEncoderBackend& backend : backend_chain(config.kind)) {
+        auto opened = backend.Configure(config);
+        if (!opened) {
+            errors += std::format(" {};", opened.status().message());
             continue;
         }
-        if (open_with(opened, *backend, codec, params)) {
-            got = true;
-            break;
+        // Some backends open and only fail on the first frame. The probe consumes the
+        // context either way -- an encoder that has seen a frame cannot be handed back as
+        // fresh -- so a successful probe is followed by opening a second, untouched one.
+        if (backend.NeedsProbe()) {
+            const bool ok = probe_one_frame(backend, *opened.value().get());
+            opened.value().reset();
+            if (!ok) {
+                errors += std::format(" {}: opened but encodes nothing;",
+                    backend_name(backend.kind()));
+                continue;
+            }
+            opened = backend.Configure(config);
+            if (!opened) {
+                errors += std::format(" {};", opened.status().message());
+                continue;
+            }
         }
-        errors += std::format(" {}: open failed;", name);
+        m_backend = &backend;
+        m_kind = backend.kind();
+        m_session = std::move(opened.value());
+        break;
     }
-    if (!got) {
-        fail(std::format(
-            "no {} encoder available:{}", h264 ? "H.264" : "HEVC", errors));
+    if (!m_backend) {
+        fail(std::format("no {} encoder available:{}",
+            config.codec == Codec::H264 ? "H.264" : "HEVC", errors));
     }
 
-    m_kind = opened.kind;
-    m_codec = params.codec;
-    m_enc = std::move(opened.enc);
-    m_hw_device = std::move(opened.hw_device);
-    m_hw_frames = std::move(opened.hw_frames);
-    m_sw_pix = opened.sw_pix;
-    m_hw_upload = opened.hw_upload;
+    m_codec = config.codec;
 
     // libx265 and the hardware wrappers hand back packets with no duration. The
     // mp4 muxer derives each sample's duration from the next packet, so with
     // nothing following it the final sample is silently dropped -- one frame
     // short, and the file a frame shorter than the source. MPEG-TS does not
     // care, which is why this only ever showed up in mp4.
-    m_frame_duration = av_rescale_q(1, av_inv_q(params.fps), m_enc.p->time_base);
+    const AVRational fps{config.fps.num, std::max(config.fps.den, 1)};
+    m_frame_duration = av_rescale_q(1, av_inv_q(fps), session().enc.p->time_base);
     if (m_frame_duration <= 0) {
         m_frame_duration = 1;
     }
 }
 
-AVFrame* RoiEncoder::to_encoder_format(AVFrame* src)
-{
-    const bool same = src->format == m_sw_pix && src->width == m_enc.p->width
-        && src->height == m_enc.p->height;
-    if (same) {
-        return src;
-    }
-
-    if (!m_sw_frame_ready) {
-        m_sw_frame.p->format = m_sw_pix;
-        m_sw_frame.p->width = m_enc.p->width;
-        m_sw_frame.p->height = m_enc.p->height;
-        check(av_frame_get_buffer(m_sw_frame.p, 32), "sw frame buffer");
-        m_sw_frame_ready = true;
-    }
-
-    if (!m_sws.p || src->width != m_sws_src_w || src->height != m_sws_src_h
-        || src->format != m_sws_src_fmt) {
-        m_sws.reset();
-        m_sws.p = sws_getContext(src->width, src->height,
-            static_cast<AVPixelFormat>(src->format), m_enc.p->width,
-            m_enc.p->height, m_sw_pix, SWS_BILINEAR, nullptr, nullptr, nullptr);
-        if (!m_sws.p) {
-            fail("sws_getContext");
-        }
-        m_sws_src_w = src->width;
-        m_sws_src_h = src->height;
-        m_sws_src_fmt = src->format;
-    }
-
-    check(av_frame_make_writable(m_sw_frame.p), "make writable");
-    sws_scale(m_sws.p, src->data, src->linesize, 0, src->height,
-        m_sw_frame.p->data, m_sw_frame.p->linesize);
-    return m_sw_frame.p;
-}
-
 void RoiEncoder::drain()
 {
     for (;;) {
-        const int r = avcodec_receive_packet(m_enc.p, m_pkt.p);
-        if (r == AVERROR(EAGAIN) || r == AVERROR_EOF) {
-            break;
+        const auto pkt = m_backend->ReceivePacket(*m_session.get());
+        if (!pkt) {
+            const StatusCode code = pkt.status().code();
+            if (code == StatusCode::Again || code == StatusCode::EndOfStream) {
+                return;
+            }
+            fail(pkt.status().message());
         }
-        check(r, "receive packet");
-        if (m_pkt.p->duration <= 0) {
-            m_pkt.p->duration = m_frame_duration;
+        // The public EncodedPacket only borrows; the AVPacket behind it is the session's,
+        // and the sink wants that -- it rescales and muxes with libav's own calls.
+        AVPacket* raw = session().pkt.p;
+        if (raw->duration <= 0) {
+            raw->duration = m_frame_duration;
         }
-        m_sink->on_packet(m_pkt.p, m_enc.p->time_base);
-        av_packet_unref(m_pkt.p);
+        m_sink->on_packet(raw, session().enc.p->time_base);
     }
 }
 
 void RoiEncoder::encode(
     AVFrame* frame, const std::vector<Rect>& rects, int64_t pts)
 {
-    AVFrame* sw = to_encoder_format(frame);
-    sw->pts = pts;
-    // A frame handed straight through still carries the decoder's picture type.
-    // Choosing I/P/B is the encoder's job, and honouring the decoder's answer
-    // would let the input's GOP structure override the requested one.
-    sw->pict_type = AV_PICTURE_TYPE_NONE;
-    attach_roi(sw, rects);
+    // The decoder's frame goes in through the same door an embedder uses. Borrowed, not
+    // owned: the decoder reuses it for the next frame.
+    AvFrameBuffer buffer(frame);
+    encode_buffer(buffer, rects, pts);
+}
 
-    if (m_hw_upload) {
-        roiav::Frame hw;
-        check(av_hwframe_get_buffer(m_enc.p->hw_frames_ctx, hw.p, 0),
-            "hwframe get");
-        check(av_hwframe_transfer_data(hw.p, sw, 0), "hw upload");
-        hw.p->pts = pts;
-        // Side data does not survive the transfer to hardware.
-        attach_roi(hw.p, rects);
-        check(avcodec_send_frame(m_enc.p, hw.p), "send frame");
-    } else {
-        check(avcodec_send_frame(m_enc.p, sw), "send frame");
+void RoiEncoder::encode_buffer(
+    IFrameBuffer& buffer, const std::vector<Rect>& rects, int64_t pts)
+{
+    BackendFrameControl control;
+    control.regions = rects;
+    control.pts = pts;
+
+    const Status s = m_backend->SubmitFrame(*m_session.get(), buffer, control);
+    if (!s) {
+        fail(s.message());
     }
     drain();
 }
 
 void RoiEncoder::flush()
 {
-    check(avcodec_send_frame(m_enc.p, nullptr), "flush encoder");
+    const Status s = m_backend->Flush(*m_session.get());
+    if (!s) {
+        fail(s.message());
+    }
     drain();
 }
 

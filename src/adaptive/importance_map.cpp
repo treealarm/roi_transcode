@@ -31,11 +31,10 @@ int delta_for_value(int value, const MaskMapping& mapping)
 } // namespace
 
 QpDeltaMap qp_map_from_mask(const Mask& mask, const MaskMapping& mapping,
-    int frame_width, int frame_height, int block)
+    int32_t frame_width, int32_t frame_height, int32_t block)
 {
     QpDeltaMap m;
-    if (frame_width <= 0 || frame_height <= 0 || block <= 0 || !mask.data
-        || mask.width <= 0 || mask.height <= 0) {
+    if (frame_width <= 0 || frame_height <= 0 || block <= 0 || !mask.consistent()) {
         return m;
     }
     m.block = block;
@@ -63,7 +62,7 @@ QpDeltaMap qp_map_from_mask(const Mask& mask, const MaskMapping& mapping,
 
             int peak = 0;
             for (int y = my0; y < my1 && y < mask.height; ++y) {
-                const uint8_t* row = mask.data + static_cast<size_t>(y) * stride;
+                const uint8_t* row = mask.data.data() + static_cast<size_t>(y) * stride;
                 for (int x = mx0; x < mx1 && x < mask.width; ++x) {
                     peak = std::max(peak, static_cast<int>(row[x]));
                 }

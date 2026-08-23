@@ -57,7 +57,7 @@ void mask_extent_covers_the_set_pixels()
         }
     }
     Mask m;
-    m.data = buf.data();
+    m.data = buf;
     m.width = 10;
     m.height = 10;
     m.stride = 10;
@@ -72,7 +72,7 @@ void empty_mask_asks_for_nothing()
 {
     std::vector<uint8_t> buf(64, 0);
     Mask m;
-    m.data = buf.data();
+    m.data = buf;
     m.width = 8;
     m.height = 8;
     m.stride = 8;

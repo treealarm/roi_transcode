@@ -1,4 +1,4 @@
-#include "smartvideo/roi.h"
+#include "smartvideo/smartvideo.h"
 
 #include "av_raii.h"
 #include "packet_sink.h"
@@ -73,12 +73,15 @@ Report transcode_file(const std::string& input_path,
             in.p->streams[aindex]->codecpar, in.p->streams[aindex]->time_base);
     }
 
-    EncoderParams ep;
+    EncoderConfig ep;
     ep.width = dec.p->width;
     ep.height = dec.p->height;
-    ep.fps = guess_fps(in_v, dec.p);
+    const AVRational fps = guess_fps(in_v, dec.p);
+    ep.fps = Rational{fps.num, fps.den};
     ep.kind = settings.encoder;
     ep.policy = settings.policy;
+    ep.temporal = settings.temporal;
+    ep.rate_control = settings.rate_control;
     ep.codec = settings.codec;
     ep.crf = settings.crf;
     ep.gop = settings.gop;
@@ -168,14 +171,17 @@ Report transcode_file(const std::string& input_path,
 
     enc.flush();
     sink.end();
-    std::fprintf(stderr, "encoded with %s crf=%d preset=%s\n", enc.label(),
-        settings.crf, settings.preset.c_str());
+    std::fprintf(stderr, "encoded with %s crf=%d preset=%s converted=%ld uploaded=%ld\n",
+        enc.label(), settings.crf, preset_name(settings.preset), enc.frames_converted(),
+        enc.frames_uploaded());
 
     Report report;
     report.encoder_used = enc.kind();
     report.encoder_name = enc.label();
     report.frames = frames;
     report.regions_dropped = dropped;
+    report.frames_converted = enc.frames_converted();
+    report.frames_uploaded = enc.frames_uploaded();
     return report;
 }
 

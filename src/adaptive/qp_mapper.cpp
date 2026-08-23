@@ -13,7 +13,7 @@
 namespace smartvideo {
 
 std::vector<Rect> rects_from_qp_map(
-    const QpDeltaMap& map, int max_regions, int* dropped)
+    const QpDeltaMap& map, int32_t max_regions, int32_t* dropped)
 {
     std::vector<Rect> out;
     if (dropped) {

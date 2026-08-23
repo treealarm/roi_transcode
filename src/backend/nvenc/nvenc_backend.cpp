@@ -14,6 +14,7 @@
 // written blind.
 
 #include "backend/common/backend_common.h"
+#include "preset.h"
 
 extern "C" {
 #include <libavutil/hwcontext.h>
@@ -24,7 +25,7 @@ namespace smartvideo {
 
 namespace {
 
-class NvencBackend final : public IEncoderBackend {
+class NvencBackend final : public LibavBackend {
 public:
     Encoder kind() const override { return Encoder::Nvenc; }
 
@@ -41,10 +42,13 @@ public:
         return c;
     }
 
-    bool Configure(BackendSession& out, const EncoderParams& p) const override
+    const char* codec_name(Codec codec) const override
     {
-        backend_common::apply_shared(out.enc.p, p);
+        return codec == Codec::H264 ? "h264_nvenc" : "hevc_nvenc";
+    }
 
+    Status configure_context(LibavSession& out, const EncoderConfig& p) const override
+    {
         // CUDA is optional here: nvenc also takes system-memory frames, and refusing to
         // open without a CUDA context would rule out machines where it is simply absent.
         backend_common::open_hw_device(out.hw_device, AV_HWDEVICE_TYPE_CUDA, nullptr);
@@ -53,14 +57,14 @@ public:
         }
         out.enc.p->pix_fmt = AV_PIX_FMT_NV12;
         out.sw_pix = AV_PIX_FMT_NV12;
-        av_opt_set(out.enc.p->priv_data, "preset", p.preset.c_str(), 0);
+        av_opt_set(out.enc.p->priv_data, "preset", nvenc_preset(p.preset), 0);
         av_opt_set(out.enc.p->priv_data, "rc", "constqp", 0);
         av_opt_set_int(out.enc.p->priv_data, "qp", p.crf, 0);
         // Both off: they redistribute quality on their own criteria, which is precisely
         // the decision this library is supposed to be making.
         av_opt_set(out.enc.p->priv_data, "spatial-aq", "0", 0);
         av_opt_set(out.enc.p->priv_data, "temporal-aq", "0", 0);
-        return true;
+        return Status::Ok();
     }
 };
 
