@@ -127,6 +127,12 @@ struct Session::Impl : PacketSink {
                 pkt->data, static_cast<std::size_t>(pkt->size));
             out.pts = pkt->pts;
             out.dts = pkt->dts;
+            out.duration = pkt->duration;
+            // The units the timestamps above are in. Filling this is not optional: the
+            // field defaults to 1/1, and a handler that believed it while the session runs
+            // in milliseconds -- which is the default -- would be out by a factor of a
+            // thousand, consistently, in a way that looks like working code.
+            out.time_base = Rational{tb.num, tb.den};
             out.key = (pkt->flags & AV_PKT_FLAG_KEY) != 0;
             handler->on_packet(out);
         }

@@ -223,18 +223,22 @@ Result<FrameBufferPtr> LibavBackend::CreateFrame(
 {
     LibavSession& s = libav(session);
     const bool hardware = s.enc.p->hw_frames_ctx != nullptr;
-
-    if (memory != MemoryType::CPU && !hardware) {
-        return Status::Unsupported(
-            std::string("this encoder has no ") + memory_type_name(memory)
-            + " memory to hand out");
-    }
+    // The device memory this session can hand out, if any. Asking a QSV encoder for VAAPI
+    // surfaces is a different request from asking it for its own, even though both reach
+    // the same silicon.
+    const MemoryType native =
+        s.kind == Encoder::Qsv ? MemoryType::ONEVPL : MemoryType::VAAPI;
 
     auto buffer = std::make_unique<AvFrameBuffer>(nullptr);
 
-    if (!hardware) {
-        // Software: allocate straight in the format the encoder reads, which is what
-        // removes the conversion as well as the upload.
+    // A caller who asked for system memory gets system memory, on every backend.
+    //
+    // This used to ignore `memory` the moment the session was a hardware one and hand back
+    // a mapped surface regardless. Nothing was reported: buffer->memory() answered ONEVPL
+    // to a caller who had asked for CPU, so the only way to find out was to look at what
+    // arrived. Honouring the request costs an upload at submit, which is counted in
+    // Report::frames_uploaded and therefore visible, and is what the caller chose.
+    if (memory == MemoryType::CPU) {
         roiav::Frame f;
         f.p->format = s.sw_pix;
         f.p->width = s.enc.p->width;
@@ -248,9 +252,14 @@ Result<FrameBufferPtr> LibavBackend::CreateFrame(
         return FrameBufferPtr(buffer.release());
     }
 
-    // Hardware: a surface out of the encoder's own pool, plus a CPU-writable view of it.
-    // The view is what the caller fills; commit() drops it, and dropping it is what makes
-    // the writes visible to the encoder.
+    if (!hardware || memory != native) {
+        return Status::Unsupported(std::string("this encoder has no ")
+            + memory_type_name(memory) + " memory to hand out");
+    }
+
+    // Device memory: a surface out of the encoder's own pool, plus a CPU-writable view of
+    // it. The view is what the caller fills; commit() drops it, and dropping it is what
+    // makes the writes visible to the encoder. Nothing is copied on submit.
     roiav::Frame hw;
     if (av_hwframe_get_buffer(s.enc.p->hw_frames_ctx, hw.p, 0) < 0) {
         return Status::Error("could not take a surface from the encoder's pool");
@@ -260,8 +269,8 @@ Result<FrameBufferPtr> LibavBackend::CreateFrame(
         < 0) {
         // Some drivers will not map a surface for writing. That is not a failure of the
         // request, it is the honest answer that this path costs a copy here -- and saying
-        // so lets the caller fall back to submitting planes rather than believing in a
-        // zero-copy that is not happening.
+        // so lets the caller fall back to CPU memory rather than believing in a zero-copy
+        // that is not happening.
         return Status::Unsupported(
             "this driver will not map an encoder surface for CPU writes");
     }
@@ -269,8 +278,7 @@ Result<FrameBufferPtr> LibavBackend::CreateFrame(
     AVFrame* raw_map = mapped.p;
     hw.p = nullptr;
     mapped.p = nullptr;
-    buffer->adopt(raw_hw, raw_map,
-        s.kind == Encoder::Qsv ? MemoryType::ONEVPL : MemoryType::VAAPI);
+    buffer->adopt(raw_hw, raw_map, native);
     return FrameBufferPtr(buffer.release());
 }
 
