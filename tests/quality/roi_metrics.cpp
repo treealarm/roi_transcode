@@ -11,6 +11,10 @@
 // once libvmaf is in the build.
 //
 // Usage: roi_metrics <reference.mp4> <distorted.mp4> <truth.json> [label]
+//                    [--baseline <same-clip-encoded-without-regions.mp4>]
+//
+// --baseline turns the §44 boundary zones from absolute numbers into a differential, which
+// is the only form in which they mean anything; see paint_zones.
 
 #include <nlohmann/json.hpp>
 
@@ -118,15 +122,20 @@ bool decode_luma(const char* path, std::vector<Plane>& out)
     return !out.empty();
 }
 
+/// A perfect match has no finite PSNR. This stands in for "identical" so an average over
+/// frames stays a number; it is well above anything a real encode reaches.
+constexpr double PSNR_IDENTICAL = 100.0;
+
 double psnr_from_mse(double mse)
 {
-    // A perfect match has no finite PSNR. 100 stands in for "identical" so an average over
-    // frames stays a number; it is well above anything a real encode reaches.
-    return mse <= 1e-9 ? 100.0 : 10.0 * std::log10(255.0 * 255.0 / mse);
+    return mse <= 1e-9 ? PSNR_IDENTICAL : 10.0 * std::log10(255.0 * 255.0 / mse);
 }
 
-/// Zone ids for §44, from outside inwards.
+/// Zone ids for §44, from outside inwards. NONE is everything far from any edge: the open
+/// background and the deep interior of a large object, neither of which says anything
+/// about the boundary.
 enum Zone : int8_t {
+    ZONE_NONE = -1,
     ZONE_OUTSIDE = 0,
     ZONE_BOUNDARY_OUTER = 1,
     ZONE_BOUNDARY = 2,
@@ -137,39 +146,66 @@ enum Zone : int8_t {
 /// Bands are one coding block wide. Narrower and the zone would say more about the block
 /// grid than about the edge.
 constexpr int BAND = 8;
+constexpr int HALF_BAND = BAND / 2;
 
-/// Paints the zone of every pixel once per frame.
+/// Paints, once per frame, which band around a region edge each pixel falls in, and
+/// separately whether it is inside a region at all.
 ///
-/// The obvious version -- ask each pixel for its distance to every region -- costs width x
-/// height x regions with a square root in the middle, which on a 720p clip of 300 frames
-/// is hundreds of millions of calls and made this tool unusable in CI. Only the
-/// neighbourhood of a region can be anything but "outside", so only that is walked, and a
-/// pixel covered by two regions keeps the innermost zone.
-void paint_zones(std::vector<int8_t>& zone, int w, int h, const std::vector<Rect>& rois)
+/// The five bands are concentric and equally thick, spanning +-2 blocks around the edge:
+///
+///     outside | boundary_outer | boundary | boundary_inner | interior
+///        -2B  ..  -B  ..  -B/2  ..  edge  ..  +B/2  ..  +B  ..  +2B
+///
+/// They are bands and not "everything outside" / "everything inside" on purpose. The first
+/// version made ZONE_OUTSIDE the whole rest of the frame and ZONE_BOUNDARY a single pixel
+/// row, and the numbers that came out were unreadable: the one-pixel ring sits exactly on
+/// the object silhouette, the highest-detail pixels in the picture, so it scored ~13 dB
+/// below its neighbours *in a baseline encode that treats the frame uniformly*. That is
+/// content, not a frame around the region -- but it looks exactly like one. Comparable
+/// bands, plus the --baseline differential below, are what separate the two.
+///
+/// The obvious implementation -- ask each pixel for its distance to every region -- costs
+/// width x height x regions with a square root in the middle, which on a 720p clip of 300
+/// frames is hundreds of millions of calls and made this tool unusable in CI. Only the
+/// neighbourhood of a region can be in any band, so only that is walked, and a pixel
+/// covered by two regions keeps the innermost zone.
+void paint_zones(std::vector<int8_t>& zone, std::vector<uint8_t>& inside, int w, int h,
+    const std::vector<Rect>& rois)
 {
-    zone.assign(static_cast<size_t>(w) * h, ZONE_OUTSIDE);
+    const size_t px = static_cast<size_t>(w) * h;
+    zone.assign(px, ZONE_NONE);
+    inside.assign(px, 0);
     for (const Rect& r : rois) {
-        const int x0 = std::max(0, r.x - BAND);
-        const int x1 = std::min(w - 1, r.x + r.w - 1 + BAND);
-        const int y0 = std::max(0, r.y - BAND);
-        const int y1 = std::min(h - 1, r.y + r.h - 1 + BAND);
+        const int reach = 2 * BAND;
+        const int x0 = std::max(0, r.x - reach);
+        const int x1 = std::min(w - 1, r.x + r.w - 1 + reach);
+        const int y0 = std::max(0, r.y - reach);
+        const int y1 = std::min(h - 1, r.y + r.h - 1 + reach);
         for (int y = y0; y <= y1; ++y) {
             int8_t* row = zone.data() + static_cast<size_t>(y) * w;
+            uint8_t* in = inside.data() + static_cast<size_t>(y) * w;
             for (int x = x0; x <= x1; ++x) {
                 const int dx = std::max({r.x - x, x - (r.x + r.w - 1), 0});
                 const int dy = std::max({r.y - y, y - (r.y + r.h - 1), 0});
-                int8_t z;
+                // Signed Chebyshev distance to the edge: positive inside, and 0 on the
+                // outermost row of the region itself. Chebyshev rather than Euclidean
+                // because the bands are a ring around a rectangle, and a square ring is
+                // what the encoder's blocks see.
+                int d;
                 if (dx == 0 && dy == 0) {
-                    const int to_edge = std::min({x - r.x, r.x + r.w - 1 - x,
-                                                  y - r.y, r.y + r.h - 1 - y});
-                    z = to_edge == 0 ? ZONE_BOUNDARY
-                        : (to_edge < BAND ? ZONE_BOUNDARY_INNER : ZONE_INTERIOR);
+                    in[x] = 1;
+                    d = std::min({x - r.x, r.x + r.w - 1 - x,
+                                  y - r.y, r.y + r.h - 1 - y});
                 } else {
-                    // Chebyshev rather than Euclidean: the bands are a ring around a
-                    // rectangle, and a square ring is what the encoder's blocks see.
-                    const int d = std::max(dx, dy);
-                    z = d <= BAND ? ZONE_BOUNDARY_OUTER : ZONE_OUTSIDE;
+                    d = -std::max(dx, dy);
                 }
+                int8_t z;
+                if (d < -2 * BAND || d > 2 * BAND)  z = ZONE_NONE;
+                else if (d < -BAND)                 z = ZONE_OUTSIDE;
+                else if (d < -HALF_BAND)            z = ZONE_BOUNDARY_OUTER;
+                else if (d <= HALF_BAND)            z = ZONE_BOUNDARY;
+                else if (d <= BAND)                 z = ZONE_BOUNDARY_INNER;
+                else                                z = ZONE_INTERIOR;
                 row[x] = std::max(row[x], z);
             }
         }
@@ -178,7 +214,7 @@ void paint_zones(std::vector<int8_t>& zone, int w, int h, const std::vector<Rect
 
 /// 8x8 windowed SSIM on luma, averaged over the windows whose centre `keep` accepts.
 double ssim_masked(const Plane& a, const Plane& b,
-    const std::vector<int8_t>& zone, bool want_inside)
+    const std::vector<uint8_t>& inside, bool want_inside)
 {
     constexpr int W = 8;
     const double c1 = 6.5025, c2 = 58.5225;
@@ -187,9 +223,8 @@ double ssim_masked(const Plane& a, const Plane& b,
     for (int y = 0; y + W <= a.h; y += 4) {
         for (int x = 0; x + W <= a.w; x += 4) {
             const int cx = x + W / 2, cy = y + W / 2;
-            const bool inside =
-                zone[static_cast<size_t>(cy) * a.w + cx] >= ZONE_BOUNDARY;
-            if (inside != want_inside) {
+            const bool is_inside = inside[static_cast<size_t>(cy) * a.w + cx] != 0;
+            if (is_inside != want_inside) {
                 continue;
             }
             double sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
@@ -220,28 +255,49 @@ double ssim_masked(const Plane& a, const Plane& b,
 
 int main(int argc, char** argv)
 {
-    if (argc < 4) {
+    std::vector<std::string> pos;
+    std::string baseline_path;
+    for (int i = 1; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--baseline" && i + 1 < argc) {
+            baseline_path = argv[++i];
+        } else {
+            pos.push_back(a);
+        }
+    }
+    if (pos.size() < 3) {
         std::fprintf(stderr,
-            "usage: roi_metrics <reference> <distorted> <truth.json> [label]\n");
+            "usage: roi_metrics <reference> <distorted> <truth.json> [label] "
+            "[--baseline <encode>]\n");
         return 2;
     }
-    const std::string label = argc > 4 ? argv[4] : "run";
+    const std::string label = pos.size() > 3 ? pos[3] : "run";
 
-    std::vector<Plane> ref, dis;
-    if (!decode_luma(argv[1], ref) || !decode_luma(argv[2], dis)) {
+    std::vector<Plane> ref, dis, base;
+    if (!decode_luma(pos[0].c_str(), ref) || !decode_luma(pos[1].c_str(), dis)) {
         return 1;
     }
-    const size_t n = std::min(ref.size(), dis.size());
+    size_t n = std::min(ref.size(), dis.size());
     if (n == 0 || ref[0].w != dis[0].w || ref[0].h != dis[0].h) {
         std::fprintf(stderr, "reference and distorted differ in size\n");
         return 1;
     }
+    if (!baseline_path.empty()) {
+        if (!decode_luma(baseline_path.c_str(), base)) {
+            return 1;
+        }
+        if (base.empty() || base[0].w != ref[0].w || base[0].h != ref[0].h) {
+            std::fprintf(stderr, "baseline differs in size from the reference\n");
+            return 1;
+        }
+        n = std::min(n, base.size());
+    }
 
     nlohmann::json truth;
     {
-        FILE* f = std::fopen(argv[3], "rb");
+        FILE* f = std::fopen(pos[2].c_str(), "rb");
         if (!f) {
-            std::fprintf(stderr, "cannot open %s\n", argv[3]);
+            std::fprintf(stderr, "cannot open %s\n", pos[2].c_str());
             return 1;
         }
         std::string buf;
@@ -257,11 +313,13 @@ int main(int argc, char** argv)
     }
 
     std::vector<int8_t> zone;
+    std::vector<uint8_t> inside;
     std::vector<double> roi_psnr_series, bg_psnr_series;
     double roi_ssim_sum = 0, bg_ssim_sum = 0;
     long roi_frames = 0;
     // §44: outside, boundary-outer, boundary, boundary-inner, interior.
     double zone_mse[5] = {0, 0, 0, 0, 0};
+    double base_zone_mse[5] = {0, 0, 0, 0, 0};
     long zone_px[5] = {0, 0, 0, 0, 0};
 
     for (size_t fi = 0; fi < n; ++fi) {
@@ -276,7 +334,8 @@ int main(int argc, char** argv)
 
         const Plane& a = ref[fi];
         const Plane& b = dis[fi];
-        paint_zones(zone, a.w, a.h, rois);
+        const Plane* c = base.empty() ? nullptr : &base[fi];
+        paint_zones(zone, inside, a.w, a.h, rois);
 
         double roi_se = 0, bg_se = 0;
         long roi_px = 0, bg_px = 0;
@@ -284,33 +343,41 @@ int main(int argc, char** argv)
         for (int y = 0; y < a.h; ++y) {
             const uint8_t* ra = a.at(y);
             const uint8_t* rb = b.at(y);
+            const uint8_t* rc = c ? c->at(y) : nullptr;
             const int8_t* rz = zone.data() + static_cast<size_t>(y) * a.w;
+            const uint8_t* ri = inside.data() + static_cast<size_t>(y) * a.w;
             for (int x = 0; x < a.w; ++x) {
                 const double d = static_cast<double>(ra[x]) - rb[x];
                 const double se = d * d;
-                const int8_t z = rz[x];
                 // Inside means the region proper -- the edge counts as inside, because a
                 // pixel on the border of a plate is part of the plate.
-                if (z >= ZONE_BOUNDARY) {
+                if (ri[x]) {
                     roi_se += se;
                     ++roi_px;
                 } else {
                     bg_se += se;
                     ++bg_px;
                 }
-                zone_mse[z] += se;
-                ++zone_px[z];
+                const int8_t z = rz[x];
+                if (z != ZONE_NONE) {
+                    zone_mse[z] += se;
+                    ++zone_px[z];
+                    if (rc) {
+                        const double db = static_cast<double>(ra[x]) - rc[x];
+                        base_zone_mse[z] += db * db;
+                    }
+                }
             }
         }
 
         if (roi_px > 0) {
             roi_psnr_series.push_back(psnr_from_mse(roi_se / static_cast<double>(roi_px)));
-            roi_ssim_sum += ssim_masked(a, b, zone, true);
+            roi_ssim_sum += ssim_masked(a, b, inside, true);
             ++roi_frames;
         }
         if (bg_px > 0) {
             bg_psnr_series.push_back(psnr_from_mse(bg_se / static_cast<double>(bg_px)));
-            bg_ssim_sum += ssim_masked(a, b, zone, false);
+            bg_ssim_sum += ssim_masked(a, b, inside, false);
         }
     }
 
@@ -343,11 +410,52 @@ int main(int argc, char** argv)
         instability(roi_psnr_series), instability(bg_psnr_series));
     static const char* zone_name[5] = {
         "outside", "boundary_outer", "boundary", "boundary_inner", "interior"};
+    double gain[5] = {0, 0, 0, 0, 0};
+    bool have_gain = !base.empty();
     for (int z = 0; z < 5; ++z) {
-        if (zone_px[z] > 0) {
-            std::printf("  zone_%s_psnr=%.3f\n", zone_name[z],
-                psnr_from_mse(zone_mse[z] / static_cast<double>(zone_px[z])));
+        if (zone_px[z] == 0) {
+            have_gain = false;
+            continue;
         }
+        const double n_px = static_cast<double>(zone_px[z]);
+        const double q = psnr_from_mse(zone_mse[z] / n_px);
+        if (base.empty()) {
+            std::printf("  zone_%s_psnr=%.3f\n", zone_name[z], q);
+            continue;
+        }
+        const double qb = psnr_from_mse(base_zone_mse[z] / n_px);
+        // A band either encode reproduced exactly has no gain to report: subtracting the
+        // stand-in would print a difference of tens of dB that means only "both were
+        // lossless here". Flat synthetic scenes hit this, so it is not a corner case.
+        if (q >= PSNR_IDENTICAL || qb >= PSNR_IDENTICAL) {
+            std::printf("  zone_%s_psnr=%.3f  zone_%s_gain=lossless\n",
+                zone_name[z], q, zone_name[z]);
+            have_gain = false;
+            continue;
+        }
+        gain[z] = q - qb;
+        std::printf("  zone_%s_psnr=%.3f  zone_%s_gain=%+.3f\n",
+            zone_name[z], q, zone_name[z], gain[z]);
+    }
+
+    // §44 asks whether the region shows a visible frame. Absolute PSNR per band cannot
+    // answer that -- the bands hold different content, and the one on the silhouette is
+    // the hardest to code no matter how it is encoded. What a frame actually is, is a ring
+    // that came off *worse than the rings on both sides of it* once the region handling
+    // was switched on. So the statistic is the deepest local dip in the gain profile, and
+    // it needs the same clip encoded without regions to exist at all.
+    if (have_gain) {
+        double dip = 0.0;
+        int at = -1;
+        for (int z = 1; z <= 3; ++z) {
+            const double d = std::min(gain[z - 1], gain[z + 1]) - gain[z];
+            if (d > dip) {
+                dip = d;
+                at = z;
+            }
+        }
+        std::printf("  boundary_dip=%.3f  at=%s\n", dip,
+            at < 0 ? "none" : zone_name[at]);
     }
     return 0;
 }

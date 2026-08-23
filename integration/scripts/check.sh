@@ -376,6 +376,21 @@ PY
     else
         fail "background did not pay for the regions ($b_bg -> $a_bg dB)"
     fi
+    # §44: no visible frame around the region. Measured as a differential against the very
+    # same clip encoded without regions -- absolute per-band PSNR cannot answer this,
+    # because the band on the object silhouette is the hardest content in the picture and
+    # scores far below its neighbours however it is encoded. A frame is a ring that came
+    # off worse than the rings on *both* sides of it once regions were switched on.
+    dip=$("${BUILD}/roi_metrics" "$src" "${WORK}/adaptive.mp4" "$truth" m \
+            --baseline "${WORK}/baseline.mp4" 2>/dev/null \
+          | grep -oE 'boundary_dip=[-0-9.]+' | cut -d= -f2)
+    if [[ -z "$dip" ]]; then
+        printf '  info  boundary zones were lossless in this scene, nothing to compare\n'
+    elif awk -v d="$dip" 'BEGIN{exit !(d < 3.0)}'; then
+        pass "no visible frame at the region edge (deepest dip ${dip} dB)"
+    else
+        fail "quality dips at the region edge (${dip} dB below both neighbouring bands)"
+    fi
     printf '  info  sizes: baseline %s, adaptive %s bytes\n' "$b_size" "$a_size"
     printf 'moving,adaptive,roi_psnr,%s\nmoving,baseline,roi_psnr,%s\n' \
         "$a_roi" "$b_roi" >> "${EVAL}/metrics.csv"
