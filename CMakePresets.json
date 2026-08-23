@@ -9,7 +9,9 @@
         "CMAKE_TOOLCHAIN_FILE": {
           "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
           "type": "FILEPATH"
-        }
+        },
+        "$comment-compile-commands": "The compile database, for the editor. Without it IntelliSense guesses the language standard and the include paths, and guesses them wrong: it reported std::span as missing from a tree that compiles, because it had defaulted to C++17 and knew nothing of vcpkg's FFmpeg. Every preset inherits this, so the database exists wherever anyone builds.",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     },
     {
