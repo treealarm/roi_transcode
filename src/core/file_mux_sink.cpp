@@ -65,6 +65,32 @@ void FileMuxSink::on_packet(AVPacket* pkt, AVRational enc_time_base)
 {
     av_packet_rescale_ts(pkt, enc_time_base, m_video->time_base);
     pkt->stream_index = m_video->index;
+
+    // Nudge a repeated decode timestamp forward by one tick.
+    //
+    // The mp4 muxer refuses a DTS that does not advance, and returns EINVAL -- which
+    // arrives here as "write video: Invalid argument" partway through a file, with nothing
+    // to say which frame caused it. Real archive clips do contain repeated timestamps: of
+    // 543 clips this deployment has tried to re-encode, 19 exhausted their attempts and
+    // landed in roi_state='failed', and the ones checked all carry duplicate DTS in the
+    // source while a clip that succeeded carries none. ffmpeg reports the same thing
+    // decoding them to /dev/null, so it is the recording that repeats, not this encoder.
+    //
+    // A tick rather than dropping the frame: the picture is real and the operator is
+    // watching it, so losing one to a timestamp the camera got wrong is the wrong trade.
+    // One tick is below anything a player can show and keeps the count intact.
+    if (m_last_dts != AV_NOPTS_VALUE && pkt->dts != AV_NOPTS_VALUE
+        && pkt->dts <= m_last_dts) {
+        const int64_t shift = m_last_dts + 1 - pkt->dts;
+        pkt->dts += shift;
+        // Presentation cannot precede decode; move it with the DTS rather than clamping,
+        // so a frame's own display order relative to its neighbours is unchanged.
+        if (pkt->pts != AV_NOPTS_VALUE && pkt->pts < pkt->dts) {
+            pkt->pts += shift;
+        }
+    }
+    m_last_dts = pkt->dts;
+
     roiav::check(av_interleaved_write_frame(m_out.p, pkt), "write video");
 }
 

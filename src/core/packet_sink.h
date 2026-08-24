@@ -52,6 +52,9 @@ private:
     AVRational m_audio_tb{};
     bool m_started = false;
     bool m_finished = false;
+    // Last DTS handed to the muxer, in the video stream's time base. Guards the monotonicity
+    // the mp4 muxer requires; see on_packet.
+    int64_t m_last_dts = AV_NOPTS_VALUE;
 };
 
 // Hands packets to a callback instead of a file.
