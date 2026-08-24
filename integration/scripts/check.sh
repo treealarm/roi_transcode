@@ -23,8 +23,17 @@ LIBBUILD="${LIBBUILD:-${ROOT}/build}"
 EVAL="${ROOT}/testdata/eval"
 SRC="${ROOT}/testdata/synth.mp4"
 CSV="${EVAL}/runs.csv"
-WORK="$(mktemp -d)"
-trap 'rm -rf "${WORK}"' EXIT
+# Every encode this script makes lands here. Temporary by default -- the verdict is the exit
+# code and the rows in runs.csv, not the files. Set KEEP=1 to look at them afterwards: they
+# go to testdata/eval/work/ and the path is printed at the end.
+if [[ -n "${KEEP:-}" ]]; then
+    WORK="${EVAL}/work"
+    rm -rf "${WORK}"
+    mkdir -p "${WORK}"
+else
+    WORK="$(mktemp -d)"
+    trap 'rm -rf "${WORK}"' EXIT
+fi
 
 # Plate box, must match testdata/synth_roi.json on a 1280x720 frame.
 PX=448; PY=288; PW=384; PH=144
@@ -283,7 +292,7 @@ def luma(video, t, x, y, w, h):
         "-vf",f"crop={w}:{h}:{x}:{y},format=gray","-f","rawvideo","-"],
         capture_output=True).stdout
     return sum(out)/len(out) if out else -1
-for scene in ("texture","moving"):
+for scene in ("texture","moving","crowded"):
     truth = json.loads((root/scene/"truth.json").read_text())
     vid = str(root/scene/"source.mp4")
     for idx in (25, 150, 275):
@@ -398,6 +407,74 @@ else
     printf '  skip  roi_metrics or the synthetic scenes are missing\n'
 fi
 
+step "the area budget spends protection where the frame can afford it"
+# The case every other scene here is missing. All of them are one object on 6% of the frame,
+# where protecting everything is affordable and the budget never fires -- which is why
+# re-compression looked harmless on synthetic footage while it made real archive files 80%
+# larger. This scene has the ratio real footage has: a person on 38% of the frame with a face
+# on 1.4% inside them, over a background worth spending bits on.
+if [[ -f "${SCENES}/crowded/source.mp4" ]]; then
+    crowd="${SCENES}/crowded"
+    # Three encodes off one config: no regions at all, the budget at its default, and the
+    # budget switched off. The third is what the second has to be measured against -- "the
+    # file did not grow" says nothing without knowing that it would have.
+    python3 - "${crowd}/roi.json" "${WORK}" <<'CROWDCFG'
+import json, sys
+d = json.load(open(sys.argv[1])); work = sys.argv[2]
+json.dump(dict(d, samples=[], background_qp_delta=0), open(f"{work}/crowd_flat.json", "w"))
+for tag, frac in (("on", 0.25), ("off", 0.0)):
+    json.dump(dict(d, max_protected_fraction=frac), open(f"{work}/crowd_{tag}.json", "w"))
+CROWDCFG
+    for tag in flat on off; do
+        "${BUILD}/roi-transcode" --in "${crowd}/source.mp4" \
+            --roi "${WORK}/crowd_${tag}.json" --out "${WORK}/crowd_${tag}.mp4" \
+            --encoder cpu --codec h264 --crf 32 >/dev/null 2>&1
+    done
+
+    if [[ -s "${WORK}/crowd_flat.mp4" && -s "${WORK}/crowd_on.mp4" && -s "${WORK}/crowd_off.mp4" ]]; then
+        c_flat=$(stat -c %s "${WORK}/crowd_flat.mp4")
+        c_on=$(stat -c %s "${WORK}/crowd_on.mp4")
+        c_off=$(stat -c %s "${WORK}/crowd_off.mp4")
+        # The face's rectangle comes from the ground truth rather than from a constant here,
+        # so moving the scene cannot leave this measuring empty background.
+        read -r FX FY FW FH < <(python3 -c "
+import json, sys
+o = json.load(open(sys.argv[1]))['frames'][0]['objects'][1]
+print(*o['bbox'])" "${crowd}/truth.json")
+        face_psnr() {
+            ffmpeg -hide_banner -i "${crowd}/source.mp4" -i "$1" -lavfi \
+                "[0:v]crop=${FW}:${FH}:${FX}:${FY}[a];[1:v]crop=${FW}:${FH}:${FX}:${FY}[b];[a][b]psnr" \
+                -f null - 2>&1 | grep -oE 'average:[0-9.]+' | tail -1 | cut -d: -f2
+        }
+        f_flat=$(face_psnr "${WORK}/crowd_flat.mp4")
+        f_on=$(face_psnr "${WORK}/crowd_on.mp4")
+
+        if awk -v a="${f_on:-0}" -v b="${f_flat:-0}" 'BEGIN{exit !(a > b + 3.0)}'; then
+            pass "the face is protected (${f_flat} -> ${f_on} dB)"
+        else
+            fail "the face gained nothing (${f_flat} -> ${f_on} dB)"
+        fi
+        # Not "smaller" but "no larger": what the budget promises is that protecting the face
+        # costs nothing worth counting, and on this scene it comes out slightly ahead.
+        if awk -v a="$c_on" -v b="$c_flat" 'BEGIN{exit !(a <= b * 1.05)}'; then
+            pass "and it costs no bytes ($c_flat -> $c_on)"
+        else
+            fail "protecting the face grew the file ($c_flat -> $c_on)"
+        fi
+        # The regression this exists to catch. Without the budget the person's 38% of noisy
+        # frame is held at -7 as well, and no rate control can pay for that.
+        if awk -v a="$c_off" -v b="$c_flat" 'BEGIN{exit !(a > b * 3.0)}'; then
+            pass "without the budget the same scene explodes ($c_off bytes)"
+        else
+            fail "the budget made no difference to size ($c_off vs $c_on)"
+        fi
+    else
+        fail "the crowded scene failed to encode"
+    fi
+else
+    printf '  skip  crowded scene not generated (benchmarks/synthetic/make-scenes.py)\n'
+fi
+
 step "gRPC: both entry points, and the sandbox"
 if [[ -x "${BUILD}/roi-transcode-svc" && -x "${BUILD}/roi_grpc_smoke" ]]; then
     port=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
@@ -467,6 +544,9 @@ else
 fi
 
 printf '\n'
+if [[ -n "${KEEP:-}" ]]; then
+    printf 'encodes kept in %s\n' "$WORK"
+fi
 if [[ $fails -eq 0 ]]; then
     printf 'all checks passed; rows appended to %s\n' "$CSV"
     exit 0

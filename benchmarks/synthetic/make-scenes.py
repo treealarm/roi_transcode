@@ -31,6 +31,17 @@ FRAMES = FPS * DURATION
 PLATE_W, PLATE_H = 0.30, 0.20
 STATIC_X, STATIC_Y = 0.35, 0.40
 
+# The crowd scene's geometry, taken from this deployment's archive rather than chosen: a
+# person box there averages 41.5% of the frame and a face 1.9%. That ratio is the whole
+# reason the area budget exists, and no other scene here has it -- every one of them is a
+# single object on 6% of the frame, which is why re-compression looked harmless on synthetic
+# footage while it made real files 80% larger.
+PERSON_W, PERSON_H = 0.45, 0.85     # 38% of the frame
+PERSON_X, PERSON_Y = 0.28, 0.10
+FACE_W, FACE_H = 0.11, 0.13         # 1.4% of the frame, and inside the person
+FACE_X = PERSON_X + (PERSON_W - FACE_W) / 2
+FACE_Y = PERSON_Y + 0.04
+
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 # (lavfi source, filters applied after it). The duration and rate belong to the
@@ -74,15 +85,24 @@ BACKGROUNDS = {
     ),
 }
 
-# name -> (background, moving?)
+# name -> (background, moving?, subject)
 SCENES = {
-    "flat": ("flat", False),
-    "edges": ("edges", False),
-    "zoneplate": ("zoneplate", False),
-    "texture": ("texture", False),
-    "moving": ("texture", True),
+    "flat": ("flat", False, "plate"),
+    "edges": ("edges", False, "plate"),
+    "zoneplate": ("zoneplate", False, "plate"),
+    "texture": ("texture", False, "plate"),
+    "moving": ("texture", True, "plate"),
     # Plate static on purpose: the point is that everything else moves.
-    "distraction": ("distraction", False),
+    "distraction": ("distraction", False, "plate"),
+    # Two objects, nested, with the size ratio real footage has. Static, because the variable
+    # under test is area, not motion -- and the person is filled with per-frame noise, so it
+    # costs bits to protect whether or not it moves.
+    #
+    # The background is the noisy one on purpose. Over a static texture there is nothing to
+    # save by penalising the background, so even a correct budget comes out larger than a flat
+    # re-encode and the scene would answer a question nobody asked. Real footage pays most of
+    # its bits for the background, which is exactly what makes re-compression worth doing.
+    "crowded": ("distraction", False, "crowd"),
 }
 
 
@@ -102,9 +122,89 @@ def run(cmd):
         raise SystemExit(f"ffmpeg failed: {' '.join(cmd[:6])} ...")
 
 
+def build_crowd(name, out_dir, background):
+    """A person on nearly half the frame with a face inside them.
+
+    The person is filled with per-frame noise on purpose: a flat panel codes almost free
+    after the first frame, and protecting something that costs nothing proves nothing. Noise
+    cannot be predicted, so every frame pays for it again -- which is what makes the area
+    budget's decision visible in the file size.
+    """
+    source = out_dir / "source.mp4"
+    pw, ph = int(round(PERSON_W * W)), int(round(PERSON_H * H))
+    fw, fh = int(round(FACE_W * W)), int(round(FACE_H * H))
+    px, py = int(round(PERSON_X * W)), int(round(PERSON_Y * H))
+    fx, fy = int(round(FACE_X * W)), int(round(FACE_Y * H))
+
+    bg_src, bg_chain = BACKGROUNDS[background]
+    bg_src = bg_src.format(W=W, H=H)
+
+    # Light enough to pass the ground-truth luma check against this background, which
+    # compares the object against a strip beside it.
+    person_chain = (
+        "format=yuv420p,noise=alls=20:allf=t,"
+        f"drawbox=x=0:y=0:w={pw}:h={ph}:color=black:t=6"
+    )
+    face_chain = (
+        "format=yuv420p,"
+        f"drawbox=x=0:y=0:w={fw}:h={fh}:color=black:t=4,"
+        f"drawtext=fontfile={FONT}:text='FACE':fontsize=28:"
+        "fontcolor=black:x=(w-text_w)/2:y=(h-text_h)/2"
+    )
+
+    run([
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-f", "lavfi", "-i", f"{bg_src}:d={DURATION}:r={FPS}",
+        "-f", "lavfi", "-i", f"color=c=0xd2d2d2:s={pw}x{ph}:d={DURATION}:r={FPS}",
+        "-f", "lavfi", "-i", f"color=c=0xf0f0f0:s={fw}x{fh}:d={DURATION}:r={FPS}",
+        "-filter_complex",
+        f"[0:v]{bg_chain}[bg];[1:v]{person_chain}[pe];[2:v]{face_chain}[fa];"
+        f"[bg][pe]overlay=x={px}:y={py}[t1];"
+        f"[t1][fa]overlay=x={fx}:y={fy},format=yuv420p",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "16", "-g", "50",
+        "-frames:v", str(FRAMES), str(source),
+    ])
+
+    objects = [
+        {"id": 1, "class": "person",
+         "bbox": [px, py, pw, ph],
+         "bbox_norm": [PERSON_X, PERSON_Y, PERSON_W, PERSON_H]},
+        {"id": 2, "class": "face",
+         "bbox": [fx, fy, fw, fh],
+         "bbox_norm": [round(FACE_X, 6), round(FACE_Y, 6), FACE_W, FACE_H]},
+    ]
+    frames = [{"index": i, "t": round(i / FPS, 6), "objects": objects}
+              for i in range(FRAMES)]
+    (out_dir / "truth.json").write_text(json.dumps({
+        "scene": name,
+        "width": W, "height": H, "fps": FPS, "frame_count": FRAMES,
+        "frames": frames,
+    }, indent=1))
+
+    # No `kinds`: the point of this scene is the importance model of section 11 deciding,
+    # exactly as the ta_vms archive pass leaves it. Background at +6 for the same reason --
+    # that is the number the archive pass uses, not the +20 the plate fixtures exaggerate to.
+    (out_dir / "roi.json").write_text(json.dumps({
+        "background_qp_delta": 6,
+        "hold_sec": DURATION * 2,
+        "samples": [
+            {"t": 0, "kind": "person", "bbox_x": PERSON_X, "bbox_y": PERSON_Y,
+             "bbox_w": PERSON_W, "bbox_h": PERSON_H, "track_id": 1, "confidence": 0.9},
+            {"t": 0, "kind": "face", "bbox_x": round(FACE_X, 6), "bbox_y": round(FACE_Y, 6),
+             "bbox_w": FACE_W, "bbox_h": FACE_H, "track_id": 2, "confidence": 0.6},
+        ],
+    }, indent=1))
+
+    print(f"{name}: {source} ({FRAMES} frames, person {PERSON_W * PERSON_H:.0%} "
+          f"of frame, face {FACE_W * FACE_H:.1%})")
+
+
 def build_scene(name, out_dir):
-    background, moving = SCENES[name]
+    background, moving, subject = SCENES[name]
     out_dir.mkdir(parents=True, exist_ok=True)
+    if subject == "crowd":
+        build_crowd(name, out_dir, background)
+        return
     source = out_dir / "source.mp4"
 
     pw, ph = int(round(PLATE_W * W)), int(round(PLATE_H * H))
@@ -200,7 +300,11 @@ def main():
     ap.add_argument("--out", default=None, help="output directory")
     args = ap.parse_args()
 
-    root = pathlib.Path(__file__).resolve().parent.parent
+    # Three levels up: this file is benchmarks/synthetic/make-scenes.py, and testdata/ sits
+    # at the project root beside it. Two levels landed in benchmarks/testdata/, which is not
+    # where check.sh looks -- and it looked right for as long as somebody had once passed
+    # --out by hand.
+    root = pathlib.Path(__file__).resolve().parent.parent.parent
     out = pathlib.Path(args.out) if args.out else root / "testdata" / "scenes"
     for name in (args.scenes or sorted(SCENES)):
         if name not in SCENES:
