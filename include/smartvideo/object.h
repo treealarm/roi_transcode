@@ -14,6 +14,8 @@
 
 #include "smartvideo/geometry.h"
 
+#include <string>
+
 #include <cstdint>
 #include <variant>
 #include <vector>
@@ -45,6 +47,14 @@ using Geometry = std::variant<BoundingBox, Polygon, Mask>;
 struct Object {
     uint64_t track_id = 0;
     uint32_t class_id = 0;
+    /// The class as a name -- "person", "face", "vehicle", "license_plate".
+    ///
+    /// §10 has only the numeric class_id. A number would mean a second table mapping it to
+    /// the names everything else here already speaks: ONVIF reports classes as text, the
+    /// archive stores text, Quality::kinds is keyed by text. That table would be one more
+    /// place for the two to disagree, so the name travels and class_id stays for a caller
+    /// who has one.
+    std::string kind;
     float confidence = 1.0f;
     Geometry geometry;
 

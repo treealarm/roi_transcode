@@ -1,5 +1,7 @@
 #pragma once
 
+#include "importance.h"
+#include "smartvideo/object.h"
 #include "smartvideo/types.h"
 
 #include <vector>
@@ -19,7 +21,17 @@ struct Detection {
     int32_t pad_qp_delta = -3;
     int32_t pad_x = 0;
     int32_t pad_y = 0;
+
+    /// What §11 said this is worth, kept so regions can be ordered by it. Only meaningful
+    /// for detections the model weighed; one whose kind was configured explicitly carries
+    /// the importance its qp_delta implies, so the ordering stays consistent either way.
+    float importance = 0.0f;
 };
+
+/// The §10 view of a box, which is what the importance model reads. Confidence of zero on
+/// the way in means "not reported" and becomes the policy's assumed value here, so nothing
+/// downstream has to know the difference.
+Object object_from_box(const Box& box, const ImportancePolicy& policy);
 
 class RoiMapBuilder {
 public:

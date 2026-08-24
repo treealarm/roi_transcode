@@ -38,6 +38,7 @@ message(STATUS "smart-video-encoder FFmpeg: ${FFMPEG_INCLUDE_DIRS}")
 # ordering and budget truncation link this and nothing else.
 # ---------------------------------------------------------------------------
 add_library(smartvideo_adaptive STATIC
+    src/adaptive/importance.cpp
     src/adaptive/object_normalizer.cpp
     src/adaptive/object_geometry.cpp
     src/adaptive/importance_map.cpp
@@ -103,6 +104,11 @@ if(SVE_BUILD_TESTS)
     target_link_libraries(object_geometry_test PRIVATE smartvideo_adaptive)
     target_compile_options(object_geometry_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME object_geometry COMMAND object_geometry_test)
+
+    add_executable(importance_test tests/unit/importance_test.cpp)
+    target_link_libraries(importance_test PRIVATE smartvideo_adaptive)
+    target_compile_options(importance_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME importance COMMAND importance_test)
 
     add_executable(geometry_test tests/unit/geometry_test.cpp)
     target_link_libraries(geometry_test PRIVATE smartvideo_adaptive)

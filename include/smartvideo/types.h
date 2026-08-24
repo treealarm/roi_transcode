@@ -2,6 +2,7 @@
 
 // The vocabulary both entry points share.
 
+#include "smartvideo/importance.h"
 #include "smartvideo/policy.h"
 
 #include <cstdint>
@@ -128,6 +129,14 @@ struct Quality {
     // distinct deltas and so fewer rectangles to spend the budget on.
     int32_t mask_qp_delta_at_255 = -6;
     int32_t mask_levels = 4;
+
+    /// §11. What a region is worth, for kinds `kinds` does not name.
+    ///
+    /// The two work together rather than competing: a kind with an explicit entry in
+    /// `kinds` keeps its qp_delta, because someone said what they wanted and that is the
+    /// end of it. Everything else -- which in ta_vms is everything, since the archive pass
+    /// configures no kinds at all -- is weighed by the model.
+    ImportancePolicy importance;
 };
 
 struct Settings {
