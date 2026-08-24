@@ -192,7 +192,7 @@ struct Session::Impl : PacketSink {
         const auto dets =
             builder.detections_from(box_list, params.settings.quality, w, h);
         auto rects =
-            builder.build(w, h, dets, params.settings.quality.background_qp_delta);
+            builder.build(w, h, dets, params.settings.quality);
         const int budget = region_budget();
         if (budget > 0 && static_cast<int>(rects.size()) > budget) {
             report.regions_dropped += static_cast<int>(rects.size()) - budget;

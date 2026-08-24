@@ -113,8 +113,7 @@ Report transcode_file(const std::string& input_path,
         const auto live = temporal.at(t);
         const auto dets =
             roi_builder.detections_from(live, settings.quality, ep.width, ep.height);
-        auto rects = roi_builder.build(
-            ep.width, ep.height, dets, settings.quality.background_qp_delta);
+        auto rects = roi_builder.build(ep.width, ep.height, dets, settings.quality);
         const int cap = settings.quality.max_regions;
         if (cap > 0 && static_cast<int>(rects.size()) > cap) {
             dropped += static_cast<int>(rects.size()) - cap;

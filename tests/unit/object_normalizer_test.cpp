@@ -30,7 +30,10 @@ int main()
     plate.pad_x = 40;
     plate.pad_y = 22;
 
-    const auto rects = builder.build(1920, 1080, {plate}, 6);
+    Quality background_only;
+    background_only.background_qp_delta = 6;
+
+    const auto rects = builder.build(1920, 1080, {plate}, background_only);
     CHECK(rects.size() == 3);
     CHECK(rects[0].qp_delta == -10);
     CHECK(rects[0].left == 800);

@@ -35,8 +35,12 @@ Object object_from_box(const Box& box, const ImportancePolicy& policy);
 
 class RoiMapBuilder {
 public:
+    /// Turns weighed detections into the rectangles an encoder takes: objects in importance
+    /// order, then their halos, then the background. Reads `background_qp_delta` and
+    /// `max_protected_fraction` from the quality settings -- the second is why this takes
+    /// the whole struct rather than the one number it used to.
     std::vector<Rect> build(int width, int height,
-        const std::vector<Detection>& detections, int background_qp_delta) const;
+        const std::vector<Detection>& detections, const Quality& quality) const;
 
     // Boxes lie on a timeline; picks the ones within Quality::hold_sec of
     // `t_sec` and resolves them to pixels.

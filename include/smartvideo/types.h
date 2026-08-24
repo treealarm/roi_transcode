@@ -137,6 +137,25 @@ struct Quality {
     /// end of it. Everything else -- which in ta_vms is everything, since the archive pass
     /// configures no kinds at all -- is weighed by the model.
     ImportancePolicy importance;
+
+    /// How much of the frame may be protected before importance decides who misses out.
+    /// 0 disables the budget and every region keeps its own delta.
+    ///
+    /// §15 spends a bitrate budget on the critical objects first. Under a constant
+    /// quantizer there is no bitrate to hand around, but there is a budget all the same,
+    /// and it is area: protection is paid for by the background it is taken from, so a
+    /// frame with no background left cannot pay. Measured across a real archive, a person
+    /// box averages 41.5% of the frame while a face averages 1.9% -- protect the person and
+    /// the file grows, protect the face and it does not. That is the whole of it.
+    ///
+    /// Regions are already sorted by importance for §12, so the budget rides on that order:
+    /// take each until the next would not fit, and give what does not fit a delta of zero.
+    /// Zero, not the background penalty -- a person nobody can afford to sharpen is still
+    /// not background, and degrading them would be a worse answer than leaving them be.
+    ///
+    /// A quarter of the frame by default. Below that the codec still has three quarters to
+    /// take bits from; above it the archive says the file grows instead of shrinking.
+    float max_protected_fraction = 0.25f;
 };
 
 struct Settings {

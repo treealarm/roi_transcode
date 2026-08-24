@@ -146,7 +146,7 @@ void a_plate_inside_a_vehicle_keeps_the_plate_s_quality()
 
     smartvideo::RoiMapBuilder builder;
     const auto dets = builder.detections_from(boxes, quality, 1000, 1000);
-    const auto rects = builder.build(1000, 1000, dets, quality.background_qp_delta);
+    const auto rects = builder.build(1000, 1000, dets, quality);
 
     check(rects.size() >= 2, "both regions produced");
     if (rects.size() < 2) {
@@ -180,7 +180,7 @@ void a_nested_halo_does_not_degrade_its_parent()
 
     smartvideo::RoiMapBuilder builder;
     const auto dets = builder.detections_from(boxes, quality, 1000, 1000);
-    const auto rects = builder.build(1000, 1000, dets, quality.background_qp_delta);
+    const auto rects = builder.build(1000, 1000, dets, quality);
 
     // Every object rectangle precedes every halo. Interleaved, the face's halo would win
     // over the person's body and the torso beside the head would come out worse than the
@@ -214,6 +214,69 @@ void a_configured_kind_keeps_its_own_number()
         "the configured delta survives the model");
 }
 
+// §15's budget, in area. The case the archive handed us: a person filling nearly half the
+// frame, with their face inside it. There is no background left to pay for protecting the
+// body, so the body goes to neutral and the face -- 0.8% of the frame and the most valuable
+// thing in it -- keeps everything it asked for.
+void the_budget_protects_the_face_and_lets_the_body_go()
+{
+    smartvideo::Quality quality;
+    quality.background_qp_delta = 6;
+    quality.kinds.clear();
+    quality.max_protected_fraction = 0.25f;
+
+    const std::vector<smartvideo::Box> boxes{
+        box("person", 0.25f, 0.10f, 0.50f, 0.85f, 1.0f),   // 42.5% of the frame
+        box("face", 0.44f, 0.14f, 0.09f, 0.09f, 1.0f),     //  0.8% of the frame
+    };
+
+    smartvideo::RoiMapBuilder builder;
+    const auto dets = builder.detections_from(boxes, quality, 1000, 1000);
+    const auto rects = builder.build(1000, 1000, dets, quality);
+
+    // Face, person, the face's halo, the background -- and nothing else. The person's halo
+    // is the one that is missing, because a halo softens a step that no longer exists.
+    check(rects.size() == 4, "four rectangles: two objects, one halo, the background");
+    if (rects.size() != 4) {
+        return;
+    }
+
+    // Importance order puts the face first, so it is the one that gets paid for.
+    check(rects[0].qp_delta == -9, "the face keeps its own delta");
+    check(rects[1].qp_delta == 0,
+        "the person is neutral -- not sharpened, and not degraded either");
+    check(rects[2].qp_delta == -4, "the halo present is the face's");
+
+    // And the background is still penalised, which is where the saving comes from.
+    check(rects[3].qp_delta == 6 && rects[3].left == 0 && rects[3].right == 1000,
+        "the background rectangle survives the budget");
+}
+
+// With the budget off, nothing changes -- the setting has to be able to get out of the way.
+void a_budget_of_zero_changes_nothing()
+{
+    smartvideo::Quality quality;
+    quality.background_qp_delta = 6;
+    quality.kinds.clear();
+
+    const std::vector<smartvideo::Box> boxes{
+        box("person", 0.25f, 0.10f, 0.50f, 0.85f, 1.0f),
+    };
+
+    smartvideo::RoiMapBuilder builder;
+    const auto dets = builder.detections_from(boxes, quality, 1000, 1000);
+
+    quality.max_protected_fraction = 0.0f;
+    const auto unbudgeted = builder.build(1000, 1000, dets, quality);
+    check(unbudgeted.size() == 3 && unbudgeted[0].qp_delta == -7,
+        "an unbudgeted person keeps its delta and its halo");
+
+    quality.max_protected_fraction = 0.25f;
+    const auto budgeted = builder.build(1000, 1000, dets, quality);
+    check(budgeted.size() == 2 && budgeted[0].qp_delta == 0,
+        "the same person under a budget goes neutral and loses its halo");
+}
+
 } // namespace
 
 int main()
@@ -226,6 +289,8 @@ int main()
     a_plate_inside_a_vehicle_keeps_the_plate_s_quality();
     a_nested_halo_does_not_degrade_its_parent();
     a_configured_kind_keeps_its_own_number();
+    the_budget_protects_the_face_and_lets_the_body_go();
+    a_budget_of_zero_changes_nothing();
 
     if (failures > 0) {
         std::fprintf(stderr, "importance_test: %d failure(s)\n", failures);

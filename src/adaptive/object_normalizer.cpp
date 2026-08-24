@@ -74,7 +74,7 @@ Object object_from_box(const Box& box, const ImportancePolicy& policy)
 }
 
 std::vector<Rect> RoiMapBuilder::build(int width, int height,
-    const std::vector<Detection>& detections, int background_qp_delta) const
+    const std::vector<Detection>& detections, const Quality& quality) const
 {
     std::vector<Rect> out;
     if (width <= 0 || height <= 0) {
@@ -96,6 +96,28 @@ std::vector<Rect> RoiMapBuilder::build(int width, int height,
     std::stable_sort(ordered.begin(), ordered.end(),
         [](const Detection* a, const Detection* b) { return a->importance > b->importance; });
 
+    // §15's budget, denominated in area rather than in bits.
+    //
+    // Under a constant quantizer there is no bitrate to hand around, but protection is still
+    // paid for: every block held at a lower QP is paid for by the background it is taken
+    // from, and a frame with no background left cannot pay. So the budget is a share of the
+    // frame, spent in the order the sort above already established -- which is what makes
+    // this §15's "critical objects first" and not a second, competing policy.
+    //
+    // Areas are summed, not united, so nesting counts twice: a face inside a person spends
+    // its own area again. That errs towards spending less, which is the safe direction --
+    // and it is nearly free here, because the objects that nest are the small ones.
+    //
+    // What does not fit gets a delta of zero rather than being dropped. Dropped, it would
+    // fall through to the background rectangle below and be *degraded*; a person nobody can
+    // afford to sharpen is still not background. Its halo goes, though: a halo exists to
+    // soften a step that is no longer there.
+    const double frame_area = static_cast<double>(width) * static_cast<double>(height);
+    const double budget = quality.max_protected_fraction > 0.0f
+        ? static_cast<double>(quality.max_protected_fraction) * frame_area
+        : 0.0;
+    double spent = 0.0;
+
     // Every object before any halo, and that ordering is load-bearing rather than tidy.
     //
     // Emitting each object with its own halo interleaved puts a nested object's halo ahead
@@ -103,6 +125,8 @@ std::vector<Rect> RoiMapBuilder::build(int width, int height,
     // roughly -4 and win over the person's own -7, so the torso beside the head would come
     // out worse than the rest of the person. A halo exists to soften the step *outside* a
     // region, never to cut into one.
+    std::vector<const Detection*> afforded;
+    afforded.reserve(ordered.size());
     for (const Detection* dp : ordered) {
         Rect obj{
             .top = dp->y1,
@@ -112,12 +136,22 @@ std::vector<Rect> RoiMapBuilder::build(int width, int height,
             .qp_delta = dp->qp_delta,
         };
         clamp_rect(obj, width, height);
-        if (rect_valid(obj)) {
-            out.push_back(obj);
+        if (!rect_valid(obj)) {
+            continue;
         }
+
+        const double area = static_cast<double>(obj.right - obj.left)
+            * static_cast<double>(obj.bottom - obj.top);
+        if (budget > 0.0 && spent + area > budget) {
+            obj.qp_delta = 0;
+        } else {
+            spent += area;
+            afforded.push_back(dp);
+        }
+        out.push_back(obj);
     }
 
-    for (const Detection* dp : ordered) {
+    for (const Detection* dp : afforded) {
         Rect pad{
             .top = dp->y1 - dp->pad_y,
             .bottom = dp->y2 + dp->pad_y,
@@ -131,13 +165,13 @@ std::vector<Rect> RoiMapBuilder::build(int width, int height,
         }
     }
 
-    if (background_qp_delta != 0) {
+    if (quality.background_qp_delta != 0) {
         out.push_back(Rect{
             .top = 0,
             .bottom = height,
             .left = 0,
             .right = width,
-            .qp_delta = background_qp_delta,
+            .qp_delta = quality.background_qp_delta,
         });
     }
 

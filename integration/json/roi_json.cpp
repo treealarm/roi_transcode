@@ -25,6 +25,11 @@ RoiJson load_roi_json(const std::string& path)
     if (root.contains("max_regions")) {
         doc.quality.max_regions = root.value("max_regions", 32);
     }
+    // §15's area budget. Present so a config can turn it off or move it -- the default is a
+    // quarter of the frame and lives in Quality, not here.
+    if (root.contains("max_protected_fraction")) {
+        doc.quality.max_protected_fraction = root.value("max_protected_fraction", 0.25f);
+    }
 
     if (root.contains("kinds") && root["kinds"].is_object()) {
         for (auto it = root["kinds"].begin(); it != root["kinds"].end(); ++it) {
