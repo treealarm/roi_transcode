@@ -43,11 +43,42 @@ struct ImportancePolicy {
     /// is there and we do not know what".
     float unknown_priority = 0.5f;
 
-    /// Confidence to assume when the detector reported none. §11 multiplies confidence in,
-    /// so a missing value has to become something -- and silence means "did not say", not
-    /// "not sure". Reading it as 0 would drop every region from a detector that reports no
-    /// confidence at all, which is most ONVIF cameras.
+    /// Confidence to assume when the detector reported none. Only reached for a class the
+    /// table does not name -- see `weigh_confidence_on_known_classes`. Silence means "did
+    /// not say", not "not sure": reading it as 0 would drop every region from a detector
+    /// that reports no confidence at all, which is most ONVIF cameras.
     float assumed_confidence = 1.0f;
+
+    /// Whether a class we recognise has its importance scaled by the detector's confidence.
+    ///
+    /// False, and that is a departure from the letter of §11, which multiplies confidence
+    /// into every region. The reason is that the multiplication defeats the very ordering
+    /// §11's own table sets up, and defeats it systematically rather than occasionally:
+    ///
+    ///     plate   semantic 1.00 x confidence 0.50 = 0.50
+    ///     vehicle semantic 0.60 x confidence 0.95 = 0.57   <- the vehicle wins
+    ///
+    /// It is not hypothetical. Measured across this deployment's archive, a face averages
+    /// 0.633 confidence against a person's 0.892, so 0.95 x 0.633 = 0.601 loses to
+    /// 0.80 x 0.892 = 0.714 and a body outranks the face on it. Small objects are harder to
+    /// detect confidently, and small objects -- faces, plates -- are exactly the ones with
+    /// the highest semantic priority. The two are anti-correlated, so multiplying inverts
+    /// the hierarchy as a rule.
+    ///
+    /// The point of adaptive encoding is that we know roughly what is in the frame and what
+    /// it is worth: a plate outranks a car, a car outranks the background, a face outranks
+    /// the body it belongs to. That ordering is the whole premise, not something to be
+    /// decided per frame by how sure a detector happened to be.
+    ///
+    /// And confidence is already spent once. Detections arrive filtered
+    /// (analytics_watch.min_confidence, 0.5 by default), so anything reaching here has
+    /// already passed the "is it really there" test. Multiplying by it again applies the
+    /// same signal twice. Confidence answers whether an object is present; the class
+    /// answers what it is worth, and those are different questions.
+    ///
+    /// It still weighs on classes the table does not name -- for those, how sure the
+    /// detector is really is all there is to go on. Set this true for the letter of §11.
+    bool weigh_confidence_on_known_classes = false;
 
     /// The two ends of the importance-to-QP line. Defaults derived from §11 and §12 above.
     int32_t qp_at_zero = 5;
@@ -57,5 +88,9 @@ struct ImportancePolicy {
 /// The §11 table, for a kind this deployment has not overridden. Returns `unknown` for a
 /// class the table does not name.
 float default_semantic_priority(const std::string& kind, float unknown = 0.5f);
+
+/// Whether anything -- §11's table or this policy -- names this class. What separates "we
+/// know what this is and what it is worth" from "something is there".
+bool is_known_class(const std::string& kind, const ImportancePolicy& policy);
 
 } // namespace smartvideo

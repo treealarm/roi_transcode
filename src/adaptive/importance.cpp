@@ -29,6 +29,17 @@ float default_semantic_priority(const std::string& kind, float unknown)
     return unknown;
 }
 
+bool is_known_class(const std::string& kind, const ImportancePolicy& policy)
+{
+    if (policy.semantic_priority.find(kind) != policy.semantic_priority.end()) {
+        return true;
+    }
+    // A sentinel the table cannot return for a class it names, so "not named" is
+    // distinguishable from "named, and worth very little".
+    constexpr float absent = -1.0f;
+    return default_semantic_priority(kind, absent) != absent;
+}
+
 namespace {
 
 float lookup(const std::unordered_map<std::string, float>& table, const std::string& key,
@@ -46,10 +57,22 @@ float importance_of(const Object& object, const ImportancePolicy& policy)
         default_semantic_priority(object.kind, policy.unknown_priority));
     const float task = lookup(policy.task_priority, object.kind, 1.0f);
 
-    // Silence is not zero. A detector that reports no confidence -- most ONVIF cameras --
-    // would otherwise have every one of its regions multiplied away to nothing.
-    const float confidence =
-        object.confidence > 0.0f ? object.confidence : policy.assumed_confidence;
+    // A class we recognise is worth what its class is worth, full stop.
+    //
+    // §11 multiplies confidence into everything, and that inverts its own table: small
+    // objects are detected less confidently, and small objects are the ones with the
+    // highest priority, so a body outranks the face on it. The reasoning is in
+    // ImportancePolicy::weigh_confidence_on_known_classes; the short version is that
+    // detections arrive already filtered by min_confidence, so "is it really there" has
+    // been answered, and "what is it worth" is a different question with a different answer.
+    //
+    // For a class nobody named, confidence is all there is, so it weighs. Silence is not
+    // zero there either -- most ONVIF cameras report no confidence at all, and reading that
+    // as zero would multiply every one of their regions away.
+    const bool known = is_known_class(object.kind, policy);
+    const float confidence = (known && !policy.weigh_confidence_on_known_classes)
+        ? 1.0f
+        : (object.confidence > 0.0f ? object.confidence : policy.assumed_confidence);
 
     // §13 and §15 territory, and honestly constant until they exist. Written out rather
     // than dropped from the product so the shape of §11 stays visible: when temporal

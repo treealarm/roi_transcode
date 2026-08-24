@@ -66,22 +66,70 @@ void the_qp_line_reproduces_the_specification_s_example()
     check(smartvideo::qp_from_importance(0.05f, policy) == 4, "background lands on +4");
 }
 
-// Confidence multiplies in; silence does not.
-void confidence_is_a_factor_and_silence_is_not_zero()
+// A class we recognise is worth what its class is worth, however sure the detector was.
+void a_known_class_is_not_scaled_by_confidence()
 {
     const smartvideo::ImportancePolicy policy;
-    smartvideo::Object certain = smartvideo::object_from_box(
-        box("person", 0.1f, 0.1f, 0.2f, 0.2f, 1.0f), policy);
-    smartvideo::Object unsure = smartvideo::object_from_box(
-        box("person", 0.1f, 0.1f, 0.2f, 0.2f, 0.5f), policy);
-    smartvideo::Object silent = smartvideo::object_from_box(
-        box("person", 0.1f, 0.1f, 0.2f, 0.2f), policy);
+    for (float c : {1.0f, 0.6f, 0.51f}) {
+        const smartvideo::Object person = smartvideo::object_from_box(
+            box("person", 0.1f, 0.1f, 0.2f, 0.2f, c), policy);
+        check_near(smartvideo::importance_of(person, policy), 0.80, 1e-5,
+            "a person is worth 0.80 at confidence " + std::to_string(c));
+    }
+}
 
-    check_near(smartvideo::importance_of(certain, policy), 0.80, 1e-5, "certain person");
-    check_near(smartvideo::importance_of(unsure, policy), 0.40, 1e-5, "half-sure person");
-    // A detector that reports nothing must not have its regions multiplied away: most
-    // ONVIF cameras report no confidence at all.
-    check_near(smartvideo::importance_of(silent, policy), 0.80, 1e-5, "silent detector");
+// The property the whole thing exists for: a plate outranks a car and a face outranks the
+// body it belongs to, whatever the detector's confidence in each happened to be.
+//
+// The numbers are this deployment's own, measured over its archive: a face averages 0.633
+// confidence against a person's 0.892. Multiplied in -- which is what §11 says literally --
+// they invert the table, 0.601 against 0.714, and the body wins.
+void the_class_hierarchy_survives_an_unhelpful_detector()
+{
+    const smartvideo::ImportancePolicy policy;
+    const auto face = smartvideo::object_from_box(
+        box("face", 0.4f, 0.2f, 0.05f, 0.06f, 0.633f), policy);
+    const auto person = smartvideo::object_from_box(
+        box("person", 0.3f, 0.2f, 0.3f, 0.6f, 0.892f), policy);
+    check(smartvideo::importance_of(face, policy) > smartvideo::importance_of(person, policy),
+        "a face outranks a person despite being detected less confidently");
+
+    const auto plate = smartvideo::object_from_box(
+        box("license_plate", 0.4f, 0.5f, 0.08f, 0.03f, 0.50f), policy);
+    const auto vehicle = smartvideo::object_from_box(
+        box("vehicle", 0.2f, 0.2f, 0.5f, 0.5f, 0.95f), policy);
+    check(smartvideo::importance_of(plate, policy)
+            > smartvideo::importance_of(vehicle, policy),
+        "a plate outranks a vehicle despite being detected less confidently");
+
+    // And the letter of §11 is still reachable, for a deployment that wants it.
+    smartvideo::ImportancePolicy literal = policy;
+    literal.weigh_confidence_on_known_classes = true;
+    check(smartvideo::importance_of(face, literal) < smartvideo::importance_of(person, literal),
+        "with confidence weighed, the table inverts -- which is why it is off");
+}
+
+// A class nobody named has nothing but the detector's word, so there confidence weighs.
+void an_unknown_class_is_scaled_by_confidence()
+{
+    const smartvideo::ImportancePolicy policy;   // unknown_priority 0.5
+    const auto sure = smartvideo::object_from_box(
+        box("bag", 0.1f, 0.1f, 0.2f, 0.2f, 1.0f), policy);
+    const auto unsure = smartvideo::object_from_box(
+        box("bag", 0.1f, 0.1f, 0.2f, 0.2f, 0.6f), policy);
+    check_near(smartvideo::importance_of(sure, policy), 0.50, 1e-5, "a certain unknown");
+    check_near(smartvideo::importance_of(unsure, policy), 0.30, 1e-5, "an unsure unknown");
+
+    // Silence is not zero: most ONVIF cameras report no confidence at all, and reading that
+    // as zero would multiply every one of their regions away.
+    const auto silent = smartvideo::object_from_box(
+        box("bag", 0.1f, 0.1f, 0.2f, 0.2f), policy);
+    check_near(smartvideo::importance_of(silent, policy), 0.50, 1e-5, "a silent detector");
+
+    // Even at full confidence an unnamed object stays below the least of the named ones.
+    check(smartvideo::importance_of(sure, policy)
+            < smartvideo::default_semantic_priority("vehicle"),
+        "an unknown never outranks a class we recognise");
 }
 
 // §12, as the specification draws it: a plate inside a vehicle.
@@ -172,7 +220,9 @@ int main()
 {
     semantic_priorities_are_the_specification_s();
     the_qp_line_reproduces_the_specification_s_example();
-    confidence_is_a_factor_and_silence_is_not_zero();
+    a_known_class_is_not_scaled_by_confidence();
+    the_class_hierarchy_survives_an_unhelpful_detector();
+    an_unknown_class_is_scaled_by_confidence();
     a_plate_inside_a_vehicle_keeps_the_plate_s_quality();
     a_nested_halo_does_not_degrade_its_parent();
     a_configured_kind_keeps_its_own_number();
