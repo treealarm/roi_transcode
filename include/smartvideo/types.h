@@ -81,6 +81,24 @@ struct Box {
     float y = 0;
     float width = 0;
     float height = 0;
+
+    /// What the detector knows beyond where the box is -- the inputs the importance model
+    /// of §11 needs and geometry alone cannot supply.
+    ///
+    /// `confidence` is one of the five factors directly. `track_id` is what makes temporal
+    /// stability computable at all: it is the only thing that says two boxes in different
+    /// frames are the same object.
+    ///
+    /// Zero means "not reported" for both, and that is a distinct state rather than a low
+    /// value: a detector that gives no confidence is not one reporting zero, and a box with
+    /// no track is not part of any. The importance model treats an unreported confidence as
+    /// 1.0 rather than as 0, because refusing to protect anything a silent detector found
+    /// would be the wrong reading of silence.
+    uint64_t track_id = 0;
+    float confidence = 0;
+    /// The producer's own, narrower word for the class when it has one ("Truck" under
+    /// vehicle). Free-form; `kind` is what decides priority.
+    std::string label;
 };
 
 // How much better than the background one kind of region gets.

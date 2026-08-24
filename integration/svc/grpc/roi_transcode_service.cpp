@@ -180,6 +180,9 @@ smartvideo::Box box_from_proto(const roi::transcode::Box& b)
     out.y = b.y();
     out.width = b.width();
     out.height = b.height();
+    out.track_id = static_cast<uint64_t>(b.track_id() > 0 ? b.track_id() : 0);
+    out.confidence = b.confidence();
+    out.label = b.label();
     return out;
 }
 

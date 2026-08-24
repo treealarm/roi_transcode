@@ -54,6 +54,12 @@ RoiJson load_roi_json(const std::string& path)
         b.y = row.value("bbox_y", 0.0f);
         b.width = row.value("bbox_w", 0.0f);
         b.height = row.value("bbox_h", 0.0f);
+        // Optional, and absent from every scene the generator writes today. Left at zero
+        // they mean "not reported", which the importance model reads as "no opinion"
+        // rather than as a low score.
+        b.track_id = row.value("track_id", 0ULL);
+        b.confidence = row.value("confidence", 0.0f);
+        b.label = row.value("label", std::string{});
         doc.boxes.push_back(b);
     }
 
