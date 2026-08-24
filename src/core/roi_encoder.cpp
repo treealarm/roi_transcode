@@ -123,9 +123,9 @@ void RoiEncoder::open_deferred(const EncoderConfig& config)
     // for temporal smoothing or a bitrate target and gets neither has been misled; the
     // encode would look like it worked, and any measurement taken against it would be
     // wrong in a way nothing reveals.
-    if (config.temporal.any_set()) {
-        fail("TemporalROIConfig (TZ v2.0 section 13) is declared but not implemented; "
-             "leave it at its defaults");
+    if (config.temporal.unimplemented_requested()) {
+        fail("smoothing and track prediction (TZ v2.0 section 13) are declared but not "
+             "implemented; max_missing_frames and confidence_decay are");
     }
     if (config.rate_control.any_set()) {
         fail("RateControlPolicy (TZ v2.0 section 15) is declared but not implemented; "

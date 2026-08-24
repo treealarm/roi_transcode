@@ -29,9 +29,22 @@ const char* quality_policy_name(QualityPolicy p);
 /// track is already known, so a gap can be interpolated rather than predicted, which is
 /// simpler and strictly more accurate. Prediction is for the live path.
 struct TemporalROIConfig {
-    /// How many frames a region survives without a detection before it is dropped.
-    uint32_t max_missing_frames = 0;
-    /// Confidence multiplier applied per missing frame.
+    /// How many of the producer's frames a region survives without a detection before it is
+    /// considered gone.
+    ///
+    /// Frames, not seconds, and that is what lets one setting serve sources running at
+    /// different rates: the duration is this count times the interval measured from a
+    /// track's own samples. A camera reporting every 0.2s and a detector reporting every
+    /// 1.0s both get three missed frames' worth of patience, which is three very different
+    /// numbers of seconds.
+    ///
+    /// Three by default. Measured on a real archive, single-frame misses dominate -- 80 of
+    /// 125 for the detector, 1321 of 1646 for the camera -- and three covers all but a
+    /// handful without keeping an object alive long after it has left.
+    uint32_t max_missing_frames = 3;
+    /// Confidence multiplier applied per missing frame, when a region is being kept alive
+    /// past the last time it was seen. Not applied between two known samples: there the
+    /// confidence is interpolated like everything else, because both ends are facts.
     float confidence_decay = 1.0f;
     float spatial_smoothing = 0.0f;
     float temporal_smoothing = 0.0f;
@@ -41,16 +54,14 @@ struct TemporalROIConfig {
     /// Extrapolate from the track's motion instead of holding the last box.
     bool use_track_prediction = false;
 
-    /// Whether the caller asked for any of this. All-zero means "unset", and a session
-    /// opens; anything else is refused at open with the field named.
+    /// Whether the caller asked for a part of §13 that does not exist yet.
     ///
-    /// Declared-but-ignored is the worst state a setting can be in: the caller fills it,
-    /// nothing happens, and the encode looks like it worked. Refusing costs one comparison
-    /// and turns a silent no-op into an answer.
-    bool any_set() const
+    /// max_missing_frames and confidence_decay are implemented and are not named here. The
+    /// rest still are: declared-but-ignored is the worst state a setting can be in, because
+    /// the caller fills it, nothing happens, and the encode looks like it worked.
+    bool unimplemented_requested() const
     {
-        return max_missing_frames != 0 || confidence_decay != 1.0f
-            || spatial_smoothing != 0.0f || temporal_smoothing != 0.0f
+        return spatial_smoothing != 0.0f || temporal_smoothing != 0.0f
             || max_qp_delta_per_frame != 0 || use_track_prediction;
     }
 };

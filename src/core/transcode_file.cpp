@@ -4,6 +4,7 @@
 #include "packet_sink.h"
 #include "importance_map.h"
 #include "roi_encoder.h"
+#include "temporal_roi.h"
 #include "object_normalizer.h"
 
 #include <cstdio>
@@ -91,6 +92,9 @@ Report transcode_file(const std::string& input_path,
     enc.open(ep, sink);
 
     RoiMapBuilder roi_builder;
+    // §13. Built once from the whole timeline: grouping boxes into tracks per frame would be
+    // the same work repeated for every frame of the clip.
+    const TemporalRoi temporal(boxes, settings.temporal, settings.quality.hold_sec);
     QpDeltaMapBuilder qp_map;
     roiav::Frame dec_frame;
     roiav::Packet ipkt;
@@ -104,8 +108,11 @@ Report transcode_file(const std::string& input_path,
             ? 0.0
             : static_cast<double>(pts) * av_q2d(in_v->time_base);
 
-        const auto dets = roi_builder.detections_at(
-            boxes, settings.quality, ep.width, ep.height, t);
+        // One region per track rather than one per sample, positioned where the object was
+        // at this instant rather than where it was last seen.
+        const auto live = temporal.at(t);
+        const auto dets =
+            roi_builder.detections_from(live, settings.quality, ep.width, ep.height);
         auto rects = roi_builder.build(
             ep.width, ep.height, dets, settings.quality.background_qp_delta);
         const int cap = settings.quality.max_regions;
