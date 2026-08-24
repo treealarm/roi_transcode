@@ -53,6 +53,25 @@ BACKGROUNDS = {
         ":cb=128:cr=128,"
         "drawgrid=width=128:height=128:thickness=3:color=0xffff00@0.95",
     ),
+    # Incoherent motion everywhere, and none of it worth keeping: temporal noise over the
+    # texture, standing in for foliage in wind, rain, or sensor grain.
+    #
+    # This is the scene the other four cannot produce. On all of them the only thing that moves
+    # is the plate, which is the best case for an encoder's own rate control -- it spends bits
+    # on what changed, and what changed is what matters, so region hints have little left to
+    # add. Here the encoder's instinct is exactly wrong: motion compensation cannot predict
+    # noise, so every frame pays for the background afresh, while the stationary plate codes
+    # almost free and stays as coarse as the first frame left it.
+    #
+    # allf=t makes the noise differ per frame; without it the grain is fixed and the scene is
+    # just a busier texture with nothing moving at all.
+    "distraction": (
+        "color=c=0x3a3a3a:s={W}x{H}",
+        "format=yuv420p,"
+        "geq=lum='if(lt(mod(X\\,32)\\,3)\\,235\\,if(lt(mod(Y\\,32)\\,3)\\,235\\,70))'"
+        ":cb=128:cr=128,"
+        "noise=alls=14:allf=t",
+    ),
 }
 
 # name -> (background, moving?)
@@ -62,6 +81,8 @@ SCENES = {
     "zoneplate": ("zoneplate", False),
     "texture": ("texture", False),
     "moving": ("texture", True),
+    # Plate static on purpose: the point is that everything else moves.
+    "distraction": ("distraction", False),
 }
 
 
