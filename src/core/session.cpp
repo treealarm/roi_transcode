@@ -247,7 +247,10 @@ Session::Session(const SessionParams& params, PacketHandler* handler)
     ep.policy = params.settings.policy;
     ep.temporal = params.settings.temporal;
     ep.rate_control = params.settings.rate_control;
-    ep.codec = params.settings.codec;
+    // SameAsSource, answered from what the caller said it is submitting. Raw frames have no
+    // source codec to mirror, so they take the same H.264 fallback an unrecognised one does.
+    ep.codec = params.settings.codec != Codec::SameAsSource ? params.settings.codec
+        : (params.codec == InputCodec::H265 ? Codec::H265 : Codec::H264);
     ep.crf = params.settings.crf;
     ep.gop = params.settings.gop;
     ep.preset = params.settings.preset;

@@ -55,12 +55,23 @@ const char* preset_name(Preset p);
 /// The name back, for a command line or a config file. Unknown text gives Balanced.
 Preset preset_from_name(const char* name);
 
-// What comes out. HEVC saves more, but a ta_vms archive is H.264 and one HLS
-// playlist stitches many clips: re-encoding some of them to HEVC would leave a
-// single playlist carrying two codecs, which browsers handle badly.
+// What comes out. HEVC saves more, but changing codec mid-archive is what breaks a
+// player: one HLS playlist stitches many clips, and browsers handle a codec change
+// within one badly. Which is why a transcoding pass wants SameAsSource rather than
+// either fixed value -- see below.
 enum class Codec {
     H264,
     H265,
+    /// Encode in whatever the input is already in -- H.264 stays H.264, HEVC stays HEVC, and
+    /// anything else becomes H.264, which is the one every consumer can play.
+    ///
+    /// For a transcoder this is usually what is wanted, and for an archive it is a correctness
+    /// requirement rather than a preference: one HLS playlist stitches many clips, and a pass that
+    /// re-encodes some of them into a different codec is what leaves two codecs in one playlist.
+    ///
+    /// Resolved before any backend is asked for anything, so no backend ever sees this value -- the
+    /// codec ternaries throughout src/backend read "not H264" as HEVC, and that stays true.
+    SameAsSource,
 };
 
 enum class InputCodec {
@@ -134,8 +145,12 @@ struct Quality {
     ///
     /// The two work together rather than competing: a kind with an explicit entry in
     /// `kinds` keeps its qp_delta, because someone said what they wanted and that is the
-    /// end of it. Everything else -- which in ta_vms is everything, since the archive pass
-    /// configures no kinds at all -- is weighed by the model.
+    /// end of it. Everything else is weighed by the model.
+    ///
+    /// Which means a caller that registers every kind it has seen, all at one delta, turns
+    /// this model off without meaning to -- every region ends up at the same delta and, since
+    /// importance is derived back from it, at the same importance, so the §12 ordering and the
+    /// area budget below both see a flat list. ta_vms did exactly that until it was noticed.
     ImportancePolicy importance;
 
     /// How much of the frame may be protected before importance decides who misses out.
@@ -160,7 +175,9 @@ struct Quality {
 
 struct Settings {
     Encoder encoder = Encoder::Auto;
-    Codec codec = Codec::H265;
+    /// H.264 by default: it is the codec every player and every browser handles, and a caller
+    /// that has an opinion says so. `SameAsSource` is the one to reach for when transcoding.
+    Codec codec = Codec::H264;
     // Constant quantizer / CRF.
     int32_t crf = 28;
     // Keyframe interval in frames; 0 means two seconds.

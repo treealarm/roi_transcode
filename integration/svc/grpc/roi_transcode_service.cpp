@@ -124,8 +124,12 @@ template <typename ProtoSettings>
 void apply_settings(const ProtoSettings& in, smartvideo::Settings& out)
 {
     out.encoder = from_proto(in.encoder());
-    out.codec = in.codec() == roi::transcode::CODEC_H264 ? smartvideo::Codec::H264
-                                                         : smartvideo::Codec::H265;
+    switch (in.codec()) {
+        case roi::transcode::CODEC_H264: out.codec = smartvideo::Codec::H264; break;
+        case roi::transcode::CODEC_SAME_AS_SOURCE:
+            out.codec = smartvideo::Codec::SameAsSource; break;
+        default: out.codec = smartvideo::Codec::H265; break;
+    }
     if (in.crf() > 0) {
         out.crf = in.crf();
     }

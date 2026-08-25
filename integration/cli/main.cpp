@@ -11,13 +11,13 @@ void usage()
 {
     std::fprintf(stderr,
         "Usage: roi-transcode --in CLIP --roi roi.json --out OUT.mp4\n"
-        "         [--encoder auto|qsv|vaapi|nvenc|cpu] [--codec h265|h264]\n"
+        "         [--encoder auto|qsv|vaapi|nvenc|cpu] [--codec h264|h265|source]\n"
         "         [--crf 28] [--gop N] [--preset balanced]\n"
         "\n"
-        "ROI transcoder, HEVC by default. Target is Intel Quick Sync.\n"
-        "--codec h264 keeps a ta_vms archive homogeneous, which matters because\n"
-        "one HLS playlist stitches many clips and browsers handle a codec change\n"
-        "mid-playlist badly.\n"
+        "ROI transcoder, H.264 by default. Target is Intel Quick Sync.\n"
+        "--codec source keeps whatever the input already is, which is what an\n"
+        "archive needs: one HLS playlist stitches many clips and browsers handle a\n"
+        "codec change mid-playlist badly.\n"
         "QSV maps AVRegionOfInterest to mfxExtEncoderROI (CQP + low_power).\n"
         "Linux VAAPI is the same iHD EncSliceLP path if hevc_qsv fails.\n"
         "libx265 is the CPU fallback (needs aq-mode).\n");
@@ -36,10 +36,11 @@ smartvideo::Encoder parse_encoder(const char* s)
 }
 smartvideo::Codec parse_codec(const char* s)
 {
+    if (std::strcmp(s, "source") == 0) return smartvideo::Codec::SameAsSource;
     if (std::strcmp(s, "h264") == 0) return smartvideo::Codec::H264;
     if (std::strcmp(s, "h265") == 0 || std::strcmp(s, "hevc") == 0)
         return smartvideo::Codec::H265;
-    throw std::runtime_error("unknown --codec (h264|h265)");
+    throw std::runtime_error("unknown --codec (h264|h265|source)");
 }
 } // namespace
 

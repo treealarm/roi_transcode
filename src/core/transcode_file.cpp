@@ -12,6 +12,22 @@
 
 namespace smartvideo {
 
+namespace {
+
+/// Codec::SameAsSource, answered from the input. Anything that is neither H.264 nor HEVC becomes
+/// H.264: it is the codec every player handles, and guessing a niche one back at the caller would
+/// be worse than the one answer that always works.
+Codec resolve_codec(Codec asked, AVCodecID input)
+{
+    if (asked != Codec::SameAsSource) {
+        return asked;
+    }
+    return input == AV_CODEC_ID_HEVC ? Codec::H265 : Codec::H264;
+}
+
+} // namespace
+
+
 using roiav::check;
 using roiav::fail;
 
@@ -83,7 +99,7 @@ Report transcode_file(const std::string& input_path,
     ep.policy = settings.policy;
     ep.temporal = settings.temporal;
     ep.rate_control = settings.rate_control;
-    ep.codec = settings.codec;
+    ep.codec = resolve_codec(settings.codec, in_v->codecpar->codec_id);
     ep.crf = settings.crf;
     ep.gop = settings.gop;
     ep.preset = settings.preset;
