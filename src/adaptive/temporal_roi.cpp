@@ -88,9 +88,18 @@ std::vector<Box> TemporalRoi::at(double t_sec) const
         // How long this track may go unseen before it is considered gone, in its own units.
         // max_missing_frames is a count of the producer's frames, and the producer's frame
         // rate is the interval measured above -- so one setting fits every source.
-        const double reach = track.interval > 0.0
-            ? track.interval * static_cast<double>(m_config.max_missing_frames)
-            : m_fallback_hold_sec;
+        // Patience measured in the producer's frames, capped in seconds -- see max_hold_sec.
+        // The cap applies only to what is inferred from the interval. A caller that set
+        // hold_sec said how long a box of theirs applies, and that is a decision rather than a
+        // guess to be second-guessed -- the same rule a configured kind gets in the quality
+        // table.
+        double reach = m_fallback_hold_sec;
+        if (track.interval > 0.0) {
+            reach = track.interval * static_cast<double>(m_config.max_missing_frames);
+            if (m_config.max_hold_sec > 0.0) {
+                reach = std::min(reach, m_config.max_hold_sec);
+            }
+        }
 
         const auto after = std::lower_bound(s.begin(), s.end(), t_sec,
             [](const Box& b, double t) { return b.t_sec < t; });

@@ -45,6 +45,23 @@ struct TemporalROIConfig {
     /// 125 for the detector, 1321 of 1646 for the camera -- and three covers all but a
     /// handful without keeping an object alive long after it has left.
     uint32_t max_missing_frames = 3;
+    /// Ceiling on that patience, in seconds. Zero means none.
+    ///
+    /// max_missing_frames is deliberately a count of the producer's frames, so one setting
+    /// serves sources running at different rates -- but that reasoning has no floor under it.
+    /// A producer reporting every eight seconds buys twenty-four seconds of patience, and a
+    /// person is not still standing where they were twenty-four seconds ago. Measured on a real
+    /// clip, that stale coverage blanketed the frame and left the background penalty with
+    /// nothing to reach, so re-compression saved nothing at any setting.
+    ///
+    /// The ceiling is a statement about objects rather than about reporting: whatever the
+    /// cadence, a box that has not been confirmed for this long has stopped describing the
+    /// picture. Two seconds by default.
+    ///
+    /// Applies only to what is inferred from a track's own interval. A caller that set
+    /// Quality::hold_sec said how long its boxes apply, and that is a decision, not a guess to
+    /// be capped -- a fixture holding one sample across a whole clip means it.
+    double max_hold_sec = 2.0;
     /// Confidence multiplier applied per missing frame, when a region is being kept alive
     /// past the last time it was seen. Not applied between two known samples: there the
     /// confidence is interpolated like everything else, because both ends are facts.
