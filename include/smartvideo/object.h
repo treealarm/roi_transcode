@@ -2,21 +2,14 @@
 
 // What the detector found -- TZ v2.0 §10.
 //
-// The fields are the specification's, verbatim. Two of them do nothing yet: the encoder
-// still gets its quality from Quality::kinds, and semantic_priority and task_priority are
-// consumed by the importance model of §11, which does not exist. They are declared now
-// because the type is the contract between the CV side and this library, and because a
-// caller that already has these numbers should not have to invent a place to put them.
-//
-// Geometry is where §10 goes beyond what the encoder currently accepts. A polygon is
-// reduced to its bounding box on the way in; the rasterisation that would preserve its
-// shape belongs with the importance map, for the same reason a mask does.
+// Geometry is where §10 goes beyond an axis-aligned box. A polygon used to collapse to its
+// AABB on the way in; the shape-preserving path paints it onto the same block qp-map a mask
+// uses, so a corner outside the outline is not protected. BoundingBox stays the cheap form.
 
 #include "smartvideo/geometry.h"
 
-#include <string>
-
 #include <cstdint>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -29,11 +22,6 @@ struct BoundingBox {
     float y = 0;
     float width = 0;
     float height = 0;
-};
-
-struct Point {
-    float x = 0;
-    float y = 0;
 };
 
 struct Polygon {
@@ -69,8 +57,18 @@ struct Object {
 };
 
 /// The smallest axis-aligned box containing this geometry, normalized like the input.
-/// A polygon collapses to its extent and a mask to the extent of its non-zero pixels --
-/// which is lossy, and is exactly what the shape-preserving path in §11 is for.
+/// A polygon collapses to its extent and a mask to the extent of its non-zero pixels.
 BoundingBox bounding_box_of(const Geometry& geometry);
+
+/// Fills `out` (tightly packed `width * height`) with `value` inside the polygon, using the
+/// even-odd rule. Points are normalized 0..1. Fewer than three points leaves `out` untouched
+/// and returns false. Does not clear pixels outside the outline -- the caller zeros the
+/// buffer when a fresh mask is wanted.
+bool rasterize_polygon(const Polygon& polygon, uint8_t* out, int32_t width, int32_t height,
+    uint8_t value = 255);
+
+/// Square dilation of a binary mask in place. `radius` is in pixels; 0 is a no-op. Used to
+/// grow a polygon by Quality::pad before it is sampled onto the block grid.
+void dilate_mask(uint8_t* mask, int32_t width, int32_t height, int32_t radius);
 
 } // namespace smartvideo

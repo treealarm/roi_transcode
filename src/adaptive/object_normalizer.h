@@ -2,6 +2,7 @@
 
 #include "importance.h"
 #include "smartvideo/object.h"
+#include "smartvideo/object_priority.h"
 #include "smartvideo/types.h"
 
 #include <vector>
@@ -22,15 +23,20 @@ struct Detection {
     int32_t pad_x = 0;
     int32_t pad_y = 0;
 
-    /// What §11 said this is worth, kept so regions can be ordered by it. Only meaningful
-    /// for detections the model weighed; one whose kind was configured explicitly carries
-    /// the importance its qp_delta implies, so the ordering stays consistent either way.
+    /// Continuous importance (v2 arithmetic), kept so regions can be ordered finely.
     float importance = 0.0f;
+    /// v3 ladder step derived from importance (or from a configured delta).
+    ObjectPriority priority = ObjectPriority::Normal;
+    uint64_t track_id = 0;
+
+    /// Normalized outline, when the box carried one. Empty means the axis-aligned rectangle
+    /// above is the whole of the geometry.
+    std::vector<Point> polygon;
 };
 
 /// The §10 view of a box, which is what the importance model reads. Confidence of zero on
 /// the way in means "not reported" and becomes the policy's assumed value here, so nothing
-/// downstream has to know the difference.
+/// downstream has to know the difference. A polygon on the box becomes Polygon geometry.
 Object object_from_box(const Box& box, const ImportancePolicy& policy);
 
 class RoiMapBuilder {
@@ -39,8 +45,16 @@ public:
     /// order, then their halos, then the background. Reads `background_qp_delta` and
     /// `max_protected_fraction` from the quality settings -- the second is why this takes
     /// the whole struct rather than the one number it used to.
+    ///
+    /// When any detection carries a polygon the path goes through the block qp-map (same as
+    /// a mask) so the outline is preserved; otherwise it stays on cheap axis-aligned rects.
+    ///
+    /// `coding_block` is the qp_map cell (16 for H.264, 32 for HEVC here).
+    /// `map_region_limit`: <0 keeps the old Quality::max_regions default for the shaped
+    /// path; 0 means unlimited (backend has qp_map); >0 truncates strongest-first.
     std::vector<Rect> build(int width, int height,
-        const std::vector<Detection>& detections, const Quality& quality) const;
+        const std::vector<Detection>& detections, const Quality& quality,
+        int32_t coding_block = 16, int32_t map_region_limit = -1) const;
 
     // Boxes lie on a timeline; picks the ones within Quality::hold_sec of
     // `t_sec` and resolves them to pixels.
@@ -52,5 +66,12 @@ public:
     std::vector<Detection> detections_from(const std::vector<Box>& boxes,
         const Quality& quality, int width, int height) const;
 };
+
+/// Cap `rects` to `budget`, always keeping a trailing full-frame background rect when one
+/// is present. RoiMapBuilder puts the background last; a naive resize then drops it first,
+/// and on VA-API the driver drops whatever is past eight by a second rule that ignores
+/// importance -- so the background penalty §15 spends from never reaches the encoder.
+void truncate_roi_rects(std::vector<Rect>& rects, int32_t budget, int32_t width, int32_t height,
+    int32_t* dropped = nullptr);
 
 } // namespace smartvideo

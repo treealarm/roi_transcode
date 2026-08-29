@@ -37,6 +37,9 @@ bool init_hw_frames(roiav::Buffer& device, roiav::Buffer& frames, AVPixelFormat 
 /// QSV, VAEncMiscParameterBufferROI on VA-API and quantOffsets on x264/x265.
 void attach_roi(AVFrame* frame, std::span<const Rect> regions);
 
+/// Attaches user-data-unregistered SEI (UUID || payload) for libx264/libx265 `udu_sei`.
+void attach_sei_unregistered(AVFrame* frame, std::span<const uint8_t> uuid_and_payload);
+
 } // namespace backend_common
 
 /// Everything a libavcodec-backed backend shares: opening the codec, submitting frames,

@@ -141,6 +141,15 @@ void RoiJobManager::run_job(const std::shared_ptr<Job>& entry, RoiJobRequest req
                 // and the difference matters enough to report rather than to
                 // leave the caller reading the process log.
                 entry->status.encoder_used = report.encoder_name;
+                entry->status.cpu_h265_target_guard = report.cpu_h265_target_guard;
+                entry->status.roi_lag_measured = report.roi_lag_measured;
+                entry->status.roi_lag_samples = report.roi_lag_samples;
+                entry->status.roi_lag_min_iou = report.roi_lag_min_iou;
+                entry->status.roi_lag_p95_frames = report.roi_lag_p95_frames;
+                entry->status.roi_lag_p99_frames = report.roi_lag_p99_frames;
+                entry->status.roi_lag_p95_ms = report.roi_lag_p95_ms;
+                entry->status.roi_lag_p99_ms = report.roi_lag_p99_ms;
+                entry->status.roi_lag_acceptance = report.roi_lag_acceptance;
             }
             entry->status.end_ts = std::chrono::system_clock::now();
             snapshot = entry->status;

@@ -13,9 +13,9 @@
 
 namespace smartvideo {
 
-// Signed QP delta per coding block, raster order. HEVC uses 32x32 CTUs,
-// H.264 16x16 macroblocks. This is the common representation a mask and a
-// box list both reduce to.
+// Signed QP delta per coding block, raster order. Cell size comes from the backend's
+// EncoderCapabilities::qp_map_block_* (H.264 16x16 macroblocks; HEVC painted at 32x32
+// here). This is the common representation a mask and a box list both reduce to.
 struct QpDeltaMap {
     int32_t block = 32;
     int32_t cols = 0;

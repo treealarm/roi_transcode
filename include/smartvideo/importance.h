@@ -80,9 +80,41 @@ struct ImportancePolicy {
     /// detector is really is all there is to go on. Set this true for the letter of §11.
     bool weigh_confidence_on_known_classes = false;
 
-    /// The two ends of the importance-to-QP line. Defaults derived from §11 and §12 above.
+    /// The two ends of the importance-to-QP line.
+    ///
+    /// Defaults are the §12 worked example (vehicle 0.60 → −4, plate 1.00 → −10). The product
+    /// operating point "plate −12, vehicle −6" is the same slope with ends at 3 and −12 -- set
+    /// those on the wire rather than changing the library default, so a measurement against
+    /// the specification still lands on the numbers the specification drew.
     int32_t qp_at_zero = 5;
     int32_t qp_at_one = -10;
+
+    /// TemporalStability rises with how long a track has been alive. A brand-new track is
+    /// worth `temporal_stability_floor`; after roughly `temporal_stability_tau_sec` seconds
+    /// it has climbed most of the way to 1.0. Untracked boxes keep 1.0 -- punishing silence
+    /// would drop every ONVIF region that has no track id.
+    float temporal_stability_floor = 0.5f;
+    float temporal_stability_tau_sec = 2.0f;
+
+    /// MotionWeight is optional in §11. Off by default (factor stays 1.0). When on, a static
+    /// track is worth `motion_weight_floor` and a track moving at `motion_speed_at_full`
+    /// frame-diagonals per second reaches 1.0.
+    bool use_motion_weight = false;
+    float motion_weight_floor = 0.7f;
+    float motion_speed_at_full = 0.15f;
+};
+
+/// What TemporalRoi knows about a track at one instant -- the two inputs §11 needs beyond
+/// a single Object. Empty (`present == false`) leaves TemporalStability and MotionWeight at
+/// 1.0, which is the right reading of "we have no history".
+struct TrackEvidence {
+    bool present = false;
+    /// Seconds since the track's first sample, at the query time.
+    float age_sec = 0.0f;
+    /// Centre displacement in frame-diagonals per second. Zero when there is no pair of
+    /// samples to measure against.
+    float speed = 0.0f;
+    int32_t sample_count = 0;
 };
 
 /// The §11 table, for a kind this deployment has not overridden. Returns `unknown` for a

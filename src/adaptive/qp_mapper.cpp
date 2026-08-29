@@ -2,7 +2,8 @@
 //
 // The last step before a backend: merge equal-delta blocks into rectangles, order them so
 // the strongest survive the region budget, and drop the rest. Which budget applies is the
-// backend's answer, not a setting -- see EncoderCapabilities::max_roi_regions.
+// backend's answer -- EncoderCapabilities::max_roi_regions for rectangle APIs, or no
+// truncate when qp_map is true (pass max_regions == 0).
 
 #include "smartvideo/geometry.h"
 

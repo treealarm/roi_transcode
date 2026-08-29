@@ -13,11 +13,17 @@ void usage()
         "Usage: roi-transcode --in CLIP --roi roi.json --out OUT.mp4\n"
         "         [--encoder auto|qsv|vaapi|nvenc|cpu] [--codec h264|h265|source]\n"
         "         [--crf 28] [--gop N] [--preset balanced]\n"
+        "         [--target-bitrate BPS] [--bitrate-overshoot F]\n"
         "\n"
         "ROI transcoder, H.264 by default. Target is Intel Quick Sync.\n"
         "--codec source keeps whatever the input already is, which is what an\n"
         "archive needs: one HLS playlist stitches many clips and browsers handle a\n"
         "codec change mid-playlist badly.\n"
+        "--target-bitrate: CPU H.264 opens CBR+filler (ROI redistributes coded\n"
+        "quality; mux bitrate matches). CPU H.265 and HW stay on CQP/CRF + outer\n"
+        "BitrateBudget loop.\n"
+        "--bitrate-overshoot is the allowed average overshoot\n"
+        "fraction (default 0.1 when a target is set).\n"
         "QSV maps AVRegionOfInterest to mfxExtEncoderROI (CQP + low_power).\n"
         "Linux VAAPI is the same iHD EncSliceLP path if hevc_qsv fails.\n"
         "libx265 is the CPU fallback (needs aq-mode).\n");
@@ -79,6 +85,12 @@ int main(int argc, char** argv)
                 settings.gop = std::stoi(need("--gop"));
             } else if (std::strcmp(a, "--preset") == 0) {
                 settings.preset = smartvideo::preset_from_name(need("--preset"));
+            } else if (std::strcmp(a, "--target-bitrate") == 0) {
+                settings.rate_control.target_bitrate =
+                    static_cast<uint64_t>(std::stoull(need("--target-bitrate")));
+            } else if (std::strcmp(a, "--bitrate-overshoot") == 0) {
+                settings.rate_control.max_average_overshoot =
+                    std::stof(need("--bitrate-overshoot"));
             } else if (std::strcmp(a, "-h") == 0
                 || std::strcmp(a, "--help") == 0) {
                 usage();

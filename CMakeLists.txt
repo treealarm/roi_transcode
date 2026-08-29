@@ -44,6 +44,11 @@ add_library(smartvideo_adaptive STATIC
     src/adaptive/importance_map.cpp
     src/adaptive/qp_mapper.cpp
     src/adaptive/temporal_roi.cpp
+    src/adaptive/bitrate_budget.cpp
+    src/adaptive/qp_slew.cpp
+    src/adaptive/box_smoother.cpp
+    src/adaptive/roi_lag.cpp
+    src/metadata/sei_payload.cpp
 )
 target_include_directories(smartvideo_adaptive
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -68,6 +73,7 @@ add_library(smartvideo STATIC
     src/core/pixel_format.cpp
     src/core/preset.cpp
     src/core/transcode_file.cpp
+    src/core/frame_roi_pipeline.cpp
     src/core/roi_encoder.cpp
     src/core/file_mux_sink.cpp
     src/core/frame_input.cpp
@@ -116,10 +122,25 @@ if(SVE_BUILD_TESTS)
     target_compile_options(temporal_roi_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME temporal_roi COMMAND temporal_roi_test)
 
+    add_executable(bitrate_budget_test tests/unit/bitrate_budget_test.cpp)
+    target_link_libraries(bitrate_budget_test PRIVATE smartvideo_adaptive)
+    target_compile_options(bitrate_budget_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME bitrate_budget COMMAND bitrate_budget_test)
+
+    add_executable(v3_policy_test tests/unit/v3_policy_test.cpp)
+    target_link_libraries(v3_policy_test PRIVATE smartvideo_adaptive)
+    target_compile_options(v3_policy_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME v3_policy COMMAND v3_policy_test)
+
     add_executable(geometry_test tests/unit/geometry_test.cpp)
     target_link_libraries(geometry_test PRIVATE smartvideo_adaptive)
     target_compile_options(geometry_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME geometry COMMAND geometry_test)
+
+    add_executable(sei_payload_test tests/unit/sei_payload_test.cpp)
+    target_link_libraries(sei_payload_test PRIVATE smartvideo_adaptive)
+    target_compile_options(sei_payload_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME sei_payload COMMAND sei_payload_test)
 
     # Compiles against the public headers only -- no src/ on the include path. That is the
     # point of it: it stops compiling the moment an internal type leaks into the surface.

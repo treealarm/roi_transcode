@@ -1,13 +1,17 @@
-// Geometry down to a bounding box.
+// Geometry: bounding boxes, and painting a polygon onto a mask.
 //
-// Lossy on purpose and only here: the encoder takes rectangles, so a polygon or a mask has
-// to become one somewhere. Doing it at the edge keeps the loss visible instead of hiding
-// it inside the importance map, which is where the shape-preserving path will live (§11).
+// The encoder takes rectangles. A polygon becomes rectangles by the same route a grayscale
+// mask does -- rasterise onto a pixel grid, sample onto the block qp-map, merge runs -- so a
+// corner outside the outline is not protected. The AABB of the same outline stays available
+// for anything that only draws boxes.
 
 #include "smartvideo/object.h"
 #include "smartvideo/policy.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <vector>
 
 namespace smartvideo {
 
@@ -76,6 +80,103 @@ BoundingBox bounding_box_of(const Geometry& geometry)
             return extent_of(g);
         }
     }, geometry);
+}
+
+bool rasterize_polygon(const Polygon& polygon, uint8_t* out, int32_t width, int32_t height,
+    uint8_t value)
+{
+    if (!out || width <= 0 || height <= 0 || polygon.points.size() < 3) {
+        return false;
+    }
+
+    // Scanline even-odd fill. Points are normalized; a vertex on the right/bottom edge is
+    // clamped into the last pixel so a polygon that touches 1.0 still paints something.
+    const int n = static_cast<int>(polygon.points.size());
+    std::vector<float> xs(static_cast<size_t>(n));
+    std::vector<float> ys(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i) {
+        xs[static_cast<size_t>(i)] =
+            std::clamp(polygon.points[static_cast<size_t>(i)].x, 0.0f, 1.0f)
+            * static_cast<float>(width);
+        ys[static_cast<size_t>(i)] =
+            std::clamp(polygon.points[static_cast<size_t>(i)].y, 0.0f, 1.0f)
+            * static_cast<float>(height);
+    }
+
+    float min_y = ys[0], max_y = ys[0];
+    for (int i = 1; i < n; ++i) {
+        min_y = std::min(min_y, ys[static_cast<size_t>(i)]);
+        max_y = std::max(max_y, ys[static_cast<size_t>(i)]);
+    }
+    const int y0 = std::max(0, static_cast<int>(std::floor(min_y)));
+    const int y1 = std::min(height - 1, static_cast<int>(std::ceil(max_y)));
+
+    std::vector<float> crossings;
+    crossings.reserve(static_cast<size_t>(n));
+
+    for (int y = y0; y <= y1; ++y) {
+        const float y_scan = static_cast<float>(y) + 0.5f;
+        crossings.clear();
+        for (int i = 0; i < n; ++i) {
+            const float y_a = ys[static_cast<size_t>(i)];
+            const float y_b = ys[static_cast<size_t>((i + 1) % n)];
+            const float x_a = xs[static_cast<size_t>(i)];
+            const float x_b = xs[static_cast<size_t>((i + 1) % n)];
+            // Skip horizontal edges; require the scanline to cross strictly upward or downward.
+            if ((y_a <= y_scan && y_b > y_scan) || (y_b <= y_scan && y_a > y_scan)) {
+                const float t = (y_scan - y_a) / (y_b - y_a);
+                crossings.push_back(x_a + t * (x_b - x_a));
+            }
+        }
+        std::sort(crossings.begin(), crossings.end());
+        uint8_t* row = out + static_cast<size_t>(y) * static_cast<size_t>(width);
+        for (size_t i = 0; i + 1 < crossings.size(); i += 2) {
+            int x_left = static_cast<int>(std::floor(crossings[i]));
+            int x_right = static_cast<int>(std::ceil(crossings[i + 1]));
+            x_left = std::max(0, x_left);
+            x_right = std::min(width, x_right);
+            for (int x = x_left; x < x_right; ++x) {
+                row[x] = value;
+            }
+        }
+    }
+    return true;
+}
+
+void dilate_mask(uint8_t* mask, int32_t width, int32_t height, int32_t radius)
+{
+    if (!mask || width <= 0 || height <= 0 || radius <= 0) {
+        return;
+    }
+    // Two-pass separable max-filter approximation with a square kernel: dilate horizontally,
+    // then vertically. Exact for a binary mask and cheap enough for a frame-sized buffer.
+    std::vector<uint8_t> tmp(static_cast<size_t>(width) * static_cast<size_t>(height));
+    for (int y = 0; y < height; ++y) {
+        const uint8_t* src = mask + static_cast<size_t>(y) * width;
+        uint8_t* dst = tmp.data() + static_cast<size_t>(y) * width;
+        for (int x = 0; x < width; ++x) {
+            uint8_t peak = 0;
+            const int x0 = std::max(0, x - radius);
+            const int x1 = std::min(width - 1, x + radius);
+            for (int xx = x0; xx <= x1; ++xx) {
+                peak = std::max(peak, src[xx]);
+            }
+            dst[x] = peak;
+        }
+    }
+    for (int y = 0; y < height; ++y) {
+        uint8_t* dst = mask + static_cast<size_t>(y) * width;
+        for (int x = 0; x < width; ++x) {
+            uint8_t peak = 0;
+            const int y0 = std::max(0, y - radius);
+            const int y1 = std::min(height - 1, y + radius);
+            for (int yy = y0; yy <= y1; ++yy) {
+                peak = std::max(peak,
+                    tmp[static_cast<size_t>(yy) * width + static_cast<size_t>(x)]);
+            }
+            dst[x] = peak;
+        }
+    }
 }
 
 const char* quality_policy_name(QualityPolicy p)

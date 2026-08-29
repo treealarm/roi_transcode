@@ -1,6 +1,6 @@
 #pragma once
 
-#include "smartvideo/smartvideo.h"
+#include "smartvideo/types.h"
 
 #include <atomic>
 #include <chrono>
@@ -27,6 +27,15 @@ struct RoiJobStatus {
     RoiJobState state = RoiJobState::Running;
     std::string message;
     std::string encoder_used;
+    bool cpu_h265_target_guard = false;
+    bool roi_lag_measured = false;
+    int64_t roi_lag_samples = 0;
+    float roi_lag_min_iou = 0.0f;
+    double roi_lag_p95_frames = 0.0;
+    double roi_lag_p99_frames = 0.0;
+    double roi_lag_p95_ms = 0.0;
+    double roi_lag_p99_ms = 0.0;
+    bool roi_lag_acceptance = false;
     std::chrono::system_clock::time_point start_ts{};
     std::chrono::system_clock::time_point end_ts{};
 };

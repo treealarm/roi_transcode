@@ -21,8 +21,9 @@
 // A track answers all three, and in an archive it answers them exactly. Both ends of a gap
 // are already known, so the position between them is interpolated rather than predicted --
 // no motion model, no guessing, and the result is where the object actually was. Prediction
-// (§13's use_track_prediction) is for the live path, where the future genuinely is unknown;
-// it is not implemented here and would be the wrong tool if it were.
+// (§13 use_track_prediction) applies only past the last sample (or before the first), within
+// max_missing_frames patience -- that is the live-shaped case an archive still hits at the
+// ends of a track.
 
 #include "smartvideo/policy.h"
 #include "smartvideo/types.h"

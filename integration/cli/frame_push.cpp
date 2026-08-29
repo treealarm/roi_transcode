@@ -306,6 +306,16 @@ int run(const Args& args)
         std::fprintf(stderr, "warning: %lld regions over the budget were dropped\n",
             static_cast<long long>(rep.regions_dropped));
     }
+    if (rep.roi_lag_measured) {
+        std::fprintf(stderr,
+            "roi lag: samples=%lld min_iou=%.3f p95_frames=%.2f p99_frames=%.2f "
+            "p95_ms=%.1f p99_ms=%.1f acceptance=%s\n",
+            static_cast<long long>(rep.roi_lag_samples), rep.roi_lag_min_iou,
+            rep.roi_lag_p95_frames, rep.roi_lag_p99_frames, rep.roi_lag_p95_ms,
+            rep.roi_lag_p99_ms, rep.roi_lag_acceptance ? "pass" : "fail");
+    } else {
+        std::fprintf(stderr, "roi lag: not measured (no tracked boxes)\n");
+    }
     return 0;
 }
 

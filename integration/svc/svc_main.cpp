@@ -104,11 +104,16 @@ void on_job_status(const RoiJobStatus& st, DaprPublisher& publisher)
             .count();
     };
     const std::string json = std::format(
-        R"({{"job_id":"{}","input_path":"{}","output_path":"{}","state":"{}","message":"{}","start_unix_ms":{},"end_unix_ms":{}}})",
+        R"({{"job_id":"{}","input_path":"{}","output_path":"{}","state":"{}","message":"{}","start_unix_ms":{},"end_unix_ms":{},"cpu_h265_target_guard":{},"roi_lag":{{"measured":{},"samples":{},"min_iou":{},"p95_frames":{},"p99_frames":{},"p95_ms":{},"p99_ms":{},"acceptance":{}}}}})",
         json_escape(st.job_id), json_escape(st.input_path),
         json_escape(st.output_path), state_name(st.state),
         json_escape(st.message), ms(st.start_ts),
-        st.end_ts.time_since_epoch().count() == 0 ? 0 : ms(st.end_ts));
+        st.end_ts.time_since_epoch().count() == 0 ? 0 : ms(st.end_ts),
+        st.cpu_h265_target_guard ? "true" : "false",
+        st.roi_lag_measured ? "true" : "false",
+        st.roi_lag_samples, st.roi_lag_min_iou, st.roi_lag_p95_frames,
+        st.roi_lag_p99_frames, st.roi_lag_p95_ms, st.roi_lag_p99_ms,
+        st.roi_lag_acceptance ? "true" : "false");
     publisher.publish_json("roi-transcode-job-changed", json);
 }
 } // namespace

@@ -2,13 +2,11 @@
 
 #include "grpc/path_guard.h"
 #include "job/roi_job_manager.h"
-#include "packet_sink.h"
 #include "smartvideo/session.h"
 
 #include <chrono>
 #include <cstring>
 #include <span>
-#include <format>
 #include <algorithm>
 #include <memory>
 #include <unordered_map>
@@ -70,6 +68,20 @@ roi::transcode::JobState to_proto(RoiJobState s)
     return roi::transcode::JOB_STATE_UNSPECIFIED;
 }
 
+void fill_lag(const bool measured, const int64_t samples, const float min_iou,
+    const double p95_frames, const double p99_frames, const double p95_ms,
+    const double p99_ms, const bool acceptance, roi::transcode::RoiLagStats* out)
+{
+    out->set_measured(measured);
+    out->set_samples(samples);
+    out->set_min_iou(min_iou);
+    out->set_p95_frames(p95_frames);
+    out->set_p99_frames(p99_frames);
+    out->set_p95_ms(p95_ms);
+    out->set_p99_ms(p99_ms);
+    out->set_acceptance(acceptance);
+}
+
 void fill_job(const RoiJobStatus& st, roi::transcode::Job* out)
 {
     out->set_job_id(st.job_id);
@@ -82,6 +94,10 @@ void fill_job(const RoiJobStatus& st, roi::transcode::Job* out)
     }
     out->set_message(st.message);
     out->set_encoder_used(st.encoder_used);
+    out->set_cpu_h265_target_guard(st.cpu_h265_target_guard);
+    fill_lag(st.roi_lag_measured, st.roi_lag_samples, st.roi_lag_min_iou,
+        st.roi_lag_p95_frames, st.roi_lag_p99_frames, st.roi_lag_p95_ms,
+        st.roi_lag_p99_ms, st.roi_lag_acceptance, out->mutable_roi_lag());
 }
 
 smartvideo::Encoder from_proto(roi::transcode::Encoder e)
@@ -138,6 +154,25 @@ void apply_settings(const ProtoSettings& in, smartvideo::Settings& out)
     }
     out.preset = to_library_preset(in.preset());
 
+    if (in.has_rate_control()) {
+        const auto& rc = in.rate_control();
+        if (rc.target_bitrate() > 0) {
+            out.rate_control.target_bitrate = rc.target_bitrate();
+        }
+        if (rc.has_max_average_overshoot()) {
+            out.rate_control.max_average_overshoot = rc.max_average_overshoot();
+        }
+        if (rc.has_critical_importance()) {
+            out.rate_control.critical_importance = rc.critical_importance();
+        }
+        if (rc.has_max_peak_overshoot()) {
+            out.rate_control.max_peak_overshoot = rc.max_peak_overshoot();
+        }
+        if (rc.has_recovery_window_ms()) {
+            out.rate_control.recovery_window_ms = rc.recovery_window_ms();
+        }
+    }
+
     const auto& q = in.roi();
     if (q.has_background_qp_delta()) {
         out.quality.background_qp_delta = q.background_qp_delta();
@@ -173,6 +208,101 @@ void apply_settings(const ProtoSettings& in, smartvideo::Settings& out)
                 std::min(out.quality.mask_qp_delta_at_255, cfg.qp_delta);
         }
     }
+    if (q.has_pad() && q.pad() > 0) {
+        out.quality.pad = q.pad();
+    }
+    if (q.has_max_protected_fraction()) {
+        out.quality.max_protected_fraction = q.max_protected_fraction();
+    }
+    switch (q.margin_mode()) {
+        case roi::transcode::MARGIN_MODE_FRACTION_OF_FRAME:
+            out.quality.margin_mode = smartvideo::MarginMode::FractionOfFrame;
+            break;
+        default:
+            out.quality.margin_mode = smartvideo::MarginMode::FixedPixels;
+            break;
+    }
+    if (q.has_margin_px()) {
+        out.quality.margin_px = q.margin_px();
+    }
+    if (q.has_min_roi_side()) {
+        out.quality.min_roi_side = q.min_roi_side();
+    }
+    if (q.has_class_weighting()) {
+        const auto& p = q.class_weighting();
+        auto& dst = out.quality.importance;
+        for (const auto& [k, v] : p.semantic_priority()) {
+            dst.semantic_priority[k] = v;
+        }
+        for (const auto& [k, v] : p.task_priority()) {
+            dst.task_priority[k] = v;
+        }
+        if (p.has_unknown_priority()) {
+            dst.unknown_priority = p.unknown_priority();
+        }
+        if (p.has_assumed_confidence()) {
+            dst.assumed_confidence = p.assumed_confidence();
+        }
+        if (p.has_weigh_confidence_on_known_classes()) {
+            dst.weigh_confidence_on_known_classes = p.weigh_confidence_on_known_classes();
+        }
+        if (p.has_temporal_stability_floor()) {
+            dst.temporal_stability_floor = p.temporal_stability_floor();
+        }
+        if (p.has_temporal_stability_tau_sec()) {
+            dst.temporal_stability_tau_sec = p.temporal_stability_tau_sec();
+        }
+        if (p.has_use_motion_weight()) {
+            dst.use_motion_weight = p.use_motion_weight();
+        }
+        if (p.has_motion_weight_floor()) {
+            dst.motion_weight_floor = p.motion_weight_floor();
+        }
+        if (p.has_motion_speed_at_full()) {
+            dst.motion_speed_at_full = p.motion_speed_at_full();
+        }
+    }
+
+    if (in.has_temporal_roi()) {
+        const auto& t = in.temporal_roi();
+        if (t.has_max_missing_frames()) {
+            out.temporal.max_missing_frames = t.max_missing_frames();
+        }
+        if (t.has_max_hold_sec()) {
+            out.temporal.max_hold_sec = t.max_hold_sec();
+        }
+        if (t.has_confidence_decay()) {
+            out.temporal.confidence_decay = t.confidence_decay();
+        }
+        if (t.has_max_qp_delta_per_frame()) {
+            out.temporal.max_qp_delta_per_frame = t.max_qp_delta_per_frame();
+        }
+        if (t.has_spatial_smoothing()) {
+            out.temporal.spatial_smoothing = t.spatial_smoothing();
+        }
+        if (t.has_temporal_smoothing()) {
+            out.temporal.temporal_smoothing = t.temporal_smoothing();
+        }
+        if (t.has_use_track_prediction()) {
+            out.temporal.use_track_prediction = t.use_track_prediction();
+        }
+    }
+}
+
+smartvideo::ObjectPriority priority_from_proto(roi::transcode::ObjectPriority p)
+{
+    switch (p) {
+        case roi::transcode::OBJECT_PRIORITY_BACKGROUND:
+            return smartvideo::ObjectPriority::Background;
+        case roi::transcode::OBJECT_PRIORITY_LOW:
+            return smartvideo::ObjectPriority::Low;
+        case roi::transcode::OBJECT_PRIORITY_HIGH:
+            return smartvideo::ObjectPriority::High;
+        case roi::transcode::OBJECT_PRIORITY_CRITICAL:
+            return smartvideo::ObjectPriority::Critical;
+        default:
+            return smartvideo::ObjectPriority::Normal;
+    }
 }
 
 smartvideo::Box box_from_proto(const roi::transcode::Box& b)
@@ -187,6 +317,18 @@ smartvideo::Box box_from_proto(const roi::transcode::Box& b)
     out.track_id = static_cast<uint64_t>(b.track_id() > 0 ? b.track_id() : 0);
     out.confidence = b.confidence();
     out.label = b.label();
+    out.polygon.reserve(static_cast<size_t>(b.polygon_size()));
+    for (const auto& p : b.polygon()) {
+        out.polygon.push_back({p.x(), p.y()});
+    }
+    if (b.has_priority()) {
+        out.has_priority = true;
+        out.priority = priority_from_proto(b.priority());
+    }
+    if (b.has_desired_qp_delta()) {
+        out.has_desired_qp_delta = true;
+        out.desired_qp_delta = b.desired_qp_delta();
+    }
     return out;
 }
 
@@ -401,7 +543,29 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
 
             smartvideo::Regions regions;
             boxes.clear();
-            if (in.has_mask()) {
+            if (in.has_qp_map()) {
+                const auto& m = in.qp_map();
+                smartvideo::QpDeltaMap grid;
+                grid.block = m.block();
+                grid.cols = m.cols();
+                grid.rows = m.rows();
+                grid.width = m.width() > 0 ? m.width() : sp.width;
+                grid.height = m.height() > 0 ? m.height() : sp.height;
+                const auto& raw = m.deltas();
+                grid.deltas.resize(raw.size());
+                for (std::size_t i = 0; i < raw.size(); ++i) {
+                    grid.deltas[i] = static_cast<int8_t>(raw[i]);
+                }
+                const std::size_t expect =
+                    static_cast<std::size_t>(std::max(grid.cols, 0))
+                    * static_cast<std::size_t>(std::max(grid.rows, 0));
+                if (grid.block <= 0 || grid.cols <= 0 || grid.rows <= 0
+                    || grid.deltas.size() != expect) {
+                    return {grpc::StatusCode::INVALID_ARGUMENT,
+                        "qp_map deltas length must equal cols*rows with block>0"};
+                }
+                regions.qp_map = std::move(grid);
+            } else if (in.has_mask()) {
                 mask.data = std::span<const uint8_t>(
                     reinterpret_cast<const uint8_t*>(in.mask().data().data()),
                     in.mask().data().size());
@@ -463,6 +627,10 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
         done->set_packets(rep.packets);
         done->set_bytes(rep.bytes);
         done->set_regions_dropped(rep.regions_dropped);
+        done->set_cpu_h265_target_guard(rep.cpu_h265_target_guard);
+        fill_lag(rep.roi_lag_measured, rep.roi_lag_samples, rep.roi_lag_min_iou,
+            rep.roi_lag_p95_frames, rep.roi_lag_p99_frames, rep.roi_lag_p95_ms,
+            rep.roi_lag_p99_ms, rep.roi_lag_acceptance, done->mutable_roi_lag());
         stream->Write(msg);
         return grpc::Status::OK;
     } catch (const std::exception& ex) {

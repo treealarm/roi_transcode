@@ -8,7 +8,6 @@
 #include <iostream>
 #include <string>
 #include <thread>
-#include <vector>
 
 #include <grpcpp/grpcpp.h>
 
@@ -100,7 +99,11 @@ int run_file_job(rt::RoiFileTranscode::Stub& stub, const std::string& in,
         }
         if (cur.state() == rt::JOB_STATE_COMPLETED) {
             std::cout << "file job ok out=" << cur.output_path()
-                      << " encoder=" << cur.encoder_used() << std::endl;
+                      << " encoder=" << cur.encoder_used()
+                      << " cpu_h265_guard=" << (cur.cpu_h265_target_guard() ? "true" : "false")
+                      << " roi_lag.measured=" << (cur.roi_lag().measured() ? "true" : "false")
+                      << " roi_lag.samples=" << cur.roi_lag().samples()
+                      << std::endl;
             return 0;
         }
         if (cur.state() == rt::JOB_STATE_FAILED
@@ -185,6 +188,8 @@ int run_stream(rt::RoiStreamTranscode::Stub& stub, const std::string& in,
             box->set_y(0.4f);
             box->set_width(0.3f);
             box->set_height(0.2f);
+            box->set_track_id(1);
+            box->set_confidence(0.95f);
             if (!stream->Write(fmsg)) {
                 break;
             }
@@ -207,7 +212,13 @@ int run_stream(rt::RoiStreamTranscode::Stub& stub, const std::string& in,
         } else if (resp.has_done()) {
             std::cout << "stream done frames=" << resp.done().frames()
                       << " packets=" << resp.done().packets()
-                      << " bytes=" << resp.done().bytes() << std::endl;
+                      << " bytes=" << resp.done().bytes()
+                      << " cpu_h265_guard="
+                      << (resp.done().cpu_h265_target_guard() ? "true" : "false")
+                      << " roi_lag.measured="
+                      << (resp.done().roi_lag().measured() ? "true" : "false")
+                      << " roi_lag.samples=" << resp.done().roi_lag().samples()
+                      << std::endl;
         }
     }
     const auto st = stream->Finish();

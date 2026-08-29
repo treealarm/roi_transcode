@@ -103,6 +103,35 @@ int main()
         CHECK(doc.boxes[1].width == 0.0f);
     }
 
+    // Nested analytics / quality-script shape: one sample per frame, boxes[] inside.
+    {
+        const auto doc = load_roi_json(write_json("nested.json", R"({
+          "background_qp_delta": 4,
+          "pad": 0.03,
+          "kinds": { "license_plate": {"qp_delta": -12} },
+          "samples": [
+            {"t_sec": 1.5, "boxes": [
+              {"kind": "vehicle", "x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4,
+               "track_id": 7, "confidence": 0.9},
+              {"kind": "license_plate", "x": 0.2, "y": 0.3, "w": 0.05, "h": 0.02}
+            ]},
+            {"t_sec": 2.0, "boxes": []}
+          ]
+        })"));
+        CHECK(doc.quality.background_qp_delta == 4);
+        CHECK(doc.quality.pad == 0.03);
+        CHECK(doc.quality.kinds.at("license_plate").qp_delta == -12);
+        CHECK(doc.boxes.size() == 2);
+        CHECK(doc.boxes[0].kind == "vehicle");
+        CHECK(doc.boxes[0].t_sec == 1.5);
+        CHECK(doc.boxes[0].x == 0.1f);
+        CHECK(doc.boxes[0].width == 0.3f);
+        CHECK(doc.boxes[0].track_id == 7);
+        CHECK(doc.boxes[1].kind == "license_plate");
+        CHECK(doc.boxes[1].width == 0.05f);
+        CHECK(doc.boxes[1].height == 0.02f);
+    }
+
     // samples[] is required: without it the caller asked for nothing, and
     // silently transcoding the whole clip at background quality would be worse
     // than saying so.

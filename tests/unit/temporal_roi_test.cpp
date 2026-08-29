@@ -116,6 +116,7 @@ void confidence_decays_only_where_it_is_a_guess()
 {
     smartvideo::TemporalROIConfig config;
     config.confidence_decay = 0.5f;
+    config.use_track_prediction = false; // hold last box; test is about confidence only
 
     const std::vector<smartvideo::Box> boxes{box(0.0, 7, 0.1f), box(1.0, 7, 0.2f)};
     const smartvideo::TemporalRoi roi(boxes, config, 0.5);
@@ -125,6 +126,30 @@ void confidence_decays_only_where_it_is_a_guess()
     const auto after = roi.at(2.0);
     check(after.size() == 1 && after[0].confidence < 0.9f * 0.6f,
         "one sample past the end, halved");
+}
+
+// Past the last detection the box keeps moving when prediction is on (TZ v3).
+void prediction_continues_motion_past_the_last_sample()
+{
+    // x: 0.10 at t=0, 0.30 at t=2 → at t=3 (one second past end) x = 0.40
+    const std::vector<smartvideo::Box> boxes{box(0.0, 7, 0.10f), box(2.0, 7, 0.30f)};
+    smartvideo::TemporalROIConfig config;
+    config.max_missing_frames = 3;
+    config.use_track_prediction = true;
+    config.confidence_decay = 1.0f;
+    const smartvideo::TemporalRoi roi(boxes, config, 0.5);
+
+    const auto past = roi.at(3.0);
+    check(past.size() == 1, "still held with prediction");
+    if (past.size() == 1) {
+        check_near(past[0].x, 0.40, 1e-4, "position continues along the last velocity");
+    }
+
+    config.use_track_prediction = false;
+    const smartvideo::TemporalRoi held(boxes, config, 0.5);
+    const auto frozen = held.at(3.0);
+    check(frozen.size() == 1 && std::fabs(frozen[0].x - 0.30f) < 1e-4,
+        "without prediction the last box is frozen");
 }
 
 // A source that reports no track has nothing to stitch, and keeps the old behaviour.
@@ -137,6 +162,27 @@ void untracked_boxes_keep_the_symmetric_window()
     check(roi.at(1.6).empty(), "dropped outside it");
 }
 
+// §11's last two factors read track age and speed off what at() already knows.
+void at_attaches_track_evidence_for_importance()
+{
+    // Moves 0.20 of the frame in x over 2 s → speed = 0.20 / (√2 * 2) ≈ 0.0707 diagonals/s.
+    const std::vector<smartvideo::Box> boxes{box(0.0, 7, 0.10f), box(2.0, 7, 0.30f)};
+    const smartvideo::TemporalRoi roi(boxes, smartvideo::TemporalROIConfig{}, 0.5);
+
+    const auto mid = roi.at(1.0);
+    check(mid.size() == 1 && mid[0].track.present, "interpolated box carries evidence");
+    check_near(mid[0].track.age_sec, 1.0, 1e-5, "age is seconds since the first sample");
+    check(mid[0].track.sample_count == 2, "both samples count");
+    check_near(mid[0].track.speed, 0.20 / (std::sqrt(2.0) * 2.0), 1e-4,
+        "speed is centre displacement in frame-diagonals per second");
+
+    smartvideo::Box lone = box(1.0, 3, 0.5f);
+    const smartvideo::TemporalRoi single({&lone, 1}, smartvideo::TemporalROIConfig{}, 0.5);
+    const auto one = single.at(1.0);
+    check(one.size() == 1 && one[0].track.present && one[0].track.speed == 0.0f,
+        "a single-sample track has age but no speed");
+}
+
 } // namespace
 
 int main()
@@ -146,7 +192,9 @@ int main()
     a_track_that_ended_is_let_go();
     patience_follows_the_source_s_own_rate();
     confidence_decays_only_where_it_is_a_guess();
+    prediction_continues_motion_past_the_last_sample();
     untracked_boxes_keep_the_symmetric_window();
+    at_attaches_track_evidence_for_importance();
 
     if (failures > 0) {
         std::fprintf(stderr, "temporal_roi_test: %d failure(s)\n", failures);

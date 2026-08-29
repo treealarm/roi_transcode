@@ -12,6 +12,7 @@
 #include "smartvideo/encoder_backend.h"
 #include "smartvideo/types.h"
 
+#include <span>
 #include <string>
 #include <vector>
 
@@ -53,10 +54,14 @@ public:
     //
     // Pixels in a form the encoder does not read directly are converted, and uploaded if
     // it wants hardware frames; both are counted. A buffer from create_frame needs neither.
-    void encode_buffer(IFrameBuffer& pixels, const std::vector<Rect>& rects, int64_t pts);
+    //
+    // `sei_unregistered` is UUID||payload for §19 bitstream metadata; empty skips.
+    void encode_buffer(IFrameBuffer& pixels, const std::vector<Rect>& rects, int64_t pts,
+        std::span<const uint8_t> sei_unregistered = {});
 
     // The same for a frame the library decoded itself.
-    void encode(AVFrame* frame, const std::vector<Rect>& rects, int64_t pts);
+    void encode(AVFrame* frame, const std::vector<Rect>& rects, int64_t pts,
+        std::span<const uint8_t> sei_unregistered = {});
     // Drains the encoder. Does not end the sink.
     void flush();
 

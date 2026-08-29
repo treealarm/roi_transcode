@@ -1,11 +1,10 @@
 #pragma once
 
-// How quality is spent, and how it behaves over time -- TZ v2.0 §13, §14, §15.
+// How quality is spent, and how it behaves over time -- TZ v3 §13, §14, §15.
 //
-// Field names are the specification's. What is implemented is narrower than what is
-// declared, and each struct says which is which, because a configuration field that is
-// silently ignored is worse than one that is absent: the caller sets it, sees no effect,
-// and has no way to tell whether the value or the feature is at fault.
+// Field names follow the specification. TemporalROIConfig defaults match v3 §13
+// (anti-flicker). RateControlPolicy still describes an outer loop over CQP/CRF,
+// not native encoder VBR/VBV.
 
 #include <cstdint>
 
@@ -21,99 +20,82 @@ enum class QualityPolicy {
 
 const char* quality_policy_name(QualityPolicy p);
 
-/// §13. Keeping a region alive across a detector miss.
+/// §13. Keeping a region alive across a detector miss (TZ v3 defaults).
 ///
-/// Partly implemented -- see `unimplemented_requested()` below for exactly which half. A
-/// track's samples are interpolated between and held past the last one; the smoothing and
-/// prediction settings are still declared and ignored, which is why asking for them is
-/// refused rather than silently absorbed.
-///
-/// The distinction that matters and is not in the specification: for an archive the whole
-/// track is already known, so a gap can be interpolated rather than predicted, which is
-/// simpler and strictly more accurate. Prediction is for the live path.
+/// Between two known samples an archive *interpolates*. Past the last sample, patience
+/// (`max_missing_frames`) keeps the region alive; with `use_track_prediction` the box
+/// keeps moving from the last known velocity instead of freezing. Live frames also get
+/// EMA smoothing (`spatial_smoothing` / `temporal_smoothing`) and a QP step ceiling.
 struct TemporalROIConfig {
     /// How many of the producer's frames a region survives without a detection before it is
-    /// considered gone.
-    ///
-    /// Frames, not seconds, and that is what lets one setting serve sources running at
-    /// different rates: the duration is this count times the interval measured from a
-    /// track's own samples. A camera reporting every 0.2s and a detector reporting every
-    /// 1.0s both get three missed frames' worth of patience, which is three very different
-    /// numbers of seconds.
-    ///
-    /// Three by default. Measured on a real archive, single-frame misses dominate -- 80 of
-    /// 125 for the detector, 1321 of 1646 for the camera -- and three covers all but a
-    /// handful without keeping an object alive long after it has left.
+    /// considered gone. Frames, not seconds -- duration is this count times the track's
+    /// own sample interval.
     uint32_t max_missing_frames = 3;
-    /// Ceiling on that patience, in seconds. Zero means none.
-    ///
-    /// max_missing_frames is deliberately a count of the producer's frames, so one setting
-    /// serves sources running at different rates -- but that reasoning has no floor under it.
-    /// A producer reporting every eight seconds buys twenty-four seconds of patience, and a
-    /// person is not still standing where they were twenty-four seconds ago. Measured on a real
-    /// clip, that stale coverage blanketed the frame and left the background penalty with
-    /// nothing to reach, so re-compression saved nothing at any setting.
-    ///
-    /// The ceiling is a statement about objects rather than about reporting: whatever the
-    /// cadence, a box that has not been confirmed for this long has stopped describing the
-    /// picture. Two seconds by default.
-    ///
-    /// Applies only to what is inferred from a track's own interval. A caller that set
-    /// Quality::hold_sec said how long its boxes apply, and that is a decision, not a guess to
-    /// be capped -- a fixture holding one sample across a whole clip means it.
+    /// Ceiling on that patience, in seconds. Zero means none. Caps a slow producer that
+    /// would otherwise buy tens of seconds of stale coverage. Does not override an
+    /// explicit Quality::hold_sec.
     double max_hold_sec = 2.0;
-    /// Confidence multiplier applied per missing frame, when a region is being kept alive
-    /// past the last time it was seen. Not applied between two known samples: there the
-    /// confidence is interpolated like everything else, because both ends are facts.
-    float confidence_decay = 1.0f;
-    float spatial_smoothing = 0.0f;
-    float temporal_smoothing = 0.0f;
-    /// Ceiling on how fast a region's QP may move between frames, which is what stops the
-    /// flicker §43 measures.
-    int32_t max_qp_delta_per_frame = 0;
-    /// Extrapolate from the track's motion instead of holding the last box.
-    bool use_track_prediction = false;
+    /// Confidence multiplier per missing producer frame while guessing. TZ v3: 0.85.
+    float confidence_decay = 0.85f;
+    /// EMA weight on the *new* width/height each frame (0 disables). TZ v3: 0.25.
+    float spatial_smoothing = 0.25f;
+    /// EMA weight on the *new* x/y each frame (0 disables). TZ v3: 0.35.
+    float temporal_smoothing = 0.35f;
+    /// Max |ΔQP| per frame for one track. Implemented by QpSlewLimiter. TZ v3: 2.
+    int32_t max_qp_delta_per_frame = 2;
+    /// Extrapolate from last motion when past the final sample (within patience). TZ v3: true.
+    bool use_track_prediction = true;
 
-    /// Whether the caller asked for a part of §13 that does not exist yet.
-    ///
-    /// max_missing_frames and confidence_decay are implemented and are not named here. The
-    /// rest still are: declared-but-ignored is the worst state a setting can be in, because
-    /// the caller fills it, nothing happens, and the encode looks like it worked.
-    bool unimplemented_requested() const
-    {
-        return spatial_smoothing != 0.0f || temporal_smoothing != 0.0f
-            || max_qp_delta_per_frame != 0 || use_track_prediction;
-    }
+    /// Always false -- §13 fields above are implemented. Kept for older call sites.
+    bool unimplemented_requested() const { return false; }
+};
+
+/// TZ v3 §19 -- whether object metadata is written into the bitstream (SEI) and how many
+/// objects one frame may carry.
+struct MetadataConfig {
+    /// Embed user-data-unregistered SEI when the backend advertises `sei` (libx264/libx265).
+    bool bitstream_sei = true;
+    /// Soft cap; lowest-priority objects are dropped first if over.
+    uint32_t max_objects = 64;
 };
 
 /// §15. The bitrate budget, spent on critical objects first.
 ///
-/// Not implemented as a *bitrate* budget. The encoder runs at a constant quantizer, and that
-/// is not an accident: under CQP a QP offset on one region does not move bits elsewhere,
-/// which is what makes per-region deltas mean what they say. A bitrate target reintroduces
-/// exactly that coupling, so this becomes a layer above each backend's own rate control
-/// rather than a setting passed through to it.
+/// The encoder itself still runs at a constant quantizer (CQP/CRF): that is what keeps
+/// per-region QP deltas honest. A target bitrate is handled by an *outer* loop
+/// (`BitrateBudget`) that watches average and peak output bits and, when the stream runs
+/// hot, raises the background QP first and only then softens low-importance ROI. Faces and
+/// plates (importance ≥ `critical_importance`) are not softened. A recovery debt keeps the
+/// extras up until an overshoot has been paid back inside `recovery_window_ms`.
 ///
-/// "Critical objects first", though, is real, and lives where it can be honest about what it
-/// is spending: Quality::max_protected_fraction budgets *area*, which under CQP is what
-/// protection actually costs. On a real archive clip that is the difference between a file
-/// 73% larger than the original and one 21% smaller, with the face 2.9 dB better than a flat
-/// re-encode of the same size.
+/// On CPU (`native_bitrate` capability) a non-zero target opens CBR+filler for H.264.
+/// H.265 and hardware backends stay on CRF/CQP and rely on the outer loop alone.
+/// BitrateBudget remains an object-first fine-tuner. Area budget
+/// (`Quality::max_protected_fraction`) still caps how much of the frame may be protected
+/// at once.
 struct RateControlPolicy {
+    /// Target average bitrate in bits per second. Zero leaves CQP/CRF alone.
     uint64_t target_bitrate = 0;
-    /// Allowed overshoot of the average, as a fraction: 0.1 is ten percent.
+    /// Allowed overshoot of the average, as a fraction: 0.1 is ten percent. Zero means
+    /// "use the built-in default" (also 0.1) once a target is set -- not "zero tolerance".
     float max_average_overshoot = 0.0f;
+    /// Allowed overshoot of the ~1 s peak rate. Zero → default 0.2 (120% of target, as in
+    /// the v3 acceptance note).
     float max_peak_overshoot = 0.0f;
-    /// How long the controller has to give back an overshoot.
+    /// How long the controller has to give back an overshoot, in milliseconds. Zero → 1000.
     uint32_t recovery_window_ms = 0;
+    /// Importance at or above this is never softened by the outer loop. Default covers
+    /// faces (0.95) and plates (1.00) from §11's table.
+    float critical_importance = 0.95f;
 
-    /// As TemporalROIConfig::any_set, and for the same reason. A caller who sets a target
-    /// bitrate and gets constant-quantizer output has been misled, not served.
     bool any_set() const
     {
         return target_bitrate != 0 || max_average_overshoot != 0.0f
             || max_peak_overshoot != 0.0f || recovery_window_ms != 0;
     }
+
+    /// All declared §15 fields are handled by BitrateBudget. Nothing left to refuse.
+    bool unimplemented_requested() const { return false; }
 };
 
 } // namespace smartvideo

@@ -76,6 +76,23 @@ v2.0 позволял считать §15 неначатым, и наш аргу
 §12 в v3 требует «max importance wins» и «minimum QP wins» — ровно то, что у нас падает из
 сортировки по важности, без единой проверки на пересечение. Здесь ничего менять не надо.
 
+### Пометки library track (2026-08-26, Cursor) — baton у Данила, разделы не переписывались
+
+Код библиотеки (ветка работы Cursor) закрыл срезы A–E без захвата baton:
+
+1. **Importance → ObjectPriority:** публичный контракт = лестница
+   (`include/smartvideo/object_priority.h`); continuous importance остаётся способом
+   выбрать ступень. `Quality::use_v3_priority_ladder` (default true).
+2. **§13 дефолты:** наши нулевые (smoothing/prediction off; `max_qp_delta_per_frame=0`).
+   С PDF расходимся явно; open по-прежнему отказывает на smoothing/prediction.
+   `max_qp_delta_per_frame` **реализован** (QpSlewLimiter), но не включён по умолчанию.
+3. **Геометрия §11.2–11.3:** `min_roi_side=64`, `margin_mode=FixedPixels`, `margin_px=8`.
+4. **§14 ROI lag:** хелперы IoU / lag / P95–P99 в `src/adaptive/roi_lag.*`.
+5. **§15–16 matched bitrate:** процедура в `docs/matched-bitrate.md`; native VBR/VBV
+   ещё нет — outer `BitrateBudget` мост.
+
+Детали и статус: [`plan-v3-library.md`](plan-v3-library.md).
+
 ---
 
 ## Как читать этот план
@@ -124,18 +141,18 @@ v2.0 позволял считать §15 неначатым, и наш аргу
 
 | Требование | Сейчас | Что делать |
 |---|---|---|
-| `Object{track_id, class_id, confidence, semantic_priority, task_priority, critical}` (§10) | только `kind` + геометрия | расширить публичный тип; **данные уже есть** в архиве ta_vms — `MetadataBox` несёт `track_id` и `confidence` |
-| Importance = произведение 5 факторов, I(x,y) ∈ [0,1] (§11) | нет | ввести слой importance между объектами и qp-map; сегодняшняя таблица становится частным случаем `semantic_priority` |
-| Polygon (§2) | нет | растеризация в ту же qp-map, что и маска |
-| Temporal ROI: `max_missing_frames`, decay, smoothing, prediction (§13) | только `hold_sec` — фиксированное окно вокруг сэмпла | по `track_id`; **важно:** для архива интерполяция не-каузальная (будущее трека известно), для живого потока — предсказание |
-| QualityPolicy: OBJECT_FIRST / BALANCED / BITRATE_FIRST (§14) | нет | `Settings`; дефолт по ТЗ — OBJECT_FIRST |
-| Object-first rate control с бюджетом битрейта (§15) | нет, только CQP/CRF | **самая крупная работа блока**, см. ниже |
+| `Object{track_id, class_id, confidence, semantic_priority, task_priority, critical}` (§10) | есть (`object.h` / `Box` на wire) | `critical` / полный `Object` на wire — по необходимости; данные уже доходят |
+| Importance = произведение 5 факторов, I(x,y) ∈ [0,1] (§11) | есть; TemporalStability по age трека; MotionWeight опционален (выкл. → 1.0) | knobs на wire; live-stream пока без истории трека |
+| Polygon (§2) | есть: растеризация → qp-map; `Box.polygon` на wire | источник полигонов у детектора пока редкий |
+| Temporal ROI: `max_missing_frames`, decay, smoothing, prediction (§13) | `max_missing_frames` + decay + интерполяция; smoothing/prediction отвергаются | по необходимости для живого потока |
+| QualityPolicy: OBJECT_FIRST / BALANCED / BITRATE_FIRST (§14) | только OBJECT_FIRST | BALANCED/BITRATE_FIRST после настоящего VBR |
+| Object-first rate control с бюджетом битрейта (§15) | outer loop: avg + peak + recovery debt; area-budget | VBV; native VBR; BALANCED/BITRATE_FIRST |
 
-**Про rate control.** Сейчас независимость QP-офсетов по блокам держится ровно на том,
-что мы кодируем в CQP. Целевой битрейт (§15) эту независимость ломает: rate control
-начнёт перераспределять биты между ROI и фоном. Это не недоработка, а физика, и ТЗ
-требует именно второго режима. Значит `FileSettings` и `StreamSettings` разойдутся
-здесь — они уже разделены в proto специально под это.
+**Про rate control.** Независимость QP-офсетов по блокам держится на CQP/CRF внутри
+бэкенда. Целевой битрейт (§15) обслуживается *внешним* циклом `BitrateBudget`: средний
+выход сравнивается с `target_bitrate`, фон давится первым, ROI ниже critical —
+потом. Это ещё не object-first VBR внутри энкодера и не VBV; `FileSettings` /
+`StreamSettings` уже несут `RateControl` на wire.
 
 ### Блок B. Бэкенды
 
@@ -344,10 +361,25 @@ ABI libva между vcpkg и Ubuntu — ровно этот класс расх
 
 ### Этап 2. Модель объекта и важности
 
-5. Расширить `Object` до §10; протащить `track_id` и `confidence` из архива ta_vms —
-   **они там уже есть и сегодня выбрасываются** в `BoxesForAsync`.
-6. Слой importance (§11), сегодняшние per-kind дельты — частный случай.
-7. Polygon → та же qp-map.
+5. ~~Расширить `Object` до §10; протащить `track_id` и `confidence` из архива ta_vms.~~
+   **Сделано.** `Object` в `include/smartvideo/object.h`; `Box` на wire несёт оба поля;
+   `BoxesForAsync` больше не выбрасывает их; video_a offline path шлёт оба.
+6. ~~Слой importance (§11), сегодняшние per-kind дельты — частный случай.~~ **Сделано**
+   в `src/adaptive/importance.cpp`. Все пять факторов живые:
+   - Semantic / Task / Confidence — как раньше;
+   - **TemporalStability** — растёт с age трека (`1 - exp(-age/τ)`, пол `temporal_stability_floor`);
+     evidence кладёт `TemporalRoi::at` в `Box.track`;
+   - **MotionWeight** — optional по §11, по умолчанию 1.0; при `use_motion_weight` —
+     скорость центра в диагоналях кадра/с между соседними сэмплами.
+   Явный `kinds` по-прежнему обходит модель — это намеренно.
+   На wire: `RoiQuality.importance` (`qp_at_zero` / `qp_at_one` / таблицы приоритетов /
+   knobs stability и motion). Продуктовая точка «номер −12, машина −6» =
+   `qp_at_zero=3`, `qp_at_one=-12`; библиотечный дефолт остаётся примером §12 (−10/−4).
+   Offline-стенд (`roi-clip`) по умолчанию **не** шлёт `--qp`, чтобы модель работала.
+   Live `RoiStream` без накопленной истории трека оставляет два последних фактора = 1.0.
+7. ~~Polygon → та же qp-map.~~ **Сделано:** `rasterize_polygon` + shaped path в
+   `RoiMapBuilder` (через block qp-map, как маска). На wire — `Box.polygon` (repeated Point).
+   AABB остаётся fallback для оверлеев и бюджета площади.
 8. ~~Temporal ROI (§13) по `track_id`, с разделением архив/поток.~~ **Сделано 2026-08-23**,
    `src/adaptive/temporal_roi.cpp`. Реализованы `max_missing_frames` и `confidence_decay`;
    сглаживание и `use_track_prediction` по-прежнему отвергаются на открытии.
@@ -366,7 +398,8 @@ ABI libva между vcpkg и Ubuntu — ровно этот класс расх
    99% до 100%, число регионов на кадр не изменилось. Пропуски детектора в архиве: у cv 2.3%
    шагов (из них 80 из 125 — один кадр), у ONVIF 13.6% (1321 из 1646 — один кадр).
 
-Этап закрывает и продуктовую задачу «номер −12, машина −6».
+Этап закрывает продуктовую задачу «номер −12, машина −6» на уровне модели; polygon → qp-map
+и пять факторов §11 уже на wire. Следующий продуктовый срез — этап 4 (bitrate budget).
 
 **Источник метаданных — измерено 2026-08-23, вывод не тот, которого ждали.**
 
@@ -436,8 +469,32 @@ CV, если понадобится, можно поднять настройк�
 
 ### Этап 4. Rate control
 
-11. `QualityPolicy` (§14) и object-first rate control с бюджетом (§15).
-12. `StreamSettings` получает целевой битрейт и VBV — то, чего требует и живой режим.
+11. ~~`QualityPolicy` (§14) и object-first rate control с бюджетом (§15).~~ **Первый срез
+    сделан:** `BitrateBudget` — внешний цикл над CQP/CRF. При `target_bitrate` смотрит
+    средний выход, сначала поднимает `background_qp_delta`, потом смягчает ROI ниже
+    `critical_importance` (лица/номера не трогает). Peak overshoot / recovery window
+    по-прежнему отвергаются на open. `QualityPolicy` кроме OBJECT_FIRST — тоже.
+    Area-budget (`max_protected_fraction`) остаётся CQP-ответом на «critical first».
+
+    **Стенд video6 (2026-08-26):** продуктовый CRF36 уже ~450 kbps (5% исходника) —
+    потолок 500 kbps no-op. На CRF28 цикл двигает битрейт (VAAPI ~1346→1244 kbps), но
+    до агрессивных целей не дотягивает: при полном бюджете регионов фон почти не виден
+    (машины+halo кроют кадр), а драйвер VA-API всё равно режет до 8 ROI. Починено:
+    `max_roi_regions=8` у VA-API и `truncate_roi_rects` всегда оставляет background.
+    `--target-bitrate` проведён через `roi-clip` / video_a.
+
+    **Peak + recovery (library):** `max_peak_overshoot` (окно ~1 с) и `recovery_window_ms`
+    (долг бит, блокирует step-down) реализованы в `BitrateBudget`; отказ на open снят.
+    **CPU native CBR+filler (2026-08-27):** при `target_bitrate > 0` software-бэкенд
+    открывает CBR с filler (`x264-params nal-hrd=cbr:filler=1`) только для H.264;
+    CRF не ставит; capability `native_bitrate` = true только для H.264. ROI-дельты
+    перераспределяют *кодированное* качество внутри бюджета; matched-bitrate ≤2%
+    на H.264. H.265 и HW (QSV/VA-API/NVENC) по-прежнему CQP + outer loop
+    (ROI у них живёт на CQP). Для CPU H.265 это зафиксированный guard-контракт:
+    `target_bitrate` даунгрейдится до CRF/CQP, `sei=false`, fallback виден в telemetry.
+    `BALANCED`/`BITRATE_FIRST` — ещё нет.
+12. ~~`StreamSettings` получает целевой битрейт~~ — `RateControl` на wire (и на
+    `FileSettings` для офлайн-калибровки). HW CBR/ABR с сохранением ROI — следующий срез.
 
 ### Этап 5. Новые бэкенды
 

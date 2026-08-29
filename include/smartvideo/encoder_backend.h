@@ -89,6 +89,8 @@ struct BackendFrameControl {
     std::span<const Rect> regions;
     /// In the encoder time base.
     int64_t pts = 0;
+    /// Optional H.264/H.265 user-data-unregistered SEI (UUID || payload). Empty skips.
+    std::span<const uint8_t> sei_unregistered;
 };
 
 /// One opened encoder. What is inside depends entirely on the backend -- libavcodec's

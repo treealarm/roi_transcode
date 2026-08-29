@@ -37,7 +37,7 @@ public:
         // False until the QP map is actually submitted. The hardware supports it; this
         // code does not.
         c.roi_rectangles = false;
-        c.per_block_qp = false;
+        c.qp_map = false;
         c.max_roi_regions = 0;
         return c;
     }

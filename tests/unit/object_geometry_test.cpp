@@ -80,6 +80,38 @@ void empty_mask_asks_for_nothing()
     CHECK(near(out.width, 0.0f) && near(out.height, 0.0f));
 }
 
+void rasterize_fills_the_triangle_and_leaves_the_corner()
+{
+    // Right triangle covering the bottom-left half of a 32x32 frame. The top-right
+    // pixel must stay clear -- that is the whole point of not collapsing to the AABB.
+    Polygon p;
+    p.points = {{0.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
+    std::vector<uint8_t> buf(32 * 32, 0);
+    CHECK(rasterize_polygon(p, buf.data(), 32, 32, 255));
+    CHECK(buf[31] == 0);            // top-right
+    CHECK(buf[31 * 32] == 255);     // bottom-left
+    CHECK(buf[31 * 32 + 15] != 0);  // mid of the base, inside
+}
+
+void degenerate_polygon_is_refused()
+{
+    std::vector<uint8_t> buf(16, 7);
+    Polygon p;
+    p.points = {{0.1f, 0.1f}, {0.9f, 0.9f}}; // two points
+    CHECK(!rasterize_polygon(p, buf.data(), 4, 4, 255));
+    CHECK(buf[0] == 7); // untouched
+}
+
+void dilate_grows_a_single_pixel()
+{
+    std::vector<uint8_t> buf(9, 0);
+    buf[4] = 255; // centre of 3x3
+    dilate_mask(buf.data(), 3, 3, 1);
+    for (uint8_t v : buf) {
+        CHECK(v == 255);
+    }
+}
+
 } // namespace
 
 int main()
@@ -89,6 +121,9 @@ int main()
     empty_polygon_asks_for_nothing();
     mask_extent_covers_the_set_pixels();
     empty_mask_asks_for_nothing();
+    rasterize_fills_the_triangle_and_leaves_the_corner();
+    degenerate_polygon_is_refused();
+    dilate_grows_a_single_pixel();
     std::printf("object_geometry ok\n");
     return 0;
 }

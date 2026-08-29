@@ -206,11 +206,147 @@ that into `mvhd` as a different movie timescale describing the same 12.000 s.
 A mask is quantized to the 32-pixel block grid and carries no halo, so it
 deliberately differs in the encode itself.
 
+## Seeing the regions on the clip
+
+The encoded file carries no boxes and cannot: ROI encoding changes where the bits
+go, and nothing about where they went survives into the bitstream. So the regions
+travel beside the video in a `*.boxes.json` sidecar, and `boxes-to-ass.py` turns
+that into subtitles any player composites over the picture:
+
+```bash
+./integration/scripts/boxes-to-ass.py clip.boxes.json -o clip.ass
+mpv clip.roi.mp4 --sub-file=clip.ass
+vlc --sub-file=clip.ass clip.roi.mp4          # libass either way
+```
+
+Two things this buys over burning the boxes in with `drawbox`. The clip stays
+byte-identical to what the encoder produced, so PSNR and SSIM against the source
+still mean something -- a burned-in copy is a different picture and every metric
+computed on it is wrong. And the same `.ass` fits the source as well as the
+re-encoded file, which is how you look at what was asked for and what came out
+without generating two overlays.
+
+The sidecar is written by video_a's offline pass (see below); the format is the
+one `Box` already uses on the wire -- normalized 0..1 from the top-left -- so the
+rectangles land where the encoder was told to spend its bits.
+
+## An end-to-end pass with a real detector
+
+`video_a` (the analytics engine, separate repository) can read a file, detect what
+is in it, and drive `EncodeStream` directly over plain gRPC -- no Dapr, no media
+router, two processes. `roi-clip.sh` starts both, builds the overlay and opens the
+result.
+
+### Quick start (plates)
+
+```bash
+./integration/scripts/roi-clip.sh \
+  /mnt/wdblue/seenaptec/media_trash/samples/dataset/mycarplate.mp4 \
+  -o /mnt/wdblue/seenaptec/media_trash/samples/dataset/output \
+  --classes vehicle,license_plate \
+  --detect-fps 0 \
+  --crf 18 --background-qp 4 \
+  --qp license_plate=-12 \
+  --encoder cpu --play none
+
+mpv .../output/mycarplate.roi.mp4 --sub-file=.../output/mycarplate.roi.ass
+```
+
+Write somewhere the player can open. Snap/Flatpak VLC often cannot read `/tmp/...`
+even when the file is valid (`ffprobe` / `mpv` are fine).
+
+### What the knobs mean
+
+| Knob | Role |
+|------|------|
+| `--crf` | Overall crush. Lower = closer to source, larger file. Default **23**; demos often use 14–18. |
+| `--background-qp` | Extra QP on unprotected areas (positive = worse background). Default **6** (mild). 14 was a lab crush. |
+| `--qp KIND=DELTA` | Override the v3 ladder for one class (negative = better). Omit to use plate/face/vehicle ladder. |
+| `--classes` | What to detect. `license_plate` uses video_a's YOLOv8 plate IR (full frame). |
+| `--detect-fps` | Detector rate; **0** = every frame (short plate clips). Default 2. |
+| `--target-bitrate` | Outer average ceiling. Does **not** yet match baseline within §16's 2%; leave off for demos. |
+| `--encoder` | `cpu` / `vaapi` / `auto`. Prefer `cpu` for quality stands. |
+| `-o` / `--out` | Output directory or exact path. |
+| `--play` | `roi` \| `source` \| `both` \| `none`. |
+
+Built-in defaults when a flag is omitted: `CRF 23`, `background_qp 6`, `pad 0.02`,
+`detect_fps 2`, `codec same`.
+
+```bash
+./integration/scripts/roi-clip.sh clip.mp4
+./integration/scripts/roi-clip.sh clip.mp4 --crf 18 --background-qp 4 --play both
+./integration/scripts/roi-clip.sh clip.mp4 --regions mask --play none
+```
+
+Everything lands in `/tmp/roi-clip/<name>/` unless `--out` / `-o` names the result
+(`-o` and `--out` are alternatives; the later one wins):
+
+```bash
+./integration/scripts/roi-clip.sh /clips/video1.mp4 --out /clips/video1_compressed.mp4
+```
+
+Past two or three settings the command line stops being readable, so the same
+settings can live in a YAML profile instead — every key is one of the flags, and a
+flag still wins over the file:
+
+```bash
+cp integration/scripts/roi-clip.example.yaml my-profile.yaml
+./integration/scripts/roi-clip.sh -c my-profile.yaml
+./integration/scripts/roi-clip.sh -c my-profile.yaml other.mp4 -o /path/out --crf 18
+export ROI_CLIP_CONFIG=$PWD/my-profile.yaml   # then just: roi-clip.sh
+```
+
+`roi-clip.example.yaml` is the commented list of everything a profile can set
+(mild product defaults, not the old CRF36/bg14 crush). An unknown key is refused
+by name rather than ignored. `qp` is the one setting that replaces rather than
+merges: a `--qp` on the command line stands for the whole block, because a kind
+added to the profile's list would otherwise reach the encoder twice.
+
+The encoder service is stopped when the
+script exits, and `--play both` opens the source and the result with the same
+subtitles -- the coordinates belong to the frame, not to the file, so one overlay
+fits both and the comparison is what the encoder was told against what it did.
+`--help` lists the encoder and detector knobs it forwards.
+
+By hand, which is what it does:
+
+```bash
+# 1. the encoder
+APP_ID=roitrc GRPC_ROI_BIND=127.0.0.1 GRPC_ROI_PORT=50061 \
+  ROI_ALLOWED_ROOTS=/path/to/clips ./build/integration/roi-transcode-svc
+
+# 2. the pass: decode, detect, re-encode, write the sidecar
+ANALYTICS_MODEL_PATH=... ANALYTICS_DEVICE=CPU ANALYTICS_REID_EMBED_INTERVAL_SEC=15 \
+  ./analytics-worker --roi-file /path/to/clips/clip.mp4 --roi-grpc 127.0.0.1:50061 \
+    --codec h264 --crf 23 --encoder cpu --background-qp 6 \
+    --qp license_plate=-12 --pad 0.02
+
+# 3. look at it
+./integration/scripts/boxes-to-ass.py /path/to/clips/clip.boxes.json -o /tmp/clip.ass
+mpv /path/to/clips/clip.roi.mp4 --sub-file=/tmp/clip.ass
+```
+
+Detection is sampled (`--detect-fps`, 2 by default) while decoding is not: every
+frame reaches the encoder, and the frames between detections carry the previous
+ones forward. `--regions mask` sends the regions as a graded mask instead of
+boxes, which is the other half of the contract.
+
+Both paths given to the worker must sit under the service's `ROI_ALLOWED_ROOTS`:
+the caller and the service share a filesystem, and the sandbox is checked on the
+service's side.
+
+**Do not point this at `--encoder qsv`.** libmfx aborts the service process after
+a handful of frames when it encodes from a gRPC worker thread, though the same
+frames go through `roi-frame-push --push raw --encoder qsv` on the same machine.
+VA-API is the hardware path that works and is the same silicon. Details, and what
+the region budget does on VA-API, in [`docs/stream-mode-hw.md`](docs/stream-mode-hw.md).
+
 ## Synthetic scenes
 
 ```bash
-./integration/scripts/make-scenes.py            # all of them, into testdata/scenes/
-./integration/scripts/make-scenes.py moving
+./benchmarks/synthetic/make-scenes.py            # all of them, into testdata/scenes/
+./benchmarks/synthetic/make-scenes.py moving
+./benchmarks/synthetic/rd_curve.sh moving cpu h264
 ```
 
 Five clips, each with a `truth.json` saying where the object is on every frame,

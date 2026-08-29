@@ -29,7 +29,7 @@ public:
         // Deliberately conservative. The VA-API limit is the driver's, not the API's, and
         // there is no query for it that works across drivers -- so this is the number the
         // caller truncates to rather than a number iHD promised.
-        c.max_roi_regions = 32;
+        c.max_roi_regions = 8; // iHD accepts eight; claiming 32 lets libavcodec drop the rest
         return c;
     }
 

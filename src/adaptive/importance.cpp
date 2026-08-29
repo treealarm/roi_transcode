@@ -2,10 +2,30 @@
 
 #include "importance.h"
 
+#include "smartvideo/object_priority.h"
+
 #include <algorithm>
 #include <cmath>
 
 namespace smartvideo {
+
+ObjectPriority priority_from_importance(float importance)
+{
+    const float i = std::clamp(importance, 0.0f, 1.0f);
+    if (i >= 0.95f) {
+        return ObjectPriority::Critical;
+    }
+    if (i >= 0.80f) {
+        return ObjectPriority::High;
+    }
+    if (i >= 0.60f) {
+        return ObjectPriority::Normal;
+    }
+    if (i >= 0.20f) {
+        return ObjectPriority::Low;
+    }
+    return ObjectPriority::Background;
+}
 
 float default_semantic_priority(const std::string& kind, float unknown)
 {
@@ -19,7 +39,7 @@ float default_semantic_priority(const std::string& kind, float unknown)
     //
     // "road" and "background" are in §11's table but nothing reports them: they describe
     // what is left over, which is what background_qp_delta already handles.
-    if (kind == "license_plate") return 1.00f;
+    if (kind == "license_plate" || kind == "plate") return 1.00f;
     if (kind == "face")          return 0.95f;
     if (kind == "person")        return 0.80f;
     if (kind == "vehicle")       return 0.60f;
@@ -51,7 +71,33 @@ float lookup(const std::unordered_map<std::string, float>& table, const std::str
 
 } // namespace
 
-float importance_of(const Object& object, const ImportancePolicy& policy)
+float temporal_stability_of(const TrackEvidence& track, const ImportancePolicy& policy)
+{
+    if (!track.present) {
+        // No history: leave the product alone. Punishing an untracked box would drop every
+        // region from a source that never numbers its tracks.
+        return 1.0f;
+    }
+    const float floor = std::clamp(policy.temporal_stability_floor, 0.0f, 1.0f);
+    const float tau = std::max(policy.temporal_stability_tau_sec, 1e-3f);
+    const float age = std::max(track.age_sec, 0.0f);
+    // 1 - exp(-age/tau) climbs from 0 toward 1; floor is what a brand-new track is worth.
+    return floor + (1.0f - floor) * (1.0f - std::exp(-age / tau));
+}
+
+float motion_weight_of(const TrackEvidence& track, const ImportancePolicy& policy)
+{
+    if (!policy.use_motion_weight || !track.present) {
+        return 1.0f;
+    }
+    const float floor = std::clamp(policy.motion_weight_floor, 0.0f, 1.0f);
+    const float full = std::max(policy.motion_speed_at_full, 1e-6f);
+    const float t = std::clamp(track.speed / full, 0.0f, 1.0f);
+    return floor + (1.0f - floor) * t;
+}
+
+float importance_of(const Object& object, const ImportancePolicy& policy,
+    const TrackEvidence& track)
 {
     const float semantic = lookup(policy.semantic_priority, object.kind,
         default_semantic_priority(object.kind, policy.unknown_priority));
@@ -74,11 +120,11 @@ float importance_of(const Object& object, const ImportancePolicy& policy)
         ? 1.0f
         : (object.confidence > 0.0f ? object.confidence : policy.assumed_confidence);
 
-    // §13 and §15 territory, and honestly constant until they exist. Written out rather
-    // than dropped from the product so the shape of §11 stays visible: when temporal
-    // stability arrives it replaces a 1.0f here and nothing else moves.
-    const float temporal_stability = 1.0f;
-    const float motion_weight = 1.0f;
+    // The last two factors of §11. TemporalStability rises with how long the track has
+    // persisted (proto's reading of the name). MotionWeight is optional and stays 1.0
+    // until the policy turns it on -- §11 marks it that way.
+    const float temporal_stability = temporal_stability_of(track, policy);
+    const float motion_weight = motion_weight_of(track, policy);
 
     const float importance =
         semantic * task * confidence * temporal_stability * motion_weight;

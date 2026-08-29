@@ -4,6 +4,7 @@
 #include "pixel_format.h"
 
 #include <algorithm>
+#include <cstring>
 #include <memory>
 
 extern "C" {
@@ -99,6 +100,20 @@ void attach_roi(AVFrame* frame, std::span<const Rect> regions)
         const int qp = std::clamp(regions[i].qp_delta, -51, 51);
         roi[i].qoffset = AVRational{qp, 51};
     }
+}
+
+void attach_sei_unregistered(AVFrame* frame, std::span<const uint8_t> uuid_and_payload)
+{
+    av_frame_remove_side_data(frame, AV_FRAME_DATA_SEI_UNREGISTERED);
+    if (uuid_and_payload.empty()) {
+        return;
+    }
+    AVFrameSideData* sd = av_frame_new_side_data(
+        frame, AV_FRAME_DATA_SEI_UNREGISTERED, static_cast<int>(uuid_and_payload.size()));
+    if (!sd) {
+        roiav::fail("av_frame_new_side_data SEI");
+    }
+    std::memcpy(sd->data, uuid_and_payload.data(), uuid_and_payload.size());
 }
 
 } // namespace backend_common
@@ -315,6 +330,7 @@ Status LibavBackend::SubmitFrame(BackendSession& session, IFrameBuffer& frame,
         // the input's GOP structure override the requested one.
         send->pict_type = AV_PICTURE_TYPE_NONE;
         backend_common::attach_roi(send, control.regions);
+        backend_common::attach_sei_unregistered(send, control.sei_unregistered);
 
         if (s.hw_upload && !is_hw_frame(send)) {
             av_frame_unref(s.hw_frame.p);
@@ -325,6 +341,7 @@ Status LibavBackend::SubmitFrame(BackendSession& session, IFrameBuffer& frame,
             s.hw_frame.p->pts = control.pts;
             // Side data does not survive the transfer to hardware.
             backend_common::attach_roi(s.hw_frame.p, control.regions);
+            backend_common::attach_sei_unregistered(s.hw_frame.p, control.sei_unregistered);
             send = s.hw_frame.p;
         }
 

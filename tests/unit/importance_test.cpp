@@ -66,6 +66,16 @@ void the_qp_line_reproduces_the_specification_s_example()
     check(smartvideo::qp_from_importance(0.05f, policy) == 4, "background lands on +4");
 }
 
+// The product operating point on the same slope: plate −12, vehicle −6.
+void the_product_qp_line_lands_on_minus_twelve_and_minus_six()
+{
+    smartvideo::ImportancePolicy policy;
+    policy.qp_at_zero = 3;
+    policy.qp_at_one = -12;
+    check(smartvideo::qp_from_importance(1.00f, policy) == -12, "plate lands on -12");
+    check(smartvideo::qp_from_importance(0.60f, policy) == -6, "vehicle lands on -6");
+}
+
 // A class we recognise is worth what its class is worth, however sure the detector was.
 void a_known_class_is_not_scaled_by_confidence()
 {
@@ -154,7 +164,8 @@ void a_plate_inside_a_vehicle_keeps_the_plate_s_quality()
     }
 
     // Ordered by importance, so the encoder's own first-wins rule is §12's rule.
-    check(rects[0].qp_delta == -10, "the plate comes first, at -10");
+    // v3 ladder: plate → Critical (−8), vehicle → Normal (−4).
+    check(rects[0].qp_delta == -8, "the plate comes first, at -8");
     check(rects[1].qp_delta == -4, "the vehicle follows, at -4");
 
     // And the plate's rectangle really is inside the vehicle's, which is what makes this
@@ -242,7 +253,8 @@ void the_budget_protects_the_face_and_lets_the_body_go()
     }
 
     // Importance order puts the face first, so it is the one that gets paid for.
-    check(rects[0].qp_delta == -9, "the face keeps its own delta");
+    // v3 ladder: face → Critical (−8), person would be High (−6) but the budget zeros it.
+    check(rects[0].qp_delta == -8, "the face keeps its own delta");
     check(rects[1].qp_delta == 0,
         "the person is neutral -- not sharpened, and not degraded either");
     check(rects[2].qp_delta == -4, "the halo present is the face's");
@@ -268,13 +280,76 @@ void a_budget_of_zero_changes_nothing()
 
     quality.max_protected_fraction = 0.0f;
     const auto unbudgeted = builder.build(1000, 1000, dets, quality);
-    check(unbudgeted.size() == 3 && unbudgeted[0].qp_delta == -7,
-        "an unbudgeted person keeps its delta and its halo");
+    check(unbudgeted.size() == 3 && unbudgeted[0].qp_delta == -6,
+        "an unbudgeted person keeps its ladder delta and its halo");
 
     quality.max_protected_fraction = 0.25f;
     const auto budgeted = builder.build(1000, 1000, dets, quality);
     check(budgeted.size() == 2 && budgeted[0].qp_delta == 0,
         "the same person under a budget goes neutral and loses its halo");
+}
+
+// TemporalStability rises with track age; an untracked box is not punished.
+void temporal_stability_rises_with_track_age()
+{
+    const smartvideo::ImportancePolicy policy;
+    smartvideo::TrackEvidence none;
+    check_near(smartvideo::temporal_stability_of(none, policy), 1.0, 1e-6,
+        "no track leaves stability at 1");
+
+    smartvideo::TrackEvidence newborn;
+    newborn.present = true;
+    newborn.age_sec = 0.0f;
+    newborn.sample_count = 1;
+    check_near(smartvideo::temporal_stability_of(newborn, policy),
+        policy.temporal_stability_floor, 1e-5, "a brand-new track is at the floor");
+
+    smartvideo::TrackEvidence older = newborn;
+    older.age_sec = policy.temporal_stability_tau_sec;
+    const float mid = smartvideo::temporal_stability_of(older, policy);
+    check(mid > policy.temporal_stability_floor + 0.2f
+            && mid < 1.0f - 1e-3f,
+        "after one tau the track has climbed but is not yet full");
+
+    smartvideo::TrackEvidence settled = newborn;
+    settled.age_sec = 20.0f;
+    check_near(smartvideo::temporal_stability_of(settled, policy), 1.0, 1e-3,
+        "a long-lived track is essentially full");
+
+    const auto person = smartvideo::object_from_box(
+        box("person", 0.1f, 0.1f, 0.2f, 0.2f), policy);
+    const float young_i = smartvideo::importance_of(person, policy, newborn);
+    const float old_i = smartvideo::importance_of(person, policy, settled);
+    check(old_i > young_i, "the same person is worth more once the track has settled");
+    check_near(young_i, 0.80 * policy.temporal_stability_floor, 1e-4,
+        "a newborn person is semantic x floor");
+}
+
+// MotionWeight stays 1.0 until opted in; then a mover outranks a parkéd object.
+void motion_weight_is_optional_and_prefers_movers()
+{
+    smartvideo::ImportancePolicy policy;
+    smartvideo::TrackEvidence parked;
+    parked.present = true;
+    parked.age_sec = 10.0f;
+    parked.speed = 0.0f;
+    check_near(smartvideo::motion_weight_of(parked, policy), 1.0, 1e-6,
+        "motion is off by default");
+
+    policy.use_motion_weight = true;
+    check_near(smartvideo::motion_weight_of(parked, policy),
+        policy.motion_weight_floor, 1e-5, "a parked track is at the floor");
+
+    smartvideo::TrackEvidence moving = parked;
+    moving.speed = policy.motion_speed_at_full;
+    check_near(smartvideo::motion_weight_of(moving, policy), 1.0, 1e-5,
+        "a track at the reference speed is full");
+
+    const auto vehicle = smartvideo::object_from_box(
+        box("vehicle", 0.1f, 0.1f, 0.2f, 0.2f), policy);
+    check(smartvideo::importance_of(vehicle, policy, moving)
+            > smartvideo::importance_of(vehicle, policy, parked),
+        "a moving vehicle outranks a parked one when motion weighs");
 }
 
 } // namespace
@@ -283,6 +358,7 @@ int main()
 {
     semantic_priorities_are_the_specification_s();
     the_qp_line_reproduces_the_specification_s_example();
+    the_product_qp_line_lands_on_minus_twelve_and_minus_six();
     a_known_class_is_not_scaled_by_confidence();
     the_class_hierarchy_survives_an_unhelpful_detector();
     an_unknown_class_is_scaled_by_confidence();
@@ -291,6 +367,8 @@ int main()
     a_configured_kind_keeps_its_own_number();
     the_budget_protects_the_face_and_lets_the_body_go();
     a_budget_of_zero_changes_nothing();
+    temporal_stability_rises_with_track_age();
+    motion_weight_is_optional_and_prefers_movers();
 
     if (failures > 0) {
         std::fprintf(stderr, "importance_test: %d failure(s)\n", failures);

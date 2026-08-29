@@ -48,6 +48,10 @@ int main()
 
     Quality quality;
     quality.hold_sec = 0.25;
+    // Keep the historical pad-as-halo semantics for this fixture; v3 FixedPixels+min
+    // side would shift the AABB and is covered by v3_policy_test.
+    quality.margin_mode = MarginMode::FractionOfFrame;
+    quality.min_roi_side = 0;
     quality.kinds["plate"] = KindQuality{-10, 0.02};
     const std::vector<Box> boxes{Box{
         .t_sec = 1.25,
@@ -82,6 +86,47 @@ int main()
     CHECK(grid.deltas[(500 / 32) * 60 + (800 / 32)] == -10);
     CHECK(grid.deltas[(500 / 32) * 60 + (760 / 32)] == -5);
     CHECK(grid.deltas[0] == 6);
+
+    // A triangle over the bottom-left half: the AABB would protect the top-right corner of
+    // that box, the polygon must not. Build through detections_from so the shaped path runs.
+    Quality poly_q;
+    poly_q.background_qp_delta = 6;
+    poly_q.pad = 0;
+    poly_q.margin_mode = MarginMode::FractionOfFrame;
+    poly_q.min_roi_side = 0;
+    poly_q.max_protected_fraction = 0; // no area budget for this check
+    poly_q.kinds["vehicle"] = KindQuality{-8, 0.0};
+    Box tri;
+    tri.kind = "vehicle";
+    tri.x = 0;
+    tri.y = 0;
+    tri.width = 1;
+    tri.height = 1;
+    tri.polygon = {{0.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
+    const auto poly_dets = builder.detections_from({tri}, poly_q, 64, 64);
+    CHECK(poly_dets.size() == 1);
+    CHECK(poly_dets[0].polygon.size() == 3);
+    const auto poly_rects = builder.build(64, 64, poly_dets, poly_q);
+    // Paint the rects onto a qp map and check the corners: bottom-left protected, top-right not.
+    const auto poly_grid = qp_map.build(64, 64, 16, poly_rects);
+    CHECK(poly_grid.cols == 4 && poly_grid.rows == 4);
+    CHECK(poly_grid.deltas[3 * 4 + 0] == -8); // bottom-left block
+    CHECK(poly_grid.deltas[0 * 4 + 3] == 6);  // top-right stays background
+
+    // A naive resize drops the background (it is last). truncate_roi_rects keeps it and
+    // spends the remaining slots on earlier objects.
+    std::vector<smartvideo::Rect> many;
+    for (int32_t i = 0; i < 10; ++i) {
+        many.push_back({.top = 0, .bottom = 10, .left = i * 10, .right = i * 10 + 8,
+            .qp_delta = -5});
+    }
+    many.push_back({.top = 0, .bottom = 100, .left = 0, .right = 100, .qp_delta = 14});
+    int32_t lost = 0;
+    smartvideo::truncate_roi_rects(many, 4, 100, 100, &lost);
+    CHECK(many.size() == 4);
+    CHECK(lost == 7); // 10 objects -> 3 kept + background; 7 objects dropped
+    CHECK(many.back().qp_delta == 14);
+    CHECK(many.back().right == 100 && many.back().bottom == 100);
 
     std::puts("roi_map_builder_test ok");
     return 0;

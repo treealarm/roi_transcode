@@ -29,6 +29,20 @@ struct Report {
     // a fault -- it is what submitting ordinary planes to a hardware encoder costs.
     int64_t frames_converted = 0;
     int64_t frames_uploaded = 0;
+
+    // Safety guard for this build: CPU H.265 ignores target_bitrate and runs plain
+    // CRF/CQP to avoid an unstable ROI+SEI path in libx265.
+    bool cpu_h265_target_guard = false;
+
+    // §14 ROI lag observability. Filled when tracked boxes are available on the path.
+    bool roi_lag_measured = false;
+    int64_t roi_lag_samples = 0;
+    float roi_lag_min_iou = 0.0f;
+    double roi_lag_p95_frames = 0.0;
+    double roi_lag_p99_frames = 0.0;
+    double roi_lag_p95_ms = 0.0;
+    double roi_lag_p99_ms = 0.0;
+    bool roi_lag_acceptance = false;
 };
 
 } // namespace smartvideo

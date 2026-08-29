@@ -119,17 +119,13 @@ void RoiEncoder::open_deferred(const EncoderConfig& config)
         fail(std::format("quality policy {} is not implemented",
             quality_policy_name(config.policy)));
     }
-    // Same rule for the two settings that exist only as declarations. A caller who asks
-    // for temporal smoothing or a bitrate target and gets neither has been misled; the
-    // encode would look like it worked, and any measurement taken against it would be
-    // wrong in a way nothing reveals.
+    // Same rule for settings that exist only as declarations. A caller who asks for a
+    // bitrate target and gets neither has been misled.
     if (config.temporal.unimplemented_requested()) {
-        fail("smoothing and track prediction (TZ v2.0 section 13) are declared but not "
-             "implemented; max_missing_frames and confidence_decay are");
+        fail("TemporalROIConfig asked for something that is not implemented");
     }
-    if (config.rate_control.any_set()) {
-        fail("RateControlPolicy (TZ v2.0 section 15) is declared but not implemented; "
-             "the encoder runs at a constant quantizer");
+    if (config.rate_control.unimplemented_requested()) {
+        fail("RateControlPolicy asked for something BitrateBudget does not implement");
     }
 
     std::string errors;
@@ -202,20 +198,23 @@ void RoiEncoder::drain()
 }
 
 void RoiEncoder::encode(
-    AVFrame* frame, const std::vector<Rect>& rects, int64_t pts)
+    AVFrame* frame, const std::vector<Rect>& rects, int64_t pts,
+    std::span<const uint8_t> sei_unregistered)
 {
     // The decoder's frame goes in through the same door an embedder uses. Borrowed, not
     // owned: the decoder reuses it for the next frame.
     AvFrameBuffer buffer(frame);
-    encode_buffer(buffer, rects, pts);
+    encode_buffer(buffer, rects, pts, sei_unregistered);
 }
 
 void RoiEncoder::encode_buffer(
-    IFrameBuffer& buffer, const std::vector<Rect>& rects, int64_t pts)
+    IFrameBuffer& buffer, const std::vector<Rect>& rects, int64_t pts,
+    std::span<const uint8_t> sei_unregistered)
 {
     BackendFrameControl control;
     control.regions = rects;
     control.pts = pts;
+    control.sei_unregistered = sei_unregistered;
 
     const Status s = m_backend->SubmitFrame(*m_session.get(), buffer, control);
     if (!s) {

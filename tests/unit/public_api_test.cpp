@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -41,6 +42,9 @@ std::vector<smartvideo::Box> make_boxes()
         .y = 0.40f,
         .width = 0.30f,
         .height = 0.20f,
+        .label = "",
+        .polygon = {},
+        .track = {},
     }};
 }
 
@@ -83,8 +87,43 @@ public:
         smartvideo::backend_chain(smartvideo::Encoder::Cpu)[0].get().GetCapabilities(
             smartvideo::Codec::H264);
     (void)caps.h264;
-    (void)caps.per_block_qp;
+    (void)caps.qp_map;
+    (void)caps.qp_map_block_width;
+    (void)caps.qp_map_block_height;
+    (void)caps.sei;
+    (void)caps.native_bitrate;
     (void)caps.max_roi_regions;
+    if (!caps.qp_map || caps.qp_map_block_width != 16 || caps.qp_map_block_height != 16) {
+        std::fprintf(stderr, "fail: Cpu H.264 must advertise qp_map 16x16\n");
+        std::exit(1);
+    }
+    if (!caps.sei) {
+        std::fprintf(stderr, "fail: Cpu must advertise sei\n");
+        std::exit(1);
+    }
+    if (!caps.native_bitrate) {
+        std::fprintf(stderr, "fail: Cpu must advertise native_bitrate\n");
+        std::exit(1);
+    }
+    const smartvideo::EncoderCapabilities hevc =
+        smartvideo::backend_chain(smartvideo::Encoder::Cpu)[0].get().GetCapabilities(
+            smartvideo::Codec::H265);
+    if (!hevc.qp_map || hevc.qp_map_block_width != 32) {
+        std::fprintf(stderr, "fail: Cpu H.265 must advertise qp_map 32x32\n");
+        std::exit(1);
+    }
+    if (hevc.native_bitrate) {
+        std::fprintf(stderr, "fail: Cpu H.265 must keep native_bitrate off\n");
+        std::exit(1);
+    }
+    if (hevc.sei) {
+        std::fprintf(stderr, "fail: Cpu H.265 must keep sei off for now\n");
+        std::exit(1);
+    }
+    if (smartvideo::qp_map_block(hevc) != 32) {
+        std::fprintf(stderr, "fail: qp_map_block helper\n");
+        std::exit(1);
+    }
 
     smartvideo::EncoderConfig config;
     config.width = 1280;
@@ -117,6 +156,15 @@ public:
     (void)r.encoder_name;
     (void)r.frames;
     (void)r.regions_dropped;
+    (void)r.cpu_h265_target_guard;
+    (void)r.roi_lag_measured;
+    (void)r.roi_lag_samples;
+    (void)r.roi_lag_min_iou;
+    (void)r.roi_lag_p95_frames;
+    (void)r.roi_lag_p99_frames;
+    (void)r.roi_lag_p95_ms;
+    (void)r.roi_lag_p99_ms;
+    (void)r.roi_lag_acceptance;
 }
 
 [[maybe_unused]] void names_the_frame_entry_point()
@@ -144,6 +192,15 @@ public:
 
     const smartvideo::Report r = session.finish();
     (void)r.packets;
+    (void)r.cpu_h265_target_guard;
+    (void)r.roi_lag_measured;
+    (void)r.roi_lag_samples;
+    (void)r.roi_lag_min_iou;
+    (void)r.roi_lag_p95_frames;
+    (void)r.roi_lag_p99_frames;
+    (void)r.roi_lag_p95_ms;
+    (void)r.roi_lag_p99_ms;
+    (void)r.roi_lag_acceptance;
 }
 
 } // namespace

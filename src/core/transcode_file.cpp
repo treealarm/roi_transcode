@@ -1,11 +1,18 @@
 #include "smartvideo/smartvideo.h"
 
 #include "av_raii.h"
+#include "bitrate_budget.h"
+#include "box_smoother.h"
+#include "encoder_runtime_warnings.h"
+#include "frame_roi_pipeline.h"
 #include "packet_sink.h"
 #include "importance_map.h"
+#include "roi_lag.h"
 #include "roi_encoder.h"
 #include "temporal_roi.h"
 #include "object_normalizer.h"
+#include "qp_slew.h"
+#include "smartvideo/metadata.h"
 
 #include <cstdio>
 #include <vector>
@@ -84,29 +91,72 @@ Report transcode_file(const std::string& input_path,
     check(avcodec_parameters_to_context(dec.p, in_v->codecpar), "decoder params");
     check(avcodec_open2(dec.p, decoder, nullptr), "open decoder");
 
-    FileMuxSink sink(output_path, settings.movflags);
+    const AVRational fps = guess_fps(in_v, dec.p);
+
+    FileMuxSink file_sink(output_path, settings.movflags);
     if (aindex >= 0) {
-        sink.declare_audio(
+        file_sink.declare_audio(
             in.p->streams[aindex]->codecpar, in.p->streams[aindex]->time_base);
     }
+
+    BitrateBudget bitrate;
+    QpSlewLimiter qp_slew;
+    BoxSmoother box_smooth;
+    const double frame_sec = (fps.num > 0 && fps.den > 0)
+        ? static_cast<double>(fps.den) / static_cast<double>(fps.num)
+        : 1.0 / 25.0;
+
+    struct BudgetedMuxSink : PacketSink {
+        FileMuxSink& inner;
+        BitrateBudget& budget;
+        double fallback_sec;
+        BudgetedMuxSink(FileMuxSink& i, BitrateBudget& b, double fs)
+            : inner(i), budget(b), fallback_sec(fs)
+        {
+        }
+        void begin(AVCodecContext* enc) override { inner.begin(enc); }
+        void on_packet(AVPacket* pkt, AVRational tb) override
+        {
+            if (budget.active()) {
+                double dt = 0.0;
+                if (pkt->duration > 0 && tb.den > 0) {
+                    dt = static_cast<double>(pkt->duration) * tb.num / tb.den;
+                }
+                budget.observe(pkt->size, dt > 0.0 ? dt : fallback_sec);
+            }
+            inner.on_packet(pkt, tb);
+        }
+        void end() override { inner.end(); }
+    } sink(file_sink, bitrate, frame_sec);
 
     EncoderConfig ep;
     ep.width = dec.p->width;
     ep.height = dec.p->height;
-    const AVRational fps = guess_fps(in_v, dec.p);
     ep.fps = Rational{fps.num, fps.den};
     ep.kind = settings.encoder;
     ep.policy = settings.policy;
     ep.temporal = settings.temporal;
     ep.rate_control = settings.rate_control;
     ep.codec = resolve_codec(settings.codec, in_v->codecpar->codec_id);
+    bool cpu_h265_target_guard = false;
+    bool logged_sei_unsupported = false;
+    if (ep.kind == Encoder::Cpu && ep.codec == Codec::H265) {
+        // Guard: CPU HEVC target-bitrate path is unstable on our stack.
+        cpu_h265_target_guard = ep.rate_control.target_bitrate > 0;
+        ep.rate_control.target_bitrate = 0;
+        if (cpu_h265_target_guard) {
+            std::fprintf(stderr,
+                "guard: cpu h265 target-bitrate disabled; using CRF/CQP\n");
+        }
+    }
     ep.crf = settings.crf;
     ep.gop = settings.gop;
     ep.preset = settings.preset;
+    // Keep file mode aligned with Session: apply sanitised rate-control (after guards).
+    bitrate = BitrateBudget(ep.rate_control);
 
     RoiEncoder enc;
     enc.open(ep, sink);
-
     RoiMapBuilder roi_builder;
     // §13. Built once from the whole timeline: grouping boxes into tracks per frame would be
     // the same work repeated for every frame of the clip.
@@ -117,6 +167,7 @@ Report transcode_file(const std::string& input_path,
     bool logged_roi = false;
     int64_t frames = 0;
     int64_t dropped = 0;
+    std::vector<RoiLagSample> lag_samples;
 
     auto handle_decoded = [&]() {
         const int64_t pts = dec_frame.p->best_effort_timestamp;
@@ -126,22 +177,29 @@ Report transcode_file(const std::string& input_path,
 
         // One region per track rather than one per sample, positioned where the object was
         // at this instant rather than where it was last seen.
-        const auto live = temporal.at(t);
-        const auto dets =
-            roi_builder.detections_from(live, settings.quality, ep.width, ep.height);
-        auto rects = roi_builder.build(ep.width, ep.height, dets, settings.quality);
-        const int cap = settings.quality.max_regions;
-        if (cap > 0 && static_cast<int>(rects.size()) > cap) {
-            dropped += static_cast<int>(rects.size()) - cap;
-            rects.resize(static_cast<size_t>(cap));
-        }
+        const EncoderCapabilities caps = enc.capabilities();
+        const std::vector<Box> live = temporal.at(t);
+        FrameRoiPipelineInput pipeline_in{
+            .boxes = live,
+            .quality = settings.quality,
+            .temporal = settings.temporal,
+            .caps = caps,
+            .width = ep.width,
+            .height = ep.height,
+            .frame_interval_sec = frame_sec,
+        };
+        FrameRoiPipeline pipeline(bitrate, box_smooth, qp_slew, roi_builder);
+        FrameRoiPipelineOutput roi_out = pipeline.process(pipeline_in);
+        auto& rects = roi_out.rects;
+        dropped += roi_out.regions_dropped;
+        lag_samples.insert(lag_samples.end(), roi_out.lag_samples.begin(), roi_out.lag_samples.end());
 
         if (!logged_roi) {
-            // H.264 partitions into 16x16 macroblocks, HEVC into 32x32 CTUs.
-            const int block = settings.codec == Codec::H264 ? 16 : 32;
+            const int32_t block = roi_out.coding_block;
             const auto grid = qp_map.build(ep.width, ep.height, block, rects);
-            std::fprintf(stderr, "ROI: %zu rects, qpDeltaMap %dx%d blocks of %d\n",
-                rects.size(), grid.cols, grid.rows, block);
+            std::fprintf(stderr, "ROI: %zu rects, qpDeltaMap %dx%d blocks of %d%s\n",
+                rects.size(), grid.cols, grid.rows, block,
+                caps.qp_map ? " (qp_map)" : "");
             if (enc.kind() == Encoder::Nvenc) {
                 std::fprintf(stderr,
                     "warning: stock FFmpeg hevc_nvenc ignores ROI; "
@@ -152,7 +210,17 @@ Report transcode_file(const std::string& input_path,
 
         const int64_t out_pts = av_rescale_q(
             pts == AV_NOPTS_VALUE ? 0 : pts, in_v->time_base, enc.time_base());
-        enc.encode(dec_frame.p, rects, out_pts);
+        std::vector<uint8_t> sei;
+        warn_sei_unsupported_once(settings.metadata.bitstream_sei, caps, logged_sei_unsupported);
+        if (settings.metadata.bitstream_sei && caps.sei) {
+            SeiFrame meta;
+            meta.frame_id = static_cast<uint64_t>(frames);
+            meta.pts = out_pts;
+            meta.objects =
+                sei_objects_from_boxes(roi_out.applied_boxes, settings.metadata.max_objects);
+            sei = encode_sei_side_data(meta, settings.metadata.max_objects);
+        }
+        enc.encode(dec_frame.p, rects, out_pts, sei);
         ++frames;
     };
 
@@ -174,8 +242,8 @@ Report transcode_file(const std::string& input_path,
             }
             continue;
         }
-        if (sink.has_audio() && ipkt.p->stream_index == aindex) {
-            sink.write_audio(ipkt.p, in.p->streams[aindex]->time_base);
+        if (file_sink.has_audio() && ipkt.p->stream_index == aindex) {
+            file_sink.write_audio(ipkt.p, in.p->streams[aindex]->time_base);
         }
         av_packet_unref(ipkt.p);
     }
@@ -193,10 +261,6 @@ Report transcode_file(const std::string& input_path,
 
     enc.flush();
     sink.end();
-    std::fprintf(stderr, "encoded with %s crf=%d preset=%s converted=%ld uploaded=%ld\n",
-        enc.label(), settings.crf, preset_name(settings.preset), enc.frames_converted(),
-        enc.frames_uploaded());
-
     Report report;
     report.encoder_used = enc.kind();
     report.encoder_name = enc.label();
@@ -204,6 +268,21 @@ Report transcode_file(const std::string& input_path,
     report.regions_dropped = dropped;
     report.frames_converted = enc.frames_converted();
     report.frames_uploaded = enc.frames_uploaded();
+    report.cpu_h265_target_guard = cpu_h265_target_guard;
+    fill_lag_report(lag_samples, report);
+    std::fprintf(stderr, "encoded with %s crf=%d preset=%s converted=%ld uploaded=%ld\n",
+        enc.label(), settings.crf, preset_name(settings.preset), enc.frames_converted(),
+        enc.frames_uploaded());
+    if (report.roi_lag_measured) {
+        std::fprintf(stderr,
+            "roi lag: samples=%lld min_iou=%.3f p95_frames=%.2f p99_frames=%.2f "
+            "p95_ms=%.1f p99_ms=%.1f acceptance=%s\n",
+            static_cast<long long>(report.roi_lag_samples), report.roi_lag_min_iou,
+            report.roi_lag_p95_frames, report.roi_lag_p99_frames, report.roi_lag_p95_ms,
+            report.roi_lag_p99_ms, report.roi_lag_acceptance ? "pass" : "fail");
+    } else {
+        std::fprintf(stderr, "roi lag: not measured (no tracked boxes)\n");
+    }
     return report;
 }
 

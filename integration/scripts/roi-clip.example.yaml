@@ -1,0 +1,72 @@
+# A roi-clip profile: the command line, written down.
+#
+#   ./integration/scripts/roi-clip.sh -c my-profile.yaml
+#   ./integration/scripts/roi-clip.sh -c my-profile.yaml other-clip.mp4 --crf 18
+#
+# Every key here is one of roi-clip.sh's flags, and a flag given on the command line wins over the
+# value in the file, so a profile is a starting point rather than a cage. Only the keys you care
+# about need to be present; delete the rest and the built-in defaults apply.
+#
+# Copy this file rather than editing it in place -- it is the documented example, not your profile.
+
+# What to convert, and where the result goes. `out` names the file exactly and takes its directory;
+# `outdir` instead keeps the source's name and appends .roi.mp4. Give one or the other.
+# Prefer a path the player can open (not only /tmp — Snap/Flatpak VLC often cannot).
+input: /mnt/wdblue/seenaptec/media_trash/samples/dataset/mycarplate.mp4
+outdir: /mnt/wdblue/seenaptec/media_trash/samples/dataset/output
+# out: /mnt/wdblue/seenaptec/media_trash/samples/dataset/output/mycarplate.roi.mp4
+
+# What to look for. Detection costs a pass over the frame per class family, so ask for what you
+# will actually look at. license_plate runs on the full frame (YOLOv8 plate model in video_a);
+# listing vehicle as well still helps association / ROI on the car body.
+classes: [vehicle, license_plate]
+detect_fps: 0          # 0 = every frame (best for short plate clips); 2 is fine for long files
+min_confidence: 0.25
+
+# How the bits get spent.
+#
+# ROI does not invent detail: it keeps protected regions closer to the source while the rest of
+# the frame may get a little worse. Product defaults (also hard-wired in roi-clip.sh):
+#   crf 23          — watchable overall quality (14–18 ≈ nearer the source, heavier file)
+#   background_qp 6 — mild background tax; 14 was a lab crush and looked broken on asphalt
+# Omit `qp` to use the v3 ObjectPriority ladder (plate/face strong, vehicle milder). Explicit
+# `qp:` rows override the ladder for those kinds only.
+crf: 23
+background_qp: 6
+pad: 0.02
+# Optional geometry (service defaults are FixedPixels / 8 / 64 if omitted):
+# margin_px: 8
+# min_roi_side: 64
+# Optional outer-loop ceiling (bits/sec). Today it does not reliably match baseline bitrate
+# (§16); leave off for demos unless you are testing BitrateBudget itself.
+# target_bitrate: 500000
+# bitrate_overshoot: 0.1
+# Stronger plates than the ladder (optional):
+# qp:
+#   license_plate: -12
+#   vehicle: -4
+
+# Which encoder does the work. vaapi is the default wherever /dev/dri exists; qsv is the same
+# silicon but crashes the service on this machine (see docs/stream-mode-hw.md). Use cpu when
+# comparing quality stands so HW quirks stay out of the numbers.
+encoder: cpu
+codec: same
+# gop:               # omit to keep the source's keyframe interval
+# preset: balanced
+
+# Regions as rectangles, or as a mask when the driver's region budget is too small for the scene
+# (VA-API takes eight). A mask costs no budget but cannot express a per-region quantizer as
+# precisely -- see docs/stream-mode-hw.md.
+regions: boxes
+# max_regions: 8
+# mask_scale: 8
+
+# What happens when it is done: roi | source | both | none.
+# none = write files only (open them yourself — prefer mpv with the .ass overlay).
+play: none
+# player: mpv
+thickness: 3
+# keep: true           # leave the encoder service's log next to the result
+
+# Where the detector's models live, when they are not in <video_a>/models.
+# model_path: /mnt/wdblue/tests/video_a/models
