@@ -36,12 +36,12 @@
 //
 //   * kind() is an addition, for reporting which backend opened under Encoder::Auto.
 
-#include "smartvideo/capabilities.h"
-#include "smartvideo/frame_buffer.h"
-#include "smartvideo/packet_handler.h"
-#include "smartvideo/session.h"
-#include "smartvideo/status.h"
-#include "smartvideo/types.h"
+#include "sve/capabilities.h"
+#include "sve/frame_buffer.h"
+#include "sve/packet_handler.h"
+#include "sve/session.h"
+#include "sve/status.h"
+#include "sve/types.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -51,7 +51,7 @@
 #include <string>
 #include <vector>
 
-namespace smartvideo {
+namespace sve {
 
 /// What the encoder is being asked to produce. Named EncoderConfig after §7; the geometry
 /// and timing here do not depend on which backend answers.
@@ -206,4 +206,4 @@ using BackendRef = std::reference_wrapper<const IEncoderBackend>;
 ///     for (const IEncoderBackend& b : backend_chain(Encoder::Auto)) { ... }
 std::span<const BackendRef> backend_chain(Encoder requested);
 
-} // namespace smartvideo
+} // namespace sve

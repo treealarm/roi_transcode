@@ -5,7 +5,7 @@
 #include <cstdlib>
 #include <vector>
 
-using namespace smartvideo;
+using namespace sve;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \
@@ -115,14 +115,14 @@ int main()
 
     // A naive resize drops the background (it is last). truncate_roi_rects keeps it and
     // spends the remaining slots on earlier objects.
-    std::vector<smartvideo::Rect> many;
+    std::vector<sve::Rect> many;
     for (int32_t i = 0; i < 10; ++i) {
         many.push_back({.top = 0, .bottom = 10, .left = i * 10, .right = i * 10 + 8,
             .qp_delta = -5});
     }
     many.push_back({.top = 0, .bottom = 100, .left = 0, .right = 100, .qp_delta = 14});
     int32_t lost = 0;
-    smartvideo::truncate_roi_rects(many, 4, 100, 100, &lost);
+    sve::truncate_roi_rects(many, 4, 100, 100, &lost);
     CHECK(many.size() == 4);
     CHECK(lost == 7); // 10 objects -> 3 kept + background; 7 objects dropped
     CHECK(many.back().qp_delta == 14);

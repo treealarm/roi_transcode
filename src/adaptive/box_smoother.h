@@ -3,14 +3,14 @@
 // EMA on box geometry across frames -- TZ v3 §13 spatial_smoothing / temporal_smoothing.
 // Stops a detector's jitter from painting a flickering ROI even when QP is already slewed.
 
-#include "smartvideo/policy.h"
-#include "smartvideo/types.h"
+#include "sve/policy.h"
+#include "sve/types.h"
 
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
 
-namespace smartvideo {
+namespace sve {
 
 class BoxSmoother {
 public:
@@ -37,4 +37,4 @@ private:
     std::unordered_map<uint64_t, State> m_state;
 };
 
-} // namespace smartvideo
+} // namespace sve

@@ -5,13 +5,13 @@
 // public header that borrowed those numbers would be promising something another project's
 // release notes get to break. Here it can only be wrong in one place.
 
-#include "smartvideo/frame_buffer.h"
+#include "sve/frame_buffer.h"
 
 extern "C" {
 #include <libavutil/pixfmt.h>
 }
 
-namespace smartvideo {
+namespace sve {
 
 const char* pixel_format_name(PixelFormat f)
 {
@@ -57,4 +57,4 @@ PixelFormat from_av_pix_fmt(int f)
     }
 }
 
-} // namespace smartvideo
+} // namespace sve

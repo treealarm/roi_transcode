@@ -31,13 +31,13 @@ pkg_check_modules(FFMPEG REQUIRED
 message(STATUS "smart-video-encoder FFmpeg: ${FFMPEG_INCLUDE_DIRS}")
 
 # ---------------------------------------------------------------------------
-# smartvideo_adaptive -- §52 src/adaptive
+# sve_adaptive -- §52 src/adaptive
 #
 # Objects to importance to encoder regions. Pure arithmetic with no FFmpeg anywhere near
 # it, which is what keeps it unit-testable without a codec: the tests that check region
 # ordering and budget truncation link this and nothing else.
 # ---------------------------------------------------------------------------
-add_library(smartvideo_adaptive STATIC
+add_library(sve_adaptive STATIC
     src/adaptive/importance.cpp
     src/adaptive/object_normalizer.cpp
     src/adaptive/object_geometry.cpp
@@ -50,19 +50,19 @@ add_library(smartvideo_adaptive STATIC
     src/adaptive/roi_lag.cpp
     src/metadata/sei_payload.cpp
 )
-target_include_directories(smartvideo_adaptive
+target_include_directories(sve_adaptive
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/src/adaptive
 )
-target_compile_options(smartvideo_adaptive PRIVATE ${SVE_WARNINGS})
+target_compile_options(sve_adaptive PRIVATE ${SVE_WARNINGS})
 
 # ---------------------------------------------------------------------------
-# smartvideo -- §52 src/core plus, for now, the encoder backends
+# sve -- §52 src/core plus, for now, the encoder backends
 #
 # The unit another project embeds: add_subdirectory() this directory and you get the
 # encoder and nothing else. Its only dependency is an FFmpeg that pkg-config can find.
 # ---------------------------------------------------------------------------
-add_library(smartvideo STATIC
+add_library(sve STATIC
     src/backend/common/backend_common.cpp
     src/backend/common/backend_registry.cpp
     src/backend/onevpl/onevpl_backend.cpp
@@ -79,22 +79,27 @@ add_library(smartvideo STATIC
     src/core/frame_input.cpp
     src/core/session.cpp
 )
-target_include_directories(smartvideo
+target_include_directories(sve
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_include_directories(smartvideo SYSTEM PUBLIC ${FFMPEG_INCLUDE_DIRS})
+target_include_directories(sve SYSTEM PUBLIC ${FFMPEG_INCLUDE_DIRS})
 if(FFMPEG_LIBRARY_DIRS)
-    target_link_directories(smartvideo PUBLIC ${FFMPEG_LIBRARY_DIRS})
+    target_link_directories(sve PUBLIC ${FFMPEG_LIBRARY_DIRS})
 endif()
-target_link_libraries(smartvideo PUBLIC smartvideo_adaptive ${FFMPEG_LIBRARIES})
-target_compile_definitions(smartvideo PRIVATE _CRT_SECURE_NO_WARNINGS)
-target_compile_options(smartvideo PRIVATE ${SVE_WARNINGS})
+target_link_libraries(sve PUBLIC sve_adaptive ${FFMPEG_LIBRARIES})
+target_compile_definitions(sve PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_compile_options(sve PRIVATE ${SVE_WARNINGS})
 
-# Names the rest of ta_vms and any embedder can keep using.
-add_library(roi_core ALIAS smartvideo)
-add_library(roi_geometry ALIAS smartvideo_adaptive)
+# Names earlier versions of this library answered to. Kept only until integration/ moves
+# onto the §8 API; they are removed together with the `smartvideo` namespace alias in
+# include/sve/sve.h, and one target should not answer to three names for longer than a
+# rename takes.
+add_library(smartvideo ALIAS sve)
+add_library(smartvideo_adaptive ALIAS sve_adaptive)
+add_library(roi_core ALIAS sve)
+add_library(roi_geometry ALIAS sve_adaptive)
 
 # ---------------------------------------------------------------------------
 # Tests -- §52 tests/unit
@@ -103,49 +108,49 @@ if(SVE_BUILD_TESTS)
     enable_testing()
 
     add_executable(object_normalizer_test tests/unit/object_normalizer_test.cpp)
-    target_link_libraries(object_normalizer_test PRIVATE smartvideo_adaptive)
+    target_link_libraries(object_normalizer_test PRIVATE sve_adaptive)
     target_compile_options(object_normalizer_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME object_normalizer COMMAND object_normalizer_test)
 
     add_executable(object_geometry_test tests/unit/object_geometry_test.cpp)
-    target_link_libraries(object_geometry_test PRIVATE smartvideo_adaptive)
+    target_link_libraries(object_geometry_test PRIVATE sve_adaptive)
     target_compile_options(object_geometry_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME object_geometry COMMAND object_geometry_test)
 
     add_executable(importance_test tests/unit/importance_test.cpp)
-    target_link_libraries(importance_test PRIVATE smartvideo_adaptive)
+    target_link_libraries(importance_test PRIVATE sve_adaptive)
     target_compile_options(importance_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME importance COMMAND importance_test)
 
     add_executable(temporal_roi_test tests/unit/temporal_roi_test.cpp)
-    target_link_libraries(temporal_roi_test PRIVATE smartvideo_adaptive)
+    target_link_libraries(temporal_roi_test PRIVATE sve_adaptive)
     target_compile_options(temporal_roi_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME temporal_roi COMMAND temporal_roi_test)
 
     add_executable(bitrate_budget_test tests/unit/bitrate_budget_test.cpp)
-    target_link_libraries(bitrate_budget_test PRIVATE smartvideo_adaptive)
+    target_link_libraries(bitrate_budget_test PRIVATE sve_adaptive)
     target_compile_options(bitrate_budget_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME bitrate_budget COMMAND bitrate_budget_test)
 
     add_executable(v3_policy_test tests/unit/v3_policy_test.cpp)
-    target_link_libraries(v3_policy_test PRIVATE smartvideo_adaptive)
+    target_link_libraries(v3_policy_test PRIVATE sve_adaptive)
     target_compile_options(v3_policy_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME v3_policy COMMAND v3_policy_test)
 
     add_executable(geometry_test tests/unit/geometry_test.cpp)
-    target_link_libraries(geometry_test PRIVATE smartvideo_adaptive)
+    target_link_libraries(geometry_test PRIVATE sve_adaptive)
     target_compile_options(geometry_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME geometry COMMAND geometry_test)
 
     add_executable(sei_payload_test tests/unit/sei_payload_test.cpp)
-    target_link_libraries(sei_payload_test PRIVATE smartvideo_adaptive)
+    target_link_libraries(sei_payload_test PRIVATE sve_adaptive)
     target_compile_options(sei_payload_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME sei_payload COMMAND sei_payload_test)
 
     # Compiles against the public headers only -- no src/ on the include path. That is the
     # point of it: it stops compiling the moment an internal type leaks into the surface.
     add_executable(public_api_test tests/unit/public_api_test.cpp)
-    target_link_libraries(public_api_test PRIVATE smartvideo)
+    target_link_libraries(public_api_test PRIVATE sve)
     target_compile_options(public_api_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME public_api COMMAND public_api_test)
 
@@ -155,7 +160,7 @@ if(SVE_BUILD_TESTS)
     # already been pulled in by a sibling above it. This is what makes "include only what
     # you need" a property rather than an intention.
     file(GLOB SVE_PUBLIC_HEADERS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/include/smartvideo/*.h)
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sve/*.h)
     set(SVE_SELFCONTAINED_SOURCES "")
     foreach(header ${SVE_PUBLIC_HEADERS})
         string(REPLACE "/" "_" stem "${header}")
@@ -169,7 +174,7 @@ if(SVE_BUILD_TESTS)
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_options(public_headers_selfcontained PRIVATE ${SVE_WARNINGS})
 
-    # And this one holds the other half of that line. public_api_test links smartvideo, so
+    # And this one holds the other half of that line. public_api_test links sve, so
     # it inherits ${FFMPEG_INCLUDE_DIRS} and would keep compiling if a public header
     # started including libavcodec. This target sees include/ and nothing else, links
     # nothing, and is the only place the "no FFmpeg in the public surface" claim is

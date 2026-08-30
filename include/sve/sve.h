@@ -2,14 +2,14 @@
 
 // smart-video-encoder: the one header to include.
 //
-//   #include "smartvideo/smartvideo.h"
+//   #include "sve/sve.h"
 //
 // Adaptive encoding -- keep the regions a detector found sharp, and spend fewer bits on
 // everything else.
 //
 // Named after the library rather than after a feature. It was roi.h, from when the whole
-// thing was called roi_transcode; a consumer should not have to know that history to find
-// the door.
+// thing was called roi_transcode, and smartvideo.h after that; a consumer should not have
+// to know that history to find the door.
 //
 // Every other header here is self-contained and can be included on its own -- a caller who
 // only writes a PacketHandler needs packet_handler.h and nothing else. The
@@ -22,33 +22,33 @@
 // IEncoderBackend (TZ v2.0 §7) comes with it: a reader who wants to know what the
 // hardware paths look like should find them here, not by digging through src/.
 // Nothing here needs gRPC, Dapr, JSON or anything else from ta_vms; the only
-// dependency is FFmpeg, so another project can add_subdirectory(core) and link
-// roi_core.
+// dependency is FFmpeg, so another project can add_subdirectory() this directory
+// and link sve.
 //
-//   smartvideo::Report r = smartvideo::transcode_file("in.mp4", "out.mp4", boxes, settings);
+//   sve::Report r = sve::transcode_file("in.mp4", "out.mp4", boxes, settings);
 //
-//   smartvideo::Session s(params, &handler);   // or params.output_path for a file
+//   sve::Session s(params, &handler);   // or params.output_path for a file
 //   s.submit(frame, regions);
-//   smartvideo::Report r = s.finish();
+//   sve::Report r = s.finish();
 
-#include "smartvideo/capabilities.h"
-#include "smartvideo/encoder_backend.h"
-#include "smartvideo/frame_buffer.h"
-#include "smartvideo/geometry.h"
-#include "smartvideo/memory.h"
-#include "smartvideo/metadata.h"
-#include "smartvideo/object.h"
-#include "smartvideo/object_priority.h"
-#include "smartvideo/packet_handler.h"
-#include "smartvideo/report.h"
-#include "smartvideo/session.h"
-#include "smartvideo/types.h"
+#include "sve/capabilities.h"
+#include "sve/encoder_backend.h"
+#include "sve/frame_buffer.h"
+#include "sve/geometry.h"
+#include "sve/memory.h"
+#include "sve/metadata.h"
+#include "sve/object.h"
+#include "sve/object_priority.h"
+#include "sve/packet_handler.h"
+#include "sve/report.h"
+#include "sve/session.h"
+#include "sve/types.h"
 
 #include <atomic>
 #include <string>
 #include <vector>
 
-namespace smartvideo {
+namespace sve {
 
 // Transcodes `input_path` to `output_path`, keeping `boxes` sharp. Boxes lie on
 // the input's timeline and apply for Quality::hold_sec around their own moment.
@@ -58,4 +58,12 @@ Report transcode_file(const std::string& input_path,
     const std::string& output_path, const std::vector<Box>& boxes,
     const Settings& settings, std::atomic_bool* cancel = nullptr);
 
-} // namespace smartvideo
+} // namespace sve
+
+// Transitional, added 2026-08-30 with the rename to `sve`. TZ v3.4 §23 links the capability
+// CLI against a library called `sve`, and the namespace follows the library. Nothing outside
+// roi_transcode/ ever spelled `smartvideo::`, so this alias exists only to keep integration/
+// and the tests compiling across the slices of the §8 rewrite that follow. It goes away with
+// the CMake aliases once those call sites move to the new API -- do not write new code
+// against it.
+namespace smartvideo = sve;

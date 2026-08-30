@@ -6,14 +6,14 @@
 // AABB on the way in; the shape-preserving path paints it onto the same block qp-map a mask
 // uses, so a corner outside the outline is not protected. BoundingBox stays the cheap form.
 
-#include "smartvideo/geometry.h"
+#include "sve/geometry.h"
 
 #include <cstdint>
 #include <string>
 #include <variant>
 #include <vector>
 
-namespace smartvideo {
+namespace sve {
 
 /// Normalized 0..1 from the top-left corner -- the convention every geometry here shares,
 /// so a detection survives a change of resolution.
@@ -71,4 +71,4 @@ bool rasterize_polygon(const Polygon& polygon, uint8_t* out, int32_t width, int3
 /// grow a polygon by Quality::pad before it is sampled onto the block grid.
 void dilate_mask(uint8_t* mask, int32_t width, int32_t height, int32_t radius);
 
-} // namespace smartvideo
+} // namespace sve

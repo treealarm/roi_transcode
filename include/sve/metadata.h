@@ -10,7 +10,7 @@
 //
 // Knobs live on MetadataConfig in policy.h (next to TemporalROIConfig).
 
-#include "smartvideo/object_priority.h"
+#include "sve/object_priority.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-namespace smartvideo {
+namespace sve {
 
 struct Box;
 
@@ -58,4 +58,4 @@ bool decode_sei_payload(std::span<const uint8_t> bytes, SeiFrame& out);
 std::vector<SeiObject> sei_objects_from_boxes(
     std::span<const Box> boxes, uint32_t max_objects = 64);
 
-} // namespace smartvideo
+} // namespace sve

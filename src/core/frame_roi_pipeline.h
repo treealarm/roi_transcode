@@ -5,14 +5,14 @@
 #include "object_normalizer.h"
 #include "qp_slew.h"
 #include "roi_lag.h"
-#include "smartvideo/capabilities.h"
-#include "smartvideo/policy.h"
-#include "smartvideo/types.h"
+#include "sve/capabilities.h"
+#include "sve/policy.h"
+#include "sve/types.h"
 
 #include <span>
 #include <vector>
 
-namespace smartvideo {
+namespace sve {
 
 int32_t effective_coding_block(const EncoderCapabilities& caps);
 int32_t effective_region_budget(const Quality& quality, const EncoderCapabilities& caps);
@@ -55,4 +55,4 @@ private:
     RoiMapBuilder& m_roi_builder;
 };
 
-} // namespace smartvideo
+} // namespace sve

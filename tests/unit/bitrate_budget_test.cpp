@@ -28,7 +28,7 @@ void check_eq(int32_t got, int32_t want, const std::string& what)
 
 void inactive_without_a_target()
 {
-    const smartvideo::BitrateBudget b;
+    const sve::BitrateBudget b;
     check(!b.active(), "default budget is inactive");
     check_eq(b.background_extra(), 0, "no background extra");
     check_eq(b.roi_soften(), 0, "no ROI soften");
@@ -36,10 +36,10 @@ void inactive_without_a_target()
 
 void overshoot_crushes_background_before_roi()
 {
-    smartvideo::RateControlPolicy policy;
+    sve::RateControlPolicy policy;
     policy.target_bitrate = 1'000'000;
     policy.max_average_overshoot = 0.1f;
-    smartvideo::BitrateBudget b(policy);
+    sve::BitrateBudget b(policy);
     check(b.active(), "a target activates the budget");
 
     for (int32_t i = 0; i < 4; ++i) {
@@ -57,10 +57,10 @@ void overshoot_crushes_background_before_roi()
 
 void undershoot_releases_only_after_debt_is_paid()
 {
-    smartvideo::RateControlPolicy policy;
+    sve::RateControlPolicy policy;
     policy.target_bitrate = 1'000'000;
     policy.recovery_window_ms = 1000;
-    smartvideo::BitrateBudget b(policy);
+    sve::BitrateBudget b(policy);
     for (int32_t i = 0; i < 100; ++i) {
         b.observe(62500, 0.25); // hot
     }
@@ -87,11 +87,11 @@ void undershoot_releases_only_after_debt_is_paid()
 
 void peak_overshoot_climbs_inside_a_wide_average_deadband()
 {
-    smartvideo::RateControlPolicy policy;
+    sve::RateControlPolicy policy;
     policy.target_bitrate = 1'000'000;
     policy.max_average_overshoot = 0.5f; // ±50%: a brief burst stays inside the avg band
     policy.max_peak_overshoot = 0.2f;    // 1.2 Mbps peak ceiling
-    smartvideo::BitrateBudget b(policy);
+    sve::BitrateBudget b(policy);
 
     for (int32_t i = 0; i < 12; ++i) {
         b.observe(31250, 0.25); // 1 Mbps -- on target
@@ -107,23 +107,23 @@ void peak_overshoot_climbs_inside_a_wide_average_deadband()
 
 void apply_and_soften_respect_critical_objects()
 {
-    smartvideo::RateControlPolicy policy;
+    sve::RateControlPolicy policy;
     policy.target_bitrate = 1'000'000;
     policy.critical_importance = 0.95f;
-    smartvideo::BitrateBudget b(policy);
+    sve::BitrateBudget b(policy);
     for (int32_t i = 0; i < 100; ++i) {
         b.observe(62500, 0.25);
     }
     check(b.background_extra() > 0 && b.roi_soften() > 0, "precondition: extras up");
 
-    smartvideo::Quality q;
+    sve::Quality q;
     q.background_qp_delta = 6;
     const auto adjusted = b.apply(q);
     check(adjusted.background_qp_delta == 6 + b.background_extra(),
         "apply raises background by the extra");
     check(q.background_qp_delta == 6, "apply does not mutate the original");
 
-    std::vector<smartvideo::Detection> dets(2);
+    std::vector<sve::Detection> dets(2);
     dets[0].importance = 1.00f;
     dets[0].qp_delta = -12;
     dets[0].pad_qp_delta = -6;

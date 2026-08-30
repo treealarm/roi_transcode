@@ -11,7 +11,7 @@ from the bitstream without a sidecar JSON.
 
 - FFmpeg side data: `AV_FRAME_DATA_SEI_UNREGISTERED` = 16-byte UUID + payload
 - Payload: magic `SVE1`, version 1, little-endian fields, CRC32 (see
-  `include/smartvideo/metadata.h` / `src/metadata/sei_payload.cpp`)
+  `include/sve/metadata.h` / `src/metadata/sei_payload.cpp`)
 - Soft encoders only: libx264 / libx265 with `udu_sei=1` (`capabilities.sei == true`)
 
 ## How to turn it on/off

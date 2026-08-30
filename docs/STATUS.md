@@ -57,9 +57,11 @@
 
 Публичный API §8 идёт срезами; каждый срез — один коммит, проверяемый до пуша.
 
-1. **Переименование в `sve`** — `namespace smartvideo` → `sve`, `include/smartvideo/` →
-   `include/sve/`, таргет `sve`. Механически, ничего кроме имён. Дёшево: `smartvideo::` за
-   пределами `roi_transcode/` не используется нигде.
+1. ~~**Переименование в `sve`**~~ — **сделано 2026-08-30.** `namespace smartvideo` → `sve`,
+   `include/smartvideo/` → `include/sve/`, `smartvideo.h` → `sve.h`, таргеты `sve` и
+   `sve_adaptive`. На переходный период оставлены alias `namespace smartvideo = sve` в
+   `include/sve/sve.h` и CMake-alias'ы `smartvideo` / `smartvideo_adaptive` / `roi_core` /
+   `roi_geometry`; они снимаются вместе с `Session` в срезе 5.
 2. **Фундаментальные типы (§8.3, 8.5–8.7, 8.10):** `InputVideoFormat`, `MediaTimestamp`,
    shared immutable `PacketBuffer`, владеющие `Frame`/`TimedFrame`, `RawFrameView`.
    FFmpeg допускается ровно в одном заголовке — `frame.h`; остальные остаются чистыми, и

@@ -1,6 +1,6 @@
-#include "smartvideo/memory.h"
+#include "sve/memory.h"
 
-namespace smartvideo {
+namespace sve {
 
 const char* memory_type_name(MemoryType t)
 {
@@ -16,4 +16,4 @@ const char* memory_type_name(MemoryType t)
     return "?";
 }
 
-} // namespace smartvideo
+} // namespace sve

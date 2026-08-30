@@ -9,7 +9,7 @@
 
 #include "av_raii.h"
 #include "pixel_format.h"
-#include "smartvideo/frame_buffer.h"
+#include "sve/frame_buffer.h"
 
 #include <cstddef>
 #include <span>
@@ -19,7 +19,7 @@ extern "C" {
 #include <libavutil/pixdesc.h>
 }
 
-namespace smartvideo {
+namespace sve {
 
 class AvFrameBuffer final : public IFrameBuffer {
 public:
@@ -115,4 +115,4 @@ private:
     bool m_owned = false;
 };
 
-} // namespace smartvideo
+} // namespace sve

@@ -1,8 +1,8 @@
 #include "object_normalizer.h"
 
 #include "importance.h"
-#include "smartvideo/geometry.h"
-#include "smartvideo/object_priority.h"
+#include "sve/geometry.h"
+#include "sve/object_priority.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,7 +10,7 @@
 #include <optional>
 #include <vector>
 
-namespace smartvideo {
+namespace sve {
 
 namespace {
 
@@ -508,4 +508,4 @@ void truncate_roi_rects(std::vector<Rect>& rects, int32_t budget, int32_t width,
     }
 }
 
-} // namespace smartvideo
+} // namespace sve

@@ -15,14 +15,14 @@
 //   - A caller implements one over their own buffers. The backend reads plane() and
 //     stride() and wraps them, which costs no copy either as long as the format matches.
 
-#include "smartvideo/memory.h"
+#include "sve/memory.h"
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <span>
 
-namespace smartvideo {
+namespace sve {
 
 /// The pixel layouts this library takes on the way in.
 ///
@@ -160,4 +160,4 @@ private:
     Plane m_plane[4];
 };
 
-} // namespace smartvideo
+} // namespace sve

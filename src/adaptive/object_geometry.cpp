@@ -5,15 +5,15 @@
 // corner outside the outline is not protected. The AABB of the same outline stays available
 // for anything that only draws boxes.
 
-#include "smartvideo/object.h"
-#include "smartvideo/policy.h"
+#include "sve/object.h"
+#include "sve/policy.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <vector>
 
-namespace smartvideo {
+namespace sve {
 
 namespace {
 
@@ -189,4 +189,4 @@ const char* quality_policy_name(QualityPolicy p)
     return "?";
 }
 
-} // namespace smartvideo
+} // namespace sve

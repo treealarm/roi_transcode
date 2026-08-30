@@ -28,7 +28,7 @@ MotionWeight` — в v3 нет вовсе. Вместо непрерывной �
 из пяти ступеней (`ObjectPriority`: Background / Low / Normal / High / Critical) с готовыми
 дельтами: **−8 / −6 / −4 / −2 / +0…+6**, плюс необязательный `desired_qp_delta` на объект.
 
-Это прямо задевает `include/smartvideo/importance.h`, `src/adaptive/importance.cpp` и вывод
+Это прямо задевает `include/sve/importance.h`, `src/adaptive/importance.cpp` и вывод
 прямой `qp = 5 − 15·I`, полученный из примера §12 v2.0. Прямая давала номеру −10, лицу −9,
 человеку −7; лестница v3 даёт −8 самому важному и ничего мельче −8 вовсе.
 
@@ -84,7 +84,7 @@ v2.0 позволял считать §15 неначатым, и наш аргу
 Код библиотеки (ветка работы Cursor) закрыл срезы A–E без захвата baton:
 
 1. **Importance → ObjectPriority:** публичный контракт = лестница
-   (`include/smartvideo/object_priority.h`); continuous importance остаётся способом
+   (`include/sve/object_priority.h`); continuous importance остаётся способом
    выбрать ступень. `Quality::use_v3_priority_ladder` (default true).
 2. **§13 дефолты:** наши нулевые (smoothing/prediction off; `max_qp_delta_per_frame=0`).
    С PDF расходимся явно; open по-прежнему отказывает на smoothing/prediction.
@@ -240,7 +240,7 @@ extradata, поэтому FFmpeg получает **один** заголово�
 | Software | работает | — |
 | NVENC | объявлен, `qpDeltaMap` **не передаётся в SDK** | доделать; нужна NVIDIA-машина, у нас её нет |
 | Rockchip MPP | нет вообще | новый бэкенд, P0 по ТЗ (RK3588/RK3588S); нужно железо |
-| `IEncoderBackend` + `EncoderCapabilities` (§6.4, §7) | **есть**, в `include/smartvideo/encoder_backend.h`: пять методов, открытие внутри бэкенда, `BackendSession` полиморфна | осталось довести до прямых SDK (NVENC, MPP) |
+| `IEncoderBackend` + `EncoderCapabilities` (§6.4, §7) | **есть**, в `include/sve/encoder_backend.h`: пять методов, открытие внутри бэкенда, `BackendSession` полиморфна | осталось довести до прямых SDK (NVENC, MPP) |
 
 **Важно про порядок:** интерфейс бэкенда и capability discovery надо сделать **до**
 Rockchip, а не после. ТЗ прямо предупреждает (§6.4), что число ROI и QP API у разных
@@ -376,7 +376,7 @@ ABI libva между vcpkg и Ubuntu — ровно этот класс расх
    сотни гигабайт; ТЗ предлагает fast corpus 5–20 ГБ с checksum-манифестом (§26).
 7. **Согласны ли с расхождениями от §7?** Сверено с ТЗ построчно 2026-08-23; интерфейс
    совпадает по составу, но отличается в четырёх местах, и все четыре перечислены в шапке
-   `include/smartvideo/encoder_backend.h`. Главное: **в §7 интерфейс stateful** (Configure,
+   `include/sve/encoder_backend.h`. Главное: **в §7 интерфейс stateful** (Configure,
    затем SubmitFrame на том же объекте), у нас каждый метод принимает `BackendSession&`, а
    `Configure` её возвращает. Причина продуктовая: один сервис перекодирует несколько
    клипов одновременно, и stateful-бэкенд потребовал бы экземпляр на задание либо блокировку
@@ -440,7 +440,7 @@ ABI libva между vcpkg и Ubuntu — ровно этот класс расх
 ### Этап 2. Модель объекта и важности
 
 5. ~~Расширить `Object` до §10; протащить `track_id` и `confidence` из архива ta_vms.~~
-   **Сделано.** `Object` в `include/smartvideo/object.h`; `Box` на wire несёт оба поля;
+   **Сделано.** `Object` в `include/sve/object.h`; `Box` на wire несёт оба поля;
    `BoxesForAsync` больше не выбрасывает их; video_a offline path шлёт оба.
 6. ~~Слой importance (§11), сегодняшние per-kind дельты — частный случай.~~ **Сделано**
    в `src/adaptive/importance.cpp`. Все пять факторов живые:
@@ -540,7 +540,7 @@ CV, если понадобится, можно поднять настройк�
 **отвергаются на открытии**, если заданы: молча игнорируемая настройка хуже отсутствующей —
 кодирование выглядит успешным, а измерение против него неверно.
 
-Заголовок-зонтик переименован `roi.h` → `smartvideo.h`. Три машинные проверки поверхности:
+Заголовок-зонтик переименован `roi.h` → `smartvideo.h`. *(2026-08-30: и дальше в `sve/sve.h` вместе с namespace — §23 требует библиотеку `sve`.)* Три машинные проверки поверхности:
 `public_headers_selfcontained` (каждый заголовок компилируется сам по себе),
 `public_headers_isolated` (вся поверхность без FFmpeg на пути включения),
 `public_api_test`.

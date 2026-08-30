@@ -4,9 +4,9 @@
 // deliberate and is what makes "--encoder qsv" mean it: falling back to libx264 when the
 // caller asked for hardware would hide the very thing they were checking.
 
-#include "smartvideo/encoder_backend.h"
+#include "sve/encoder_backend.h"
 
-namespace smartvideo {
+namespace sve {
 
 const IEncoderBackend& onevpl_backend();
 const IEncoderBackend& vaapi_backend();
@@ -45,4 +45,4 @@ std::span<const BackendRef> backend_chain(Encoder requested)
     return cpu;
 }
 
-} // namespace smartvideo
+} // namespace sve

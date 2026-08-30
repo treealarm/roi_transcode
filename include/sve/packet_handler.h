@@ -6,14 +6,14 @@
 // does not need libav* on its include path to write a handler. Muxing to a file
 // is not done this way -- set SessionParams::output_path and the session does it.
 
-#include "smartvideo/types.h"
+#include "sve/types.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string>
 
-namespace smartvideo {
+namespace sve {
 
 // One encoded access unit. `data` belongs to whoever handed it over and stays valid until
 // the next call on the same session -- copy it if you need it longer.
@@ -52,4 +52,4 @@ public:
     virtual void on_end() {}
 };
 
-} // namespace smartvideo
+} // namespace sve

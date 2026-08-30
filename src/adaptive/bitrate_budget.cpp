@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace smartvideo {
+namespace sve {
 
 namespace {
 
@@ -182,4 +182,4 @@ void BitrateBudget::soften_detections(std::vector<Detection>& detections) const
     }
 }
 
-} // namespace smartvideo
+} // namespace sve

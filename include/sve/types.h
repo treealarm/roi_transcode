@@ -2,16 +2,16 @@
 
 // The vocabulary both entry points share.
 
-#include "smartvideo/importance.h"
-#include "smartvideo/object_priority.h"
-#include "smartvideo/policy.h"
+#include "sve/importance.h"
+#include "sve/object_priority.h"
+#include "sve/policy.h"
 
 #include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-namespace smartvideo {
+namespace sve {
 
 // A ratio, for frame rates and time bases. Spelled out here rather than borrowed from
 // FFmpeg so the public headers carry no libavutil types -- see encoder_backend.h.
@@ -264,4 +264,4 @@ struct Rect {
     int32_t qp_delta = 0;
 };
 
-} // namespace smartvideo
+} // namespace sve

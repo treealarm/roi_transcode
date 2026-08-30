@@ -24,7 +24,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace smartvideo {
+namespace sve {
 
 struct ImportancePolicy {
     /// Semantic priority per kind, 0..1 -- how much this class of thing is worth in
@@ -125,4 +125,4 @@ float default_semantic_priority(const std::string& kind, float unknown = 0.5f);
 /// know what this is and what it is worth" from "something is there".
 bool is_known_class(const std::string& kind, const ImportancePolicy& policy);
 
-} // namespace smartvideo
+} // namespace sve

@@ -9,14 +9,14 @@
 // this class no longer touches libavcodec's send/receive pair itself.
 
 #include "backend/common/backend_session.h"
-#include "smartvideo/encoder_backend.h"
-#include "smartvideo/types.h"
+#include "sve/encoder_backend.h"
+#include "sve/types.h"
 
 #include <span>
 #include <string>
 #include <vector>
 
-namespace smartvideo {
+namespace sve {
 
 class PacketSink;
 
@@ -89,4 +89,4 @@ private:
     PacketSink* m_sink = nullptr;
 };
 
-} // namespace smartvideo
+} // namespace sve

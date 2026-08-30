@@ -7,7 +7,7 @@
 // can take today are accepted; the rest are refused at submit with a message saying so,
 // which is a better answer than a wrong picture.
 
-namespace smartvideo {
+namespace sve {
 
 enum class MemoryType {
     /// Tightly packed planes in system memory. Accepted.
@@ -36,4 +36,4 @@ constexpr bool memory_type_supported(MemoryType t)
 
 const char* memory_type_name(MemoryType t);
 
-} // namespace smartvideo
+} // namespace sve

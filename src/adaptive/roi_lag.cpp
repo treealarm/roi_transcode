@@ -4,7 +4,7 @@
 #include <cmath>
 #include <limits>
 
-namespace smartvideo {
+namespace sve {
 
 float box_iou(const Box& a, const Box& b)
 {
@@ -114,4 +114,4 @@ void fill_lag_report(const std::vector<RoiLagSample>& samples, Report& report)
     report.roi_lag_acceptance = roi_lag_acceptance(samples);
 }
 
-} // namespace smartvideo
+} // namespace sve

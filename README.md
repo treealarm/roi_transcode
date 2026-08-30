@@ -156,29 +156,30 @@ Smoke (against a running svc) covers both:
 
 ## Using it from another project
 
-One include, one namespace, two ways in. `roi_core` depends on FFmpeg and the
-standard library -- no gRPC, no Dapr, no JSON, nothing from ta_vms -- so a
-separate project can `add_subdirectory(roi_transcode/core)` and link it -- `core/`
-is its own CMake project, and `scripts/check.sh` configures it alone to keep that true.
+One include, one namespace, two ways in. `sve` depends on FFmpeg and the standard
+library -- no gRPC, no Dapr, no JSON, nothing from ta_vms -- so a separate project
+can `add_subdirectory(roi_transcode)` and link it. Everything that would drag those
+in lives under `integration/`, behind an option that is off by default, and
+`integration/scripts/check.sh` configures the library alone to keep that true.
 
 ```cpp
-#include "roi/roi.h"
+#include "sve/sve.h"
 
-roi::Settings s;
+sve::Settings s;
 s.quality.background_qp_delta = 20;
-s.quality.kinds["plate"] = roi::KindQuality{-8, 0.01};
+s.quality.kinds["plate"] = sve::KindQuality{-8, 0.01};
 
 // A file.
-roi::Report r = roi::transcode_file("in.mp4", "out.mp4", boxes, s);
+sve::Report r = sve::transcode_file("in.mp4", "out.mp4", boxes, s);
 
 // Or frames, raw or already compressed, each with a mask or boxes.
-roi::SessionParams p;
+sve::SessionParams p;
 p.width = 1280; p.height = 720;
-p.codec = roi::InputCodec::H264;
+p.codec = sve::InputCodec::H264;
 p.settings = s;
-roi::Session session(p, &handler);   // or p.output_path to mux a file
+sve::Session session(p, &handler);   // or p.output_path to mux a file
 session.submit(frame, regions);
-roi::Report done = session.finish();
+sve::Report done = session.finish();
 ```
 
 `PacketHandler` carries no FFmpeg types -- bytes, timestamps and a keyframe flag
@@ -370,7 +371,7 @@ downstream would notice.
 One exit code, no step that needs a human to look at a picture: unit tests, the
 service refusing a broken configuration, structural checks on the output, the
 ROI assertions, frame/file parity, the gRPC paths and the sandbox, and a
-standalone build of `roi_core`. Each encode also appends a row to
+standalone build of `sve`. Each encode also appends a row to
 `testdata/eval/runs.csv`, so rate-distortion curves can be built from
 accumulated runs without rewriting the script.
 

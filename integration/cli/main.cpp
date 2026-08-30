@@ -1,4 +1,4 @@
-#include "smartvideo/smartvideo.h"
+#include "sve/sve.h"
 #include "roi_json.h"
 
 #include <cstdio>
@@ -29,23 +29,23 @@ void usage()
         "libx265 is the CPU fallback (needs aq-mode).\n");
 }
 
-smartvideo::Encoder parse_encoder(const char* s)
+sve::Encoder parse_encoder(const char* s)
 {
-    if (std::strcmp(s, "auto") == 0) return smartvideo::Encoder::Auto;
-    if (std::strcmp(s, "qsv") == 0) return smartvideo::Encoder::Qsv;
-    if (std::strcmp(s, "vaapi") == 0) return smartvideo::Encoder::Vaapi;
-    if (std::strcmp(s, "nvenc") == 0) return smartvideo::Encoder::Nvenc;
-    if (std::strcmp(s, "cpu") == 0) return smartvideo::Encoder::Cpu;
+    if (std::strcmp(s, "auto") == 0) return sve::Encoder::Auto;
+    if (std::strcmp(s, "qsv") == 0) return sve::Encoder::Qsv;
+    if (std::strcmp(s, "vaapi") == 0) return sve::Encoder::Vaapi;
+    if (std::strcmp(s, "nvenc") == 0) return sve::Encoder::Nvenc;
+    if (std::strcmp(s, "cpu") == 0) return sve::Encoder::Cpu;
     // The old spelling, kept so existing scripts keep working.
-    if (std::strcmp(s, "x265") == 0) return smartvideo::Encoder::Cpu;
+    if (std::strcmp(s, "x265") == 0) return sve::Encoder::Cpu;
     throw std::runtime_error("unknown --encoder (auto|qsv|vaapi|nvenc|cpu)");
 }
-smartvideo::Codec parse_codec(const char* s)
+sve::Codec parse_codec(const char* s)
 {
-    if (std::strcmp(s, "source") == 0) return smartvideo::Codec::SameAsSource;
-    if (std::strcmp(s, "h264") == 0) return smartvideo::Codec::H264;
+    if (std::strcmp(s, "source") == 0) return sve::Codec::SameAsSource;
+    if (std::strcmp(s, "h264") == 0) return sve::Codec::H264;
     if (std::strcmp(s, "h265") == 0 || std::strcmp(s, "hevc") == 0)
-        return smartvideo::Codec::H265;
+        return sve::Codec::H265;
     throw std::runtime_error("unknown --codec (h264|h265|source)");
 }
 } // namespace
@@ -56,7 +56,7 @@ int main(int argc, char** argv)
     std::string output_path;
     RoiJson roi_doc;
     bool have_roi = false;
-    smartvideo::Settings settings;
+    sve::Settings settings;
 
     try {
         for (int i = 1; i < argc; ++i) {
@@ -84,7 +84,7 @@ int main(int argc, char** argv)
             } else if (std::strcmp(a, "--gop") == 0) {
                 settings.gop = std::stoi(need("--gop"));
             } else if (std::strcmp(a, "--preset") == 0) {
-                settings.preset = smartvideo::preset_from_name(need("--preset"));
+                settings.preset = sve::preset_from_name(need("--preset"));
             } else if (std::strcmp(a, "--target-bitrate") == 0) {
                 settings.rate_control.target_bitrate =
                     static_cast<uint64_t>(std::stoull(need("--target-bitrate")));
@@ -104,7 +104,7 @@ int main(int argc, char** argv)
             return 2;
         }
         settings.quality = roi_doc.quality;
-        smartvideo::transcode_file(input_path, output_path, roi_doc.boxes, settings);
+        sve::transcode_file(input_path, output_path, roi_doc.boxes, settings);
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "error: %s\n", ex.what());
         return 1;

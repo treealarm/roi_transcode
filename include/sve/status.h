@@ -14,7 +14,7 @@
 #include <string>
 #include <utility>
 
-namespace smartvideo {
+namespace sve {
 
 enum class StatusCode {
     Ok = 0,
@@ -104,4 +104,4 @@ private:
     T m_value{};
 };
 
-} // namespace smartvideo
+} // namespace sve

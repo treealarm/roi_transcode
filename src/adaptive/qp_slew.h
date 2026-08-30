@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <unordered_map>
 
-namespace smartvideo {
+namespace sve {
 
 class QpSlewLimiter {
 public:
@@ -23,4 +23,4 @@ private:
     std::unordered_map<uint64_t, int32_t> m_last_qp;
 };
 
-} // namespace smartvideo
+} // namespace sve

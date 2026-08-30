@@ -10,7 +10,7 @@
 
 #include <cstdint>
 
-namespace smartvideo {
+namespace sve {
 
 struct EncoderCapabilities {
     bool h264 = false;
@@ -65,4 +65,4 @@ inline int32_t qp_map_block(const EncoderCapabilities& c)
     return static_cast<int32_t>(c.qp_map_block_height);
 }
 
-} // namespace smartvideo
+} // namespace sve

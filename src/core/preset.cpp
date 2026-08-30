@@ -8,7 +8,7 @@
 
 #include <cstring>
 
-namespace smartvideo {
+namespace sve {
 
 const char* preset_name(Preset p)
 {
@@ -90,4 +90,4 @@ const char* nvenc_preset(Preset p)
     return "p4";
 }
 
-} // namespace smartvideo
+} // namespace sve

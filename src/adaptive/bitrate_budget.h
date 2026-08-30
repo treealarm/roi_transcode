@@ -11,15 +11,15 @@
 // Peak overshoot (short window) and a recovery debt (give-back within recovery_window_ms)
 // ride on the same ladder. This is still not encoder-side VBR/VBV.
 
-#include "smartvideo/policy.h"
-#include "smartvideo/types.h"
+#include "sve/policy.h"
+#include "sve/types.h"
 
 #include "object_normalizer.h"
 
 #include <cstdint>
 #include <vector>
 
-namespace smartvideo {
+namespace sve {
 
 class BitrateBudget {
 public:
@@ -82,4 +82,4 @@ private:
     int32_t m_roi_soften = 0;
 };
 
-} // namespace smartvideo
+} // namespace sve

@@ -2,12 +2,12 @@
 
 // Frames in, encoded packets out -- for a caller that has no file to hand over.
 
-#include "smartvideo/frame_buffer.h"
-#include "smartvideo/geometry.h"
-#include "smartvideo/memory.h"
-#include "smartvideo/packet_handler.h"
-#include "smartvideo/report.h"
-#include "smartvideo/types.h"
+#include "sve/frame_buffer.h"
+#include "sve/geometry.h"
+#include "sve/memory.h"
+#include "sve/packet_handler.h"
+#include "sve/report.h"
+#include "sve/types.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-namespace smartvideo {
+namespace sve {
 
 // What to keep sharp in this frame: a mask, boxes, a ready qp_map, or neither.
 //
@@ -92,4 +92,4 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace smartvideo
+} // namespace sve

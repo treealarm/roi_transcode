@@ -2,7 +2,7 @@
 
 #include "grpc/path_guard.h"
 #include "job/roi_job_manager.h"
-#include "smartvideo/session.h"
+#include "sve/session.h"
 
 #include <chrono>
 #include <cstring>
@@ -23,26 +23,26 @@ namespace {
 // the wire format is ta_vms' contract with this service, not the library's -- the library
 // deliberately does not know FFmpeg's numbering, and this is the edge where that stops
 // mattering.
-smartvideo::PixelFormat to_library_format(AVPixelFormat f)
+sve::PixelFormat to_library_format(AVPixelFormat f)
 {
     switch (f) {
-    case AV_PIX_FMT_YUV420P: return smartvideo::PixelFormat::YUV420P;
-    case AV_PIX_FMT_NV12:    return smartvideo::PixelFormat::NV12;
-    case AV_PIX_FMT_YUV422P: return smartvideo::PixelFormat::YUV422P;
-    case AV_PIX_FMT_YUV444P: return smartvideo::PixelFormat::YUV444P;
-    case AV_PIX_FMT_GRAY8:   return smartvideo::PixelFormat::GRAY8;
-    default:                 return smartvideo::PixelFormat::Unknown;
+    case AV_PIX_FMT_YUV420P: return sve::PixelFormat::YUV420P;
+    case AV_PIX_FMT_NV12:    return sve::PixelFormat::NV12;
+    case AV_PIX_FMT_YUV422P: return sve::PixelFormat::YUV422P;
+    case AV_PIX_FMT_YUV444P: return sve::PixelFormat::YUV444P;
+    case AV_PIX_FMT_GRAY8:   return sve::PixelFormat::GRAY8;
+    default:                 return sve::PixelFormat::Unknown;
     }
 }
 
-smartvideo::Preset to_library_preset(roi::transcode::Preset p)
+sve::Preset to_library_preset(roi::transcode::Preset p)
 {
     switch (p) {
-    case roi::transcode::PRESET_FASTEST: return smartvideo::Preset::Fastest;
-    case roi::transcode::PRESET_FAST:    return smartvideo::Preset::Fast;
-    case roi::transcode::PRESET_SLOW:    return smartvideo::Preset::Slow;
-    case roi::transcode::PRESET_SLOWEST: return smartvideo::Preset::Slowest;
-    default:                             return smartvideo::Preset::Balanced;
+    case roi::transcode::PRESET_FASTEST: return sve::Preset::Fastest;
+    case roi::transcode::PRESET_FAST:    return sve::Preset::Fast;
+    case roi::transcode::PRESET_SLOW:    return sve::Preset::Slow;
+    case roi::transcode::PRESET_SLOWEST: return sve::Preset::Slowest;
+    default:                             return sve::Preset::Balanced;
     }
 }
 
@@ -100,32 +100,32 @@ void fill_job(const RoiJobStatus& st, roi::transcode::Job* out)
         st.roi_lag_p99_ms, st.roi_lag_acceptance, out->mutable_roi_lag());
 }
 
-smartvideo::Encoder from_proto(roi::transcode::Encoder e)
+sve::Encoder from_proto(roi::transcode::Encoder e)
 {
     switch (e) {
     case roi::transcode::ENCODER_QSV:
-        return smartvideo::Encoder::Qsv;
+        return sve::Encoder::Qsv;
     case roi::transcode::ENCODER_VAAPI:
-        return smartvideo::Encoder::Vaapi;
+        return sve::Encoder::Vaapi;
     case roi::transcode::ENCODER_NVENC:
-        return smartvideo::Encoder::Nvenc;
+        return sve::Encoder::Nvenc;
     case roi::transcode::ENCODER_CPU:
-        return smartvideo::Encoder::Cpu;
+        return sve::Encoder::Cpu;
     default:
-        return smartvideo::Encoder::Auto;
+        return sve::Encoder::Auto;
     }
 }
 
-roi::transcode::Encoder to_proto(smartvideo::Encoder k)
+roi::transcode::Encoder to_proto(sve::Encoder k)
 {
     switch (k) {
-    case smartvideo::Encoder::Qsv:
+    case sve::Encoder::Qsv:
         return roi::transcode::ENCODER_QSV;
-    case smartvideo::Encoder::Vaapi:
+    case sve::Encoder::Vaapi:
         return roi::transcode::ENCODER_VAAPI;
-    case smartvideo::Encoder::Nvenc:
+    case sve::Encoder::Nvenc:
         return roi::transcode::ENCODER_NVENC;
-    case smartvideo::Encoder::Cpu:
+    case sve::Encoder::Cpu:
         return roi::transcode::ENCODER_CPU;
     default:
         return roi::transcode::ENCODER_AUTO;
@@ -137,14 +137,14 @@ roi::transcode::Encoder to_proto(smartvideo::Encoder k)
 // FileSettings and StreamSettings are distinct types with identical fields, so
 // one template serves both and they cannot drift apart by accident.
 template <typename ProtoSettings>
-void apply_settings(const ProtoSettings& in, smartvideo::Settings& out)
+void apply_settings(const ProtoSettings& in, sve::Settings& out)
 {
     out.encoder = from_proto(in.encoder());
     switch (in.codec()) {
-        case roi::transcode::CODEC_H264: out.codec = smartvideo::Codec::H264; break;
+        case roi::transcode::CODEC_H264: out.codec = sve::Codec::H264; break;
         case roi::transcode::CODEC_SAME_AS_SOURCE:
-            out.codec = smartvideo::Codec::SameAsSource; break;
-        default: out.codec = smartvideo::Codec::H265; break;
+            out.codec = sve::Codec::SameAsSource; break;
+        default: out.codec = sve::Codec::H265; break;
     }
     if (in.crf() > 0) {
         out.crf = in.crf();
@@ -184,7 +184,7 @@ void apply_settings(const ProtoSettings& in, smartvideo::Settings& out)
         out.quality.max_regions = q.max_regions();
     }
     for (const auto& k : q.kinds()) {
-        smartvideo::KindQuality cfg;
+        sve::KindQuality cfg;
         if (k.has_qp_delta()) {
             cfg.qp_delta = k.qp_delta();
         }
@@ -216,10 +216,10 @@ void apply_settings(const ProtoSettings& in, smartvideo::Settings& out)
     }
     switch (q.margin_mode()) {
         case roi::transcode::MARGIN_MODE_FRACTION_OF_FRAME:
-            out.quality.margin_mode = smartvideo::MarginMode::FractionOfFrame;
+            out.quality.margin_mode = sve::MarginMode::FractionOfFrame;
             break;
         default:
-            out.quality.margin_mode = smartvideo::MarginMode::FixedPixels;
+            out.quality.margin_mode = sve::MarginMode::FixedPixels;
             break;
     }
     if (q.has_margin_px()) {
@@ -289,25 +289,25 @@ void apply_settings(const ProtoSettings& in, smartvideo::Settings& out)
     }
 }
 
-smartvideo::ObjectPriority priority_from_proto(roi::transcode::ObjectPriority p)
+sve::ObjectPriority priority_from_proto(roi::transcode::ObjectPriority p)
 {
     switch (p) {
         case roi::transcode::OBJECT_PRIORITY_BACKGROUND:
-            return smartvideo::ObjectPriority::Background;
+            return sve::ObjectPriority::Background;
         case roi::transcode::OBJECT_PRIORITY_LOW:
-            return smartvideo::ObjectPriority::Low;
+            return sve::ObjectPriority::Low;
         case roi::transcode::OBJECT_PRIORITY_HIGH:
-            return smartvideo::ObjectPriority::High;
+            return sve::ObjectPriority::High;
         case roi::transcode::OBJECT_PRIORITY_CRITICAL:
-            return smartvideo::ObjectPriority::Critical;
+            return sve::ObjectPriority::Critical;
         default:
-            return smartvideo::ObjectPriority::Normal;
+            return sve::ObjectPriority::Normal;
     }
 }
 
-smartvideo::Box box_from_proto(const roi::transcode::Box& b)
+sve::Box box_from_proto(const roi::transcode::Box& b)
 {
-    smartvideo::Box out;
+    sve::Box out;
     out.t_sec = b.t();
     out.kind = b.kind();
     out.x = b.x();
@@ -412,14 +412,14 @@ namespace {
 
 // Ships packets back over the stream. The alternative is output_path, in which
 // case the session muxes and only the summary comes back.
-class StreamSink : public smartvideo::PacketHandler {
+class StreamSink : public sve::PacketHandler {
 public:
     using Writer = grpc::ServerReaderWriter<roi::transcode::EncodeStreamResponse,
         roi::transcode::EncodeStreamRequest>;
 
     explicit StreamSink(Writer* w) : m_writer(w) {}
 
-    void on_open(const smartvideo::StreamInfo& info) override
+    void on_open(const sve::StreamInfo& info) override
     {
         roi::transcode::EncodeStreamResponse msg;
         auto* opened = msg.mutable_opened();
@@ -431,7 +431,7 @@ public:
         m_writer->Write(msg);
     }
 
-    void on_packet(const smartvideo::EncodedPacket& pkt) override
+    void on_packet(const sve::EncodedPacket& pkt) override
     {
         roi::transcode::EncodeStreamResponse msg;
         auto* out = msg.mutable_packet();
@@ -446,23 +446,23 @@ private:
     Writer* m_writer;
 };
 
-smartvideo::InputCodec codec_from_proto(roi::transcode::InputCodec c)
+sve::InputCodec codec_from_proto(roi::transcode::InputCodec c)
 {
     switch (c) {
     case roi::transcode::INPUT_CODEC_H264:
-        return smartvideo::InputCodec::H264;
+        return sve::InputCodec::H264;
     case roi::transcode::INPUT_CODEC_H265:
-        return smartvideo::InputCodec::H265;
+        return sve::InputCodec::H265;
     case roi::transcode::INPUT_CODEC_JPEG:
-        return smartvideo::InputCodec::Jpeg;
+        return sve::InputCodec::Jpeg;
     default:
-        return smartvideo::InputCodec::Raw;
+        return sve::InputCodec::Raw;
     }
 }
 
-smartvideo::SessionParams params_from_open(const roi::transcode::StreamOpen& open)
+sve::SessionParams params_from_open(const roi::transcode::StreamOpen& open)
 {
-    smartvideo::SessionParams sp;
+    sve::SessionParams sp;
     sp.width = open.width();
     sp.height = open.height();
     if (open.time_base_num() > 0 && open.time_base_den() > 0) {
@@ -503,7 +503,7 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
             return {grpc::StatusCode::INVALID_ARGUMENT,
                 "open needs a frame size"};
         }
-        smartvideo::SessionParams sp = params_from_open(open);
+        sve::SessionParams sp = params_from_open(open);
 
         // Either the session muxes into a sandboxed path, or packets come back
         // over the stream. Opened is sent by the handler, on_open.
@@ -514,7 +514,7 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
             streaming = std::make_unique<StreamSink>(stream);
         }
 
-        smartvideo::Session session(sp, streaming.get());
+        sve::Session session(sp, streaming.get());
 
         // Raw planes arrive tightly packed, so the plane pointers are derived
         // rather than sent: one layout, described once in `open`.
@@ -522,17 +522,17 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
         // The wire still carries an AVPixelFormat number -- that is ta_vms' own contract
         // with this service. The library has its own enum, so the translation happens here,
         // at the edge, rather than leaking FFmpeg's numbering into the library's surface.
-        const smartvideo::PixelFormat frame_format =
-            sp.codec == smartvideo::InputCodec::Raw
+        const sve::PixelFormat frame_format =
+            sp.codec == sve::InputCodec::Raw
             ? to_library_format(pix)
-            : smartvideo::PixelFormat::Unknown;
-        if (sp.codec == smartvideo::InputCodec::Raw
-            && frame_format == smartvideo::PixelFormat::Unknown) {
+            : sve::PixelFormat::Unknown;
+        if (sp.codec == sve::InputCodec::Raw
+            && frame_format == sve::PixelFormat::Unknown) {
             return {grpc::StatusCode::INVALID_ARGUMENT,
                 "pix_fmt names a format this encoder does not take"};
         }
-        std::vector<smartvideo::Box> boxes;
-        smartvideo::Mask mask;
+        std::vector<sve::Box> boxes;
+        sve::Mask mask;
 
         while (stream->Read(&req)) {
             if (!req.has_frame()) {
@@ -541,11 +541,11 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
             }
             const auto& in = req.frame();
 
-            smartvideo::Regions regions;
+            sve::Regions regions;
             boxes.clear();
             if (in.has_qp_map()) {
                 const auto& m = in.qp_map();
-                smartvideo::QpDeltaMap grid;
+                sve::QpDeltaMap grid;
                 grid.block = m.block();
                 grid.cols = m.cols();
                 grid.rows = m.rows();
@@ -582,7 +582,7 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
 
             const auto* bytes =
                 reinterpret_cast<const uint8_t*>(in.data().data());
-            if (sp.codec == smartvideo::InputCodec::Raw) {
+            if (sp.codec == sve::InputCodec::Raw) {
                 uint8_t* planes[4] = {nullptr, nullptr, nullptr, nullptr};
                 int strides[4] = {0, 0, 0, 0};
                 const int needed = av_image_fill_arrays(planes, strides,
@@ -595,7 +595,7 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
                 // Each plane's length is the distance to the next one, and for the last
                 // the remainder of what the frame occupies. Derived here rather than
                 // guessed inside the library, which is the point of PlaneBuffer asking.
-                smartvideo::PlaneBuffer::Plane described[4];
+                sve::PlaneBuffer::Plane described[4];
                 for (int i = 0; i < 4; ++i) {
                     if (!planes[i]) {
                         continue;
@@ -610,8 +610,8 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
                             - static_cast<std::size_t>(planes[i] - bytes);
                     described[i] = {std::span<uint8_t>(planes[i], len), strides[i]};
                 }
-                smartvideo::PlaneBuffer pixels(sp.width, sp.height, frame_format,
-                    std::span<const smartvideo::PlaneBuffer::Plane>(described, 4));
+                sve::PlaneBuffer pixels(sp.width, sp.height, frame_format,
+                    std::span<const sve::PlaneBuffer::Plane>(described, 4));
                 session.submit(pixels, regions, in.pts());
             } else {
                 session.submit(
@@ -620,7 +620,7 @@ grpc::Status RoiStreamTranscodeServiceImpl::EncodeStream(grpc::ServerContext*,
             }
         }
 
-        const smartvideo::Report rep = session.finish();
+        const sve::Report rep = session.finish();
         roi::transcode::EncodeStreamResponse msg;
         auto* done = msg.mutable_done();
         done->set_frames(rep.frames);

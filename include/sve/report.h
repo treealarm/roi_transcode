@@ -4,12 +4,12 @@
 // the caller of either wants to know which backend actually ran, and with
 // Encoder::Auto that is not knowable in advance.
 
-#include "smartvideo/types.h"
+#include "sve/types.h"
 
 #include <cstdint>
 #include <string>
 
-namespace smartvideo {
+namespace sve {
 
 struct Report {
     Encoder encoder_used = Encoder::Cpu;
@@ -45,4 +45,4 @@ struct Report {
     bool roi_lag_acceptance = false;
 };
 
-} // namespace smartvideo
+} // namespace sve

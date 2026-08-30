@@ -8,7 +8,7 @@
 
 #include <cstdint>
 
-namespace smartvideo {
+namespace sve {
 
 enum class ObjectPriority {
     Background = 0,
@@ -55,4 +55,4 @@ inline int32_t priority_rank(ObjectPriority p)
     return static_cast<int32_t>(p);
 }
 
-} // namespace smartvideo
+} // namespace sve

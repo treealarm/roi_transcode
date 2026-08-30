@@ -9,7 +9,7 @@ on the library side so the two tracks stay visible.
 
 ## Slice A — ObjectPriority ladder (§11.1)
 
-- Public type: [`object_priority.h`](../include/smartvideo/object_priority.h)
+- Public type: [`object_priority.h`](../include/sve/object_priority.h)
   (`Critical/−8` … `Background/0`).
 - Continuous v2 importance remains the **internal** way to pick a step
   (`priority_from_importance`); `Quality::use_v3_priority_ladder` (default
@@ -72,7 +72,7 @@ Vendored into `video_a/proto/roi_transcode.proto`. ta_vms archive callers adjust
 
 ## Slice F — SEI bitstream metadata (§19)
 
-- Payload encode/decode: `include/smartvideo/metadata.h`, `src/metadata/sei_payload.cpp`
+- Payload encode/decode: `include/sve/metadata.h`, `src/metadata/sei_payload.cpp`
   (UUID + `SVE1` LE frame/objects/CRC32).
 - Soft backend `libx264`: `udu_sei=1`, `capabilities.sei=true`; frame side data
   attached from Session / `transcode_file` when `MetadataConfig::bitstream_sei`.

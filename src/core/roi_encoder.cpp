@@ -8,7 +8,7 @@
 #include <cstring>
 #include <format>
 
-namespace smartvideo {
+namespace sve {
 
 
 using roiav::check;
@@ -232,4 +232,4 @@ void RoiEncoder::flush()
     drain();
 }
 
-} // namespace smartvideo
+} // namespace sve

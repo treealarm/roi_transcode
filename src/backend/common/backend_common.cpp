@@ -12,7 +12,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-namespace smartvideo {
+namespace sve {
 
 // The deleters, compiled here on purpose: this is the library's side of the ABI, and so
 // the library's allocator is the one that frees what it allocated. Inlining these into the
@@ -388,4 +388,4 @@ Status LibavBackend::Flush(BackendSession& session) const
     return Status::Ok();
 }
 
-} // namespace smartvideo
+} // namespace sve

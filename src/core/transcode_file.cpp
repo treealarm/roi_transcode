@@ -1,4 +1,4 @@
-#include "smartvideo/smartvideo.h"
+#include "sve/sve.h"
 
 #include "av_raii.h"
 #include "bitrate_budget.h"
@@ -12,12 +12,12 @@
 #include "temporal_roi.h"
 #include "object_normalizer.h"
 #include "qp_slew.h"
-#include "smartvideo/metadata.h"
+#include "sve/metadata.h"
 
 #include <cstdio>
 #include <vector>
 
-namespace smartvideo {
+namespace sve {
 
 namespace {
 
@@ -286,4 +286,4 @@ Report transcode_file(const std::string& input_path,
     return report;
 }
 
-} // namespace smartvideo
+} // namespace sve

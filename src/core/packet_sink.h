@@ -9,7 +9,7 @@
 #include <functional>
 #include <string>
 #include <vector>
-namespace smartvideo {
+namespace sve {
 
 
 class PacketSink {
@@ -89,4 +89,4 @@ private:
     OnOpen m_on_open;
 };
 
-} // namespace smartvideo
+} // namespace sve

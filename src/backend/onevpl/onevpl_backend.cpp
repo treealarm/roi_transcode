@@ -14,7 +14,7 @@ extern "C" {
 #include <libavutil/opt.h>
 }
 
-namespace smartvideo {
+namespace sve {
 
 namespace {
 
@@ -105,4 +105,4 @@ const IEncoderBackend& onevpl_backend()
     return instance;
 }
 
-} // namespace smartvideo
+} // namespace sve

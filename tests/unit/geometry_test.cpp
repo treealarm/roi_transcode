@@ -1,10 +1,10 @@
-#include "smartvideo/geometry.h"
+#include "sve/geometry.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
 
-using namespace smartvideo;
+using namespace sve;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \

@@ -30,9 +30,9 @@ double sample_time(const json& row)
     return row.value("t", 0.0);
 }
 
-smartvideo::Box parse_box(const json& row, double t_sec)
+sve::Box parse_box(const json& row, double t_sec)
 {
-    smartvideo::Box b;
+    sve::Box b;
     b.t_sec = t_sec;
     b.kind = row.value("kind", std::string{});
     b.x = box_dim(row, "x", "bbox_x");
@@ -79,7 +79,7 @@ RoiJson load_roi_json(const std::string& path)
 
     if (root.contains("kinds") && root["kinds"].is_object()) {
         for (auto it = root["kinds"].begin(); it != root["kinds"].end(); ++it) {
-            smartvideo::KindQuality cfg;
+            sve::KindQuality cfg;
             cfg.qp_delta = it.value().value("qp_delta", -6);
             cfg.pad = it.value().value("pad_norm", doc.quality.pad);
             doc.quality.kinds.emplace(it.key(), cfg);

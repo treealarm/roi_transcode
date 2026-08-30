@@ -1,10 +1,10 @@
 #pragma once
 
-#include "smartvideo/capabilities.h"
+#include "sve/capabilities.h"
 
 #include <cstdio>
 
-namespace smartvideo {
+namespace sve {
 
 inline void warn_sei_unsupported_once(const bool requested, const EncoderCapabilities& caps,
     bool& warned)
@@ -17,4 +17,4 @@ inline void warn_sei_unsupported_once(const bool requested, const EncoderCapabil
     warned = true;
 }
 
-} // namespace smartvideo
+} // namespace sve

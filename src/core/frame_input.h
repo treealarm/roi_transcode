@@ -4,7 +4,7 @@
 // copy; H.264, H.265 and JPEG go through a decoder.
 
 #include "av_raii.h"
-#include "smartvideo/session.h"
+#include "sve/session.h"
 
 #include <functional>
 
@@ -12,7 +12,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 }
 
-namespace smartvideo {
+namespace sve {
 
 class FrameDecoder {
 public:
@@ -20,7 +20,7 @@ public:
 
     // `extradata` may be null; for H.264/H.265 in AVCC/HVCC form it is required
     // for the decoder to make sense of the first access unit.
-    void open(smartvideo::InputCodec codec, const uint8_t* extradata, int extradata_size);
+    void open(sve::InputCodec codec, const uint8_t* extradata, int extradata_size);
 
     // Feeds one buffer. Calls `cb` for every frame that comes out -- usually one,
     // sometimes none while the decoder builds up state.
@@ -31,7 +31,7 @@ public:
 private:
     void receive(const FrameCb& cb);
 
-    smartvideo::InputCodec m_codec = smartvideo::InputCodec::Raw;
+    sve::InputCodec m_codec = sve::InputCodec::Raw;
     roiav::CodecCtx m_dec;
     AVCodecParserContext* m_parser = nullptr;
     roiav::Frame m_frame;
@@ -44,4 +44,4 @@ public:
     FrameDecoder& operator=(const FrameDecoder&) = delete;
 };
 
-} // namespace smartvideo
+} // namespace sve

@@ -8,7 +8,7 @@
 
 #include <cstdint>
 
-namespace smartvideo {
+namespace sve {
 
 /// §14. OBJECT_FIRST is the default and the only one implemented; the others are rejected
 /// at configure time rather than quietly treated as the default.
@@ -98,4 +98,4 @@ struct RateControlPolicy {
     bool unimplemented_requested() const { return false; }
 };
 
-} // namespace smartvideo
+} // namespace sve

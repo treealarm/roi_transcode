@@ -707,7 +707,7 @@ if cmake -S "${ROOT}" -B "$tmpb" -G Ninja \
    && cmake --build "$tmpb" -j"$(nproc)" >/dev/null 2>&1; then
     pass "the library configures and builds without integration/"
 else
-    fail "roi_core does not build standalone"
+    fail "sve does not build standalone"
 fi
 
 printf '\n'

@@ -1,6 +1,6 @@
 #include "job/roi_job_manager.h"
 
-#include "smartvideo/smartvideo.h"
+#include "sve/sve.h"
 
 #include <format>
 #include <stdexcept>
@@ -126,7 +126,7 @@ void RoiJobManager::run_job(const std::shared_ptr<Job>& entry, RoiJobRequest req
         if (entry->cancel.load()) {
             throw std::runtime_error("cancelled");
         }
-        const smartvideo::Report report = smartvideo::transcode_file(
+        const sve::Report report = sve::transcode_file(
             req.input_path, req.output_path, req.boxes, req.settings,
             &entry->cancel);
         {

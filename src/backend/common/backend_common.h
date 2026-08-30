@@ -11,11 +11,11 @@
 // that does not go through libavcodec at all (Rockchip MPP, §6) overrides them.
 
 #include "backend/common/backend_session.h"
-#include "smartvideo/encoder_backend.h"
+#include "sve/encoder_backend.h"
 
 #include <span>
 
-namespace smartvideo {
+namespace sve {
 
 namespace backend_common {
 
@@ -68,4 +68,4 @@ protected:
         LibavSession& session, const EncoderConfig& config) const = 0;
 };
 
-} // namespace smartvideo
+} // namespace sve

@@ -6,13 +6,13 @@
 // structure.
 
 #include "av_raii.h"
-#include "smartvideo/encoder_backend.h"
+#include "sve/encoder_backend.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
 }
 
-namespace smartvideo {
+namespace sve {
 
 class LibavSession final : public BackendSession {
 public:
@@ -50,4 +50,4 @@ public:
 /// here, and the cast is safe because a backend only ever receives sessions it opened.
 LibavSession& libav(BackendSession& session);
 
-} // namespace smartvideo
+} // namespace sve

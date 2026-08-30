@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace smartvideo {
+namespace sve {
 
 int32_t effective_coding_block(const EncoderCapabilities& caps)
 {
@@ -71,4 +71,4 @@ FrameRoiPipelineOutput FrameRoiPipeline::process(const FrameRoiPipelineInput& in
     return out;
 }
 
-} // namespace smartvideo
+} // namespace sve

@@ -4,14 +4,14 @@
 // of boxes -- into the rectangles an encoder accepts. Pure arithmetic, no
 // FFmpeg, which is why it is exposed: these are the parts worth unit testing.
 
-#include "smartvideo/types.h"
+#include "sve/types.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <span>
 #include <vector>
 
-namespace smartvideo {
+namespace sve {
 
 // Signed QP delta per coding block, raster order. Cell size comes from the backend's
 // EncoderCapabilities::qp_map_block_* (H.264 16x16 macroblocks; HEVC painted at 32x32
@@ -76,4 +76,4 @@ QpDeltaMap qp_map_from_mask(const Mask& mask, const MaskMapping& mapping,
 std::vector<Rect> rects_from_qp_map(
     const QpDeltaMap& map, int32_t max_regions, int32_t* dropped = nullptr);
 
-} // namespace smartvideo
+} // namespace sve

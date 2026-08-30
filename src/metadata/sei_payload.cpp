@@ -1,10 +1,10 @@
-#include "smartvideo/metadata.h"
-#include "smartvideo/types.h"
+#include "sve/metadata.h"
+#include "sve/types.h"
 
 #include <algorithm>
 #include <cstring>
 
-namespace smartvideo {
+namespace sve {
 
 namespace {
 
@@ -283,4 +283,4 @@ std::vector<SeiObject> sei_objects_from_boxes(std::span<const Box> boxes, uint32
     return out;
 }
 
-} // namespace smartvideo
+} // namespace sve

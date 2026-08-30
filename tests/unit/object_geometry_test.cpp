@@ -1,13 +1,13 @@
 // bounding_box_of: polygon and mask reduced to the rectangle the encoder can take.
 
-#include "smartvideo/object.h"
+#include "sve/object.h"
 
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
 
-using namespace smartvideo;
+using namespace sve;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \

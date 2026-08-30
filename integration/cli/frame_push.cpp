@@ -1,9 +1,9 @@
-// Drives smartvideo::Session from a file: demuxes, then pushes frames in rather than
+// Drives sve::Session from a file: demuxes, then pushes frames in rather than
 // handing the path to the file pipeline. Two reasons it exists. It is the only
 // way to exercise the frame mode without a gRPC client in between, and running
 // it against roi-transcode on the same input is the check that both modes agree.
 
-#include "smartvideo/smartvideo.h"
+#include "sve/sve.h"
 #include "roi_json.h"
 
 #include <algorithm>
@@ -24,15 +24,15 @@ namespace {
 
 // AVPixelFormat to the library's own PixelFormat; the library does not know FFmpeg's
 // numbering, and this tool is on the FFmpeg side of that line.
-smartvideo::PixelFormat to_library_format(AVPixelFormat f)
+sve::PixelFormat to_library_format(AVPixelFormat f)
 {
     switch (f) {
-    case AV_PIX_FMT_YUV420P: return smartvideo::PixelFormat::YUV420P;
-    case AV_PIX_FMT_NV12:    return smartvideo::PixelFormat::NV12;
-    case AV_PIX_FMT_YUV422P: return smartvideo::PixelFormat::YUV422P;
-    case AV_PIX_FMT_YUV444P: return smartvideo::PixelFormat::YUV444P;
-    case AV_PIX_FMT_GRAY8:   return smartvideo::PixelFormat::GRAY8;
-    default:                 return smartvideo::PixelFormat::Unknown;
+    case AV_PIX_FMT_YUV420P: return sve::PixelFormat::YUV420P;
+    case AV_PIX_FMT_NV12:    return sve::PixelFormat::NV12;
+    case AV_PIX_FMT_YUV422P: return sve::PixelFormat::YUV422P;
+    case AV_PIX_FMT_YUV444P: return sve::PixelFormat::YUV444P;
+    case AV_PIX_FMT_GRAY8:   return sve::PixelFormat::GRAY8;
+    default:                 return sve::PixelFormat::Unknown;
     }
 }
 
@@ -44,30 +44,30 @@ void usage()
         "         [--codec h265|h264]\n"
         "         [--crf 28] [--gop N] [--preset balanced]\n"
         "\n"
-        "Pushes frames into smartvideo::Session instead of transcoding a path.\n"
+        "Pushes frames into sve::Session instead of transcoding a path.\n"
         "  --push raw        decode here, submit raw planes (default)\n"
         "  --push bitstream  submit compressed access units, Session decodes\n"
         "  --mask            rasterize the boxes into a grayscale mask\n");
 }
 
-smartvideo::Encoder parse_encoder(const char* s)
+sve::Encoder parse_encoder(const char* s)
 {
-    if (std::strcmp(s, "auto") == 0) return smartvideo::Encoder::Auto;
-    if (std::strcmp(s, "qsv") == 0) return smartvideo::Encoder::Qsv;
-    if (std::strcmp(s, "vaapi") == 0) return smartvideo::Encoder::Vaapi;
-    if (std::strcmp(s, "nvenc") == 0) return smartvideo::Encoder::Nvenc;
-    if (std::strcmp(s, "cpu") == 0) return smartvideo::Encoder::Cpu;
+    if (std::strcmp(s, "auto") == 0) return sve::Encoder::Auto;
+    if (std::strcmp(s, "qsv") == 0) return sve::Encoder::Qsv;
+    if (std::strcmp(s, "vaapi") == 0) return sve::Encoder::Vaapi;
+    if (std::strcmp(s, "nvenc") == 0) return sve::Encoder::Nvenc;
+    if (std::strcmp(s, "cpu") == 0) return sve::Encoder::Cpu;
     // The old spelling, kept so existing scripts keep working.
-    if (std::strcmp(s, "x265") == 0) return smartvideo::Encoder::Cpu;
+    if (std::strcmp(s, "x265") == 0) return sve::Encoder::Cpu;
     throw std::runtime_error("unknown --encoder (auto|qsv|vaapi|nvenc|cpu)");
 }
 
-smartvideo::InputCodec codec_of(AVCodecID id)
+sve::InputCodec codec_of(AVCodecID id)
 {
     switch (id) {
-    case AV_CODEC_ID_H264: return smartvideo::InputCodec::H264;
-    case AV_CODEC_ID_HEVC: return smartvideo::InputCodec::H265;
-    case AV_CODEC_ID_MJPEG: return smartvideo::InputCodec::Jpeg;
+    case AV_CODEC_ID_H264: return sve::InputCodec::H264;
+    case AV_CODEC_ID_HEVC: return sve::InputCodec::H265;
+    case AV_CODEC_ID_MJPEG: return sve::InputCodec::Jpeg;
     default:
         throw std::runtime_error(
             "--push bitstream needs H.264, H.265 or JPEG input");
@@ -76,11 +76,11 @@ smartvideo::InputCodec codec_of(AVCodecID id)
 
 // Boxes live on the timeline; a submitted frame wants the ones around its own
 // instant. Same hold window the file pipeline applies.
-std::vector<smartvideo::Box> boxes_at(
-    const std::vector<smartvideo::Box>& boxes, double hold_sec, double t_sec)
+std::vector<sve::Box> boxes_at(
+    const std::vector<sve::Box>& boxes, double hold_sec, double t_sec)
 {
     const double hold = hold_sec > 0 ? hold_sec : 0.25;
-    std::vector<smartvideo::Box> out;
+    std::vector<sve::Box> out;
     for (const auto& b : boxes) {
         if (std::abs(b.t_sec - t_sec) <= hold) {
             out.push_back(b);
@@ -90,7 +90,7 @@ std::vector<smartvideo::Box> boxes_at(
 }
 
 void rasterize(std::vector<uint8_t>& mask, int w, int h,
-    const std::vector<smartvideo::Box>& boxes)
+    const std::vector<sve::Box>& boxes)
 {
     std::fill(mask.begin(), mask.end(), static_cast<uint8_t>(0));
     for (const auto& s : boxes) {
@@ -115,8 +115,8 @@ struct Args {
     bool have_roi = false;
     bool bitstream = false;
     bool use_mask = false;
-    smartvideo::Encoder encoder = smartvideo::Encoder::Auto;
-    smartvideo::Codec codec = smartvideo::Codec::H265;
+    sve::Encoder encoder = sve::Encoder::Auto;
+    sve::Codec codec = sve::Codec::H265;
     int crf = 28;
     int gop = 0;
     std::string preset = "balanced";
@@ -148,7 +148,7 @@ int run(const Args& args)
     }
     AVStream* vs = fmt->streams[vindex];
 
-    smartvideo::SessionParams sp;
+    sve::SessionParams sp;
     sp.width = vs->codecpar->width;
     sp.height = vs->codecpar->height;
     sp.time_base_num = vs->time_base.num;
@@ -161,7 +161,7 @@ int run(const Args& args)
     sp.settings.codec = args.codec;
     sp.settings.crf = args.crf;
     sp.settings.gop = args.gop;
-    sp.settings.preset = smartvideo::preset_from_name(args.preset.c_str());
+    sp.settings.preset = sve::preset_from_name(args.preset.c_str());
     sp.settings.quality = args.roi_doc.quality;
     // A rasterized box is on or off, so two levels is all the mask can express.
     if (args.use_mask) {
@@ -177,19 +177,19 @@ int run(const Args& args)
     }
 
     sp.output_path = args.out;
-    smartvideo::Session session(sp);
+    sve::Session session(sp);
 
     std::vector<uint8_t> mask_buf(
         static_cast<size_t>(sp.width) * static_cast<size_t>(sp.height));
-    smartvideo::Mask mask;
+    sve::Mask mask;
     mask.data = mask_buf;
     mask.width = sp.width;
     mask.height = sp.height;
     mask.stride = sp.width;
 
-    auto regions_for = [&](double t_sec, std::vector<smartvideo::Box>& keep) {
+    auto regions_for = [&](double t_sec, std::vector<sve::Box>& keep) {
         keep = boxes_at(args.roi_doc.boxes, args.roi_doc.quality.hold_sec, t_sec);
-        smartvideo::Regions r;
+        sve::Regions r;
         if (args.use_mask) {
             rasterize(mask_buf, sp.width, sp.height, keep);
             r.mask = mask;
@@ -210,8 +210,8 @@ int run(const Args& args)
             if (pkt->stream_index == vindex) {
                 const int64_t pts = pkt->pts != AV_NOPTS_VALUE ? pkt->pts : 0;
                 const double t = static_cast<double>(pts) * av_q2d(vs->time_base);
-                std::vector<smartvideo::Box> keep;
-                const smartvideo::Regions r = regions_for(t, keep);
+                std::vector<sve::Box> keep;
+                const sve::Regions r = regions_for(t, keep);
                 session.submit(
                     std::span<const uint8_t>(
                         pkt->data, static_cast<size_t>(pkt->size)),
@@ -253,9 +253,9 @@ int run(const Args& args)
                     ? frame->best_effort_timestamp
                     : 0;
                 const double t = static_cast<double>(pts) * av_q2d(vs->time_base);
-                std::vector<smartvideo::Box> keep;
-                const smartvideo::Regions rg = regions_for(t, keep);
-                smartvideo::PlaneBuffer::Plane planes[4];
+                std::vector<sve::Box> keep;
+                const sve::Regions rg = regions_for(t, keep);
+                sve::PlaneBuffer::Plane planes[4];
                 for (int i = 0; i < 4; ++i) {
                     if (!frame->data[i] || frame->linesize[i] <= 0) {
                         continue;
@@ -275,9 +275,9 @@ int run(const Args& args)
                                          * static_cast<size_t>(rows)),
                         frame->linesize[i]};
                 }
-                smartvideo::PlaneBuffer pixels(frame->width, frame->height,
+                sve::PlaneBuffer pixels(frame->width, frame->height,
                     to_library_format(static_cast<AVPixelFormat>(frame->format)),
-                    std::span<const smartvideo::PlaneBuffer::Plane>(planes, 4));
+                    std::span<const sve::PlaneBuffer::Plane>(planes, 4));
                 session.submit(pixels, rg, pts);
                 av_frame_unref(frame);
             }
@@ -296,7 +296,7 @@ int run(const Args& args)
         drain();
     }
 
-    const smartvideo::Report rep = session.finish();
+    const sve::Report rep = session.finish();
     std::fprintf(stderr,
         "pushed %lld frames -> %lld packets, %lld bytes, %s%s\n",
         static_cast<long long>(rep.frames), static_cast<long long>(rep.packets),
@@ -319,11 +319,11 @@ int run(const Args& args)
     return 0;
 }
 
-smartvideo::Codec parse_codec(const char* s)
+sve::Codec parse_codec(const char* s)
 {
-    if (std::strcmp(s, "h264") == 0) return smartvideo::Codec::H264;
+    if (std::strcmp(s, "h264") == 0) return sve::Codec::H264;
     if (std::strcmp(s, "h265") == 0 || std::strcmp(s, "hevc") == 0)
-        return smartvideo::Codec::H265;
+        return sve::Codec::H265;
     throw std::runtime_error("unknown --codec (h264|h265)");
 }
 } // namespace

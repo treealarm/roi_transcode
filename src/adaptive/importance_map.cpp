@@ -5,13 +5,13 @@
 // that is the granularity every encoder backend actually accepts.
 
 #include "importance_map.h"
-#include "smartvideo/geometry.h"
+#include "sve/geometry.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 
-namespace smartvideo {
+namespace sve {
 
 namespace {
 
@@ -113,4 +113,4 @@ QpDeltaMap QpDeltaMapBuilder::build(
     return m;
 }
 
-} // namespace smartvideo
+} // namespace sve

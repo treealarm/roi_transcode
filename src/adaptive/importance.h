@@ -1,15 +1,15 @@
 #pragma once
 
-// §11's model, evaluated. The policy itself is public (smartvideo/importance.h); this is
+// §11's model, evaluated. The policy itself is public (sve/importance.h); this is
 // the arithmetic that reads it.
 
-#include "smartvideo/importance.h"
-#include "smartvideo/object.h"
-#include "smartvideo/object_priority.h"
+#include "sve/importance.h"
+#include "sve/object.h"
+#include "sve/object_priority.h"
 
 #include <cstdint>
 
-namespace smartvideo {
+namespace sve {
 
 /// TemporalStability ∈ [floor, 1]: rises with track age. 1.0 when there is no track.
 float temporal_stability_of(const TrackEvidence& track, const ImportancePolicy& policy);
@@ -28,4 +28,4 @@ int32_t qp_from_importance(float importance, const ImportancePolicy& policy);
 
 float importance_from_qp(int32_t qp_delta, const ImportancePolicy& policy);
 
-} // namespace smartvideo
+} // namespace sve

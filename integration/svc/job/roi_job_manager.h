@@ -1,6 +1,6 @@
 #pragma once
 
-#include "smartvideo/types.h"
+#include "sve/types.h"
 
 #include <atomic>
 #include <chrono>
@@ -43,8 +43,8 @@ struct RoiJobStatus {
 struct RoiJobRequest {
     std::string input_path;
     std::string output_path;
-    std::vector<smartvideo::Box> boxes;
-    smartvideo::Settings settings;
+    std::vector<sve::Box> boxes;
+    sve::Settings settings;
 };
 
 class RoiJobManager {

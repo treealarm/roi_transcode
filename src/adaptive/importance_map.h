@@ -1,11 +1,11 @@
 #pragma once
 
-#include "smartvideo/geometry.h"
-#include "smartvideo/types.h"
+#include "sve/geometry.h"
+#include "sve/types.h"
 
 #include <cstdint>
 #include <vector>
-namespace smartvideo {
+namespace sve {
 
 
 // NVIDIA NVENC qpDeltaMap: signed QP delta per CTU/MB, raster order.
@@ -20,4 +20,4 @@ public:
         const std::vector<Rect>& rects) const;
 };
 
-} // namespace smartvideo
+} // namespace sve

@@ -4,7 +4,7 @@
 #include <cmath>
 #include <map>
 
-namespace smartvideo {
+namespace sve {
 
 namespace {
 
@@ -239,4 +239,4 @@ std::vector<Box> TemporalRoi::at(double t_sec) const
     return out;
 }
 
-} // namespace smartvideo
+} // namespace sve

@@ -5,7 +5,7 @@
 extern "C" {
 #include <libavutil/dict.h>
 }
-namespace smartvideo {
+namespace sve {
 
 
 FileMuxSink::FileMuxSink(std::string path, std::string movflags)
@@ -113,4 +113,4 @@ void FileMuxSink::end()
     roiav::check(av_write_trailer(m_out.p), "write trailer");
 }
 
-} // namespace smartvideo
+} // namespace sve

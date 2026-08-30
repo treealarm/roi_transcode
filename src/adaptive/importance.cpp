@@ -2,12 +2,12 @@
 
 #include "importance.h"
 
-#include "smartvideo/object_priority.h"
+#include "sve/object_priority.h"
 
 #include <algorithm>
 #include <cmath>
 
-namespace smartvideo {
+namespace sve {
 
 ObjectPriority priority_from_importance(float importance)
 {
@@ -155,4 +155,4 @@ int32_t qp_from_importance(float importance, const ImportancePolicy& policy)
     return std::clamp(static_cast<int32_t>(std::lround(qp)), -51, 51);
 }
 
-} // namespace smartvideo
+} // namespace sve

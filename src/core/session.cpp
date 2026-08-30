@@ -1,4 +1,4 @@
-#include "smartvideo/session.h"
+#include "sve/session.h"
 
 #include "av_raii.h"
 #include "bitrate_budget.h"
@@ -11,14 +11,14 @@
 #include "qp_slew.h"
 #include "roi_lag.h"
 #include "roi_encoder.h"
-#include "smartvideo/metadata.h"
+#include "sve/metadata.h"
 
 #include <algorithm>
 #include <cstdio>
 #include <map>
 #include <span>
 
-namespace smartvideo {
+namespace sve {
 
 namespace {
 
@@ -408,4 +408,4 @@ Report Session::finish()
     return m_impl->report;
 }
 
-} // namespace smartvideo
+} // namespace sve

@@ -5,13 +5,13 @@
 // backend's answer -- EncoderCapabilities::max_roi_regions for rectangle APIs, or no
 // truncate when qp_map is true (pass max_regions == 0).
 
-#include "smartvideo/geometry.h"
+#include "sve/geometry.h"
 
 #include <algorithm>
 #include <cstdlib>
 #include <map>
 
-namespace smartvideo {
+namespace sve {
 
 std::vector<Rect> rects_from_qp_map(
     const QpDeltaMap& map, int32_t max_regions, int32_t* dropped)
@@ -109,4 +109,4 @@ std::vector<Rect> rects_from_qp_map(
     return out;
 }
 
-} // namespace smartvideo
+} // namespace sve
