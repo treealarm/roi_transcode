@@ -126,9 +126,9 @@ public:
     }
 
     sve::EncoderConfig config;
-    config.width = 1280;
-    config.height = 720;
-    config.fps = sve::Rational{25, 1};
+    config.input.width = 1280;
+    config.input.height = 720;
+    config.input.frame_rate = sve::Rational{25, 1};
     config.codec = sve::Codec::H264;
 
     const std::vector<sve::Rect> regions{sve::Rect{0, 16, 0, 16, -8}};

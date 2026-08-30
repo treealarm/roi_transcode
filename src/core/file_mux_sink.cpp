@@ -1,5 +1,9 @@
 #include "packet_sink.h"
 
+#include "codec_id.h"
+
+#include <cstring>
+
 #include <utility>
 
 extern "C" {
@@ -27,14 +31,47 @@ void FileMuxSink::begin(AVCodecContext* enc)
     if (m_started) {
         return;
     }
+    open_video_stream();
+    roiav::check(avcodec_parameters_from_context(m_video->codecpar, enc),
+        "encoder params");
+    m_video->time_base = enc->time_base;
+    finish_begin();
+}
 
+void FileMuxSink::begin(const CodecParameters& params)
+{
+    if (m_started) {
+        return;
+    }
+    open_video_stream();
+    m_video->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
+    m_video->codecpar->codec_id = av_id_from_codec(params.codec);
+    m_video->codecpar->width = params.width;
+    m_video->codecpar->height = params.height;
+    if (!params.extradata.empty()) {
+        m_video->codecpar->extradata = static_cast<uint8_t*>(
+            av_mallocz(params.extradata.size() + AV_INPUT_BUFFER_PADDING_SIZE));
+        if (m_video->codecpar->extradata == nullptr) {
+            roiav::fail("allocate extradata");
+        }
+        std::memcpy(m_video->codecpar->extradata, params.extradata.data(),
+            params.extradata.size());
+        m_video->codecpar->extradata_size = static_cast<int>(params.extradata.size());
+    }
+    m_video->time_base = AVRational{params.time_base.num, params.time_base.den};
+    finish_begin();
+}
+
+void FileMuxSink::open_video_stream()
+{
     m_video = avformat_new_stream(m_out.p, nullptr);
     if (!m_video) {
         roiav::fail("new video stream");
     }
-    roiav::check(avcodec_parameters_from_context(m_video->codecpar, enc),
-        "encoder params");
-    m_video->time_base = enc->time_base;
+}
+
+void FileMuxSink::finish_begin()
+{
 
     if (m_audio_par) {
         m_audio = avformat_new_stream(m_out.p, nullptr);
@@ -92,6 +129,22 @@ void FileMuxSink::on_packet(AVPacket* pkt, AVRational enc_time_base)
     m_last_dts = pkt->dts;
 
     roiav::check(av_interleaved_write_frame(m_out.p, pkt), "write video");
+}
+
+void FileMuxSink::write_video(const EncodedPacket& packet)
+{
+    roiav::Packet pkt;
+    if (av_new_packet(pkt.p, static_cast<int>(packet.payload.size())) < 0) {
+        roiav::fail("allocate packet for muxing");
+    }
+    std::memcpy(pkt.p->data, packet.payload.data(), packet.payload.size());
+    pkt.p->pts = packet.pts;
+    pkt.p->dts = packet.dts;
+    pkt.p->duration = packet.duration;
+    if (packet.key_frame) {
+        pkt.p->flags |= AV_PKT_FLAG_KEY;
+    }
+    on_packet(pkt.p, AVRational{packet.time_base.num, packet.time_base.den});
 }
 
 void FileMuxSink::write_audio(AVPacket* pkt, AVRational src_time_base)

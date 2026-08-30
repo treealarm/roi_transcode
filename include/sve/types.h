@@ -184,11 +184,6 @@ struct Quality {
     /// symmetrically so the codec still sees it.
     int32_t min_roi_side = 64;
 
-    /// When true (default), QP deltas come from the v3 ObjectPriority ladder. When false,
-    /// the v2.0 continuous importance→QP line is used -- kept for measurements against
-    /// the older specification.
-    bool use_v3_priority_ladder = true;
-
     // Mask input only: the strength a mask value of 255 asks for, and how many
     // steps the 0..255 range is quantized into. Fewer steps means fewer
     // distinct deltas and so fewer rectangles to spend the budget on.

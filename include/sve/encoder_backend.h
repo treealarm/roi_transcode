@@ -38,6 +38,7 @@
 
 #include "sve/capabilities.h"
 #include "sve/frame_buffer.h"
+#include "sve/input_format.h"
 #include "sve/packet_handler.h"
 #include "sve/session.h"
 #include "sve/status.h"
@@ -56,13 +57,15 @@ namespace sve {
 /// What the encoder is being asked to produce. Named EncoderConfig after §7; the geometry
 /// and timing here do not depend on which backend answers.
 struct EncoderConfig {
-    int32_t width = 0;
-    int32_t height = 0;
-    /// Frame rate. Also picks the default GOP (two seconds) when gop == 0.
-    Rational fps{25, 1};
-    /// Encoder time base. Left at den == 0 it follows the frame rate, which is what a file
+    /// Geometry, pixel layout, frame rate and time base -- TZ v3.4 §8.3. Held as one
+    /// structure rather than as loose fields so that "what is coming in" cannot be edited
+    /// while meaning to change "what should come out": those were neighbours here, and a
+    /// caller reaching for a bitrate landed on a resolution.
+    ///
+    /// `input.time_base` left at den == 0 follows the frame rate, which is what a file
     /// wants; a pushed source usually has its own units instead.
-    Rational time_base{0, 0};
+    InputVideoFormat input;
+
     Encoder kind = Encoder::Auto;
     Codec codec = Codec::H265;
     int32_t crf = 28;
@@ -148,7 +151,7 @@ public:
     /// intersection, which would understate what the hardware does.
     virtual EncoderCapabilities GetCapabilities(Codec codec) const = 0;
 
-    /// Opens an encoder and returns it. StatusCode::Unavailable means "not on this
+    /// Opens an encoder and returns it. StatusCode::DeviceUnavailable means "not on this
     /// machine" -- the caller moves to the next backend in the chain, so an absent GPU must
     /// not come back as an error.
     ///

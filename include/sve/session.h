@@ -3,6 +3,7 @@
 // Frames in, encoded packets out -- for a caller that has no file to hand over.
 
 #include "sve/frame_buffer.h"
+#include "sve/frame_metadata.h"
 #include "sve/geometry.h"
 #include "sve/memory.h"
 #include "sve/packet_handler.h"
@@ -17,22 +18,6 @@
 #include <vector>
 
 namespace sve {
-
-// What to keep sharp in this frame: a mask, boxes, a ready qp_map, or neither.
-//
-// Both carry their own length. The previous shape was a pointer and a count the caller
-// filled in separately, which meant a wrong count read past the end of their buffer and
-// nothing here could tell.
-//
-// Precedence when more than one form is filled: qp_map, then mask, then boxes. A detector
-// that already painted the block grid should not be re-quantized through the mask path.
-struct Regions {
-    /// Takes precedence over `mask` and `boxes` when `deltas` is non-empty.
-    QpDeltaMap qp_map;
-    /// Takes precedence over `boxes` when it holds a consistent mask.
-    Mask mask;
-    std::span<const Box> boxes;
-};
 
 struct SessionParams {
     int32_t width = 0;

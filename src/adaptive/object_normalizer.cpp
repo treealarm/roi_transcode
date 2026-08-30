@@ -123,13 +123,10 @@ Detection to_detection(
         } else {
             d.priority = priority_from_importance(d.importance);
         }
-        if (b.has_desired_qp_delta) {
-            d.qp_delta = b.desired_qp_delta;
-        } else if (quality.use_v3_priority_ladder) {
-            d.qp_delta = qp_delta_for(d.priority);
-        } else {
-            d.qp_delta = qp_from_importance(d.importance, quality.importance);
-        }
+        // The ladder is the contract (TZ §11.1); continuous importance stays the way a
+        // step is chosen, not a second way to answer. A caller with a number of its own
+        // says so through desired_qp_delta.
+        d.qp_delta = b.has_desired_qp_delta ? b.desired_qp_delta : qp_delta_for(d.priority);
         if (b.has_priority || b.has_desired_qp_delta) {
             // Ordering against other regions still needs a comparable importance.
             d.importance = importance_from_qp(d.qp_delta, quality.importance);

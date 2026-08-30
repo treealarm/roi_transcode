@@ -18,8 +18,9 @@ namespace sve {
 
 enum class StatusCode {
     Ok = 0,
-    /// The backend is not present on this machine. Not a failure: the caller moves on.
-    Unavailable,
+    /// The device this backend needs is not on this machine. Not a failure: the caller
+    /// moves to the next backend in the chain. Named DeviceUnavailable after TZ v3.4 §25.
+    DeviceUnavailable,
     /// The caller asked for something this backend cannot do.
     Unsupported,
     /// The request itself does not make sense -- a plane shorter than its own stride
@@ -29,6 +30,14 @@ enum class StatusCode {
     Again,
     /// No more output will come.
     EndOfStream,
+    /// The backend failed at what it was asked to do. Carries the backend, the codec and
+    /// the native code in its message (TZ v3.4 §25).
+    BackendError,
+    /// An allocation failed.
+    OutOfMemory,
+    /// A bounded wait expired. Only the optional blocking variants of §24 produce this;
+    /// the normative API is non-blocking and answers Again instead.
+    Timeout,
     /// Everything else.
     Error,
 };
@@ -42,7 +51,10 @@ public:
     }
 
     static Status Ok() { return {}; }
-    static Status Unavailable(std::string m) { return {StatusCode::Unavailable, std::move(m)}; }
+    static Status DeviceUnavailable(std::string m)
+    {
+        return {StatusCode::DeviceUnavailable, std::move(m)};
+    }
     static Status Unsupported(std::string m) { return {StatusCode::Unsupported, std::move(m)}; }
     static Status InvalidArgument(std::string m)
     {
@@ -50,6 +62,15 @@ public:
     }
     static Status Again() { return {StatusCode::Again, {}}; }
     static Status EndOfStream() { return {StatusCode::EndOfStream, {}}; }
+    static Status BackendError(std::string m)
+    {
+        return {StatusCode::BackendError, std::move(m)};
+    }
+    static Status OutOfMemory(std::string m)
+    {
+        return {StatusCode::OutOfMemory, std::move(m)};
+    }
+    static Status Timeout(std::string m) { return {StatusCode::Timeout, std::move(m)}; }
     static Status Error(std::string m) { return {StatusCode::Error, std::move(m)}; }
 
     StatusCode code() const { return m_code; }

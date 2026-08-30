@@ -75,6 +75,7 @@ add_library(sve STATIC
     src/core/transcode_file.cpp
     src/core/frame_roi_pipeline.cpp
     src/core/roi_encoder.cpp
+    src/core/smart_video_encoder.cpp
     src/core/file_mux_sink.cpp
     src/core/frame.cpp
     src/core/frame_input.cpp
@@ -156,6 +157,13 @@ if(SVE_BUILD_TESTS)
     target_link_libraries(frame_test PRIVATE sve)
     target_compile_options(frame_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME frame COMMAND frame_test)
+
+    # encoder_test drives the public encoder end to end on the software backend: no GPU,
+    # but a real libx264 behind it, so it links sve like frame_test does.
+    add_executable(encoder_test tests/unit/encoder_test.cpp)
+    target_link_libraries(encoder_test PRIVATE sve)
+    target_compile_options(encoder_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME encoder COMMAND encoder_test)
 
     add_executable(public_api_test tests/unit/public_api_test.cpp)
     target_link_libraries(public_api_test PRIVATE sve)

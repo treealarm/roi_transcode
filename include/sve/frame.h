@@ -14,6 +14,7 @@
 // tests/unit/public_headers_isolated.cpp compiles the rest without FFmpeg, so a stray
 // include of this header from a sibling stops the build rather than an embedder's.
 
+#include "sve/frame_metadata.h"
 #include "sve/input_format.h"
 #include "sve/status.h"
 #include "sve/timestamp.h"
@@ -63,6 +64,16 @@ private:
     explicit Frame(AVFrame* frame) : m_frame(frame) {}
 
     std::unique_ptr<AVFrame, Deleter> m_frame;
+};
+
+/// A frame and what the encoder is to be told about it -- TZ v3.4 §8.5.
+///
+/// The owning counterpart of SubmitFrame(const AVFrame*, const FrameMetadata&): the frame
+/// inside holds its own reference, so an encoder that buffers it for lookahead or B-frames
+/// is not depending on the caller keeping theirs.
+struct TimedFrame {
+    Frame frame;
+    FrameMetadata metadata;
 };
 
 /// One plane of pixels the caller owns, with the length that bounds it. A pointer alone

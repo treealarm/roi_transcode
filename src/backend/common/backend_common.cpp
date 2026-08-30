@@ -37,11 +37,11 @@ namespace backend_common {
 
 void apply_shared(AVCodecContext* enc, const EncoderConfig& p)
 {
-    const AVRational fps{p.fps.num, std::max(p.fps.den, 1)};
-    enc->width = p.width;
-    enc->height = p.height;
-    enc->time_base = p.time_base.den > 0
-        ? AVRational{p.time_base.num, p.time_base.den}
+    const AVRational fps{p.input.frame_rate.num, std::max(p.input.frame_rate.den, 1)};
+    enc->width = p.input.width;
+    enc->height = p.input.height;
+    enc->time_base = p.input.time_base.den > 0
+        ? AVRational{p.input.time_base.num, p.input.time_base.den}
         : av_inv_q(fps);
     enc->framerate = fps;
     // Two seconds' worth when nothing was asked for, which is what a player expects to
@@ -207,7 +207,7 @@ Result<SessionPtr> LibavBackend::Configure(const EncoderConfig& config) const
         codec = avcodec_find_encoder(av_id_from_codec(config.codec));
     }
     if (!codec) {
-        return Status::Unavailable(std::string(name) + ": not in this FFmpeg build");
+        return Status::DeviceUnavailable(std::string(name) + ": not in this FFmpeg build");
     }
 
     auto session = std::make_unique<LibavSession>();
@@ -228,7 +228,7 @@ Result<SessionPtr> LibavBackend::Configure(const EncoderConfig& config) const
     }
 
     if (avcodec_open2(session->enc.p, codec, nullptr) < 0) {
-        return Status::Unavailable(std::string(name) + ": would not open");
+        return Status::DeviceUnavailable(std::string(name) + ": would not open");
     }
     return SessionPtr(session.release());
 }

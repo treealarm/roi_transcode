@@ -45,9 +45,6 @@ struct TemporalROIConfig {
     int32_t max_qp_delta_per_frame = 2;
     /// Extrapolate from last motion when past the final sample (within patience). TZ v3: true.
     bool use_track_prediction = true;
-
-    /// Always false -- §13 fields above are implemented. Kept for older call sites.
-    bool unimplemented_requested() const { return false; }
 };
 
 /// TZ v3 §19 -- whether object metadata is written into the bitstream (SEI) and how many
@@ -93,9 +90,6 @@ struct RateControlPolicy {
         return target_bitrate != 0 || max_average_overshoot != 0.0f
             || max_peak_overshoot != 0.0f || recovery_window_ms != 0;
     }
-
-    /// All declared §15 fields are handled by BitrateBudget. Nothing left to refuse.
-    bool unimplemented_requested() const { return false; }
 };
 
 } // namespace sve

@@ -54,7 +54,7 @@ public:
         if (derr < 0
             && !backend_common::open_hw_device(
                 out.hw_device, AV_HWDEVICE_TYPE_QSV, nullptr)) {
-            return Status::Unavailable("no QSV device on this machine");
+            return Status::DeviceUnavailable("no QSV device on this machine");
         }
 
         // The encoder reads mfxFrameSurface1 out of a pool we own, rather than taking NV12
@@ -64,8 +64,8 @@ public:
         // CreateFrame hands surfaces out of -- a factory surface has to come from the pool
         // the encoder will read, or it is just another buffer to copy from.
         if (!backend_common::init_hw_frames(out.hw_device, out.hw_frames, AV_PIX_FMT_QSV,
-                AV_PIX_FMT_NV12, p.width, p.height, 24)) {
-            return Status::Unavailable("QSV device opened but allocates no surfaces");
+                AV_PIX_FMT_NV12, p.input.width, p.input.height, 24)) {
+            return Status::DeviceUnavailable("QSV device opened but allocates no surfaces");
         }
         out.enc.p->pix_fmt = AV_PIX_FMT_QSV;
         out.enc.p->hw_frames_ctx = av_buffer_ref(out.hw_frames.p);

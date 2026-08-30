@@ -61,7 +61,6 @@ void ladder_maps_kinds_to_canonical_deltas()
 void detections_use_ladder_by_default()
 {
     sve::Quality q;
-    q.use_v3_priority_ladder = true;
     q.margin_mode = sve::MarginMode::FixedPixels;
     q.margin_px = 0; // isolate QP from geometry
     q.min_roi_side = 0;
@@ -185,7 +184,6 @@ void v3_temporal_defaults_match_the_spec()
     check_near(t.temporal_smoothing, 0.35, 1e-6, "temporal_smoothing");
     check(t.use_track_prediction, "use_track_prediction");
     check_eq(t.max_qp_delta_per_frame, 2, "max_qp_delta_per_frame");
-    check(!t.unimplemented_requested(), "nothing left unimplemented");
 }
 
 void roi_lag_acceptance_matches_v3_thresholds()

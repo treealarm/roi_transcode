@@ -42,11 +42,11 @@ public:
                 out.hw_device, AV_HWDEVICE_TYPE_VAAPI, "/dev/dri/renderD128")
             && !backend_common::open_hw_device(
                 out.hw_device, AV_HWDEVICE_TYPE_VAAPI, nullptr)) {
-            return Status::Unavailable("no VA-API device on this machine");
+            return Status::DeviceUnavailable("no VA-API device on this machine");
         }
         if (!backend_common::init_hw_frames(out.hw_device, out.hw_frames,
-                AV_PIX_FMT_VAAPI, AV_PIX_FMT_NV12, p.width, p.height, 20)) {
-            return Status::Unavailable("VA-API device opened but allocates no frames");
+                AV_PIX_FMT_VAAPI, AV_PIX_FMT_NV12, p.input.width, p.input.height, 20)) {
+            return Status::DeviceUnavailable("VA-API device opened but allocates no frames");
         }
 
         out.enc.p->pix_fmt = AV_PIX_FMT_VAAPI;

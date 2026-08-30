@@ -321,10 +321,10 @@ Session::Session(const SessionParams& params, PacketHandler* handler)
         static_cast<int>(params.extradata.size()));
 
     EncoderConfig ep;
-    ep.width = params.width;
-    ep.height = params.height;
-    ep.fps = Rational{params.fps_num, std::max(params.fps_den, 1)};
-    ep.time_base =
+    ep.input.width = params.width;
+    ep.input.height = params.height;
+    ep.input.frame_rate = Rational{params.fps_num, std::max(params.fps_den, 1)};
+    ep.input.time_base =
         Rational{params.time_base_num, std::max(params.time_base_den, 1)};
     ep.kind = params.settings.encoder;
     ep.policy = params.settings.policy;

@@ -121,12 +121,6 @@ void RoiEncoder::open_deferred(const EncoderConfig& config)
     }
     // Same rule for settings that exist only as declarations. A caller who asks for a
     // bitrate target and gets neither has been misled.
-    if (config.temporal.unimplemented_requested()) {
-        fail("TemporalROIConfig asked for something that is not implemented");
-    }
-    if (config.rate_control.unimplemented_requested()) {
-        fail("RateControlPolicy asked for something BitrateBudget does not implement");
-    }
 
     std::string errors;
     for (const IEncoderBackend& backend : backend_chain(config.kind)) {
@@ -169,7 +163,7 @@ void RoiEncoder::open_deferred(const EncoderConfig& config)
     // nothing following it the final sample is silently dropped -- one frame
     // short, and the file a frame shorter than the source. MPEG-TS does not
     // care, which is why this only ever showed up in mp4.
-    const AVRational fps{config.fps.num, std::max(config.fps.den, 1)};
+    const AVRational fps{config.input.frame_rate.num, std::max(config.input.frame_rate.den, 1)};
     m_frame_duration = av_rescale_q(1, av_inv_q(fps), session().enc.p->time_base);
     if (m_frame_duration <= 0) {
         m_frame_duration = 1;

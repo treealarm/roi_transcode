@@ -6,6 +6,9 @@
 
 #include "av_raii.h"
 
+#include "sve/codec_parameters.h"
+#include "sve/packet.h"
+
 #include <functional>
 #include <string>
 #include <vector>
@@ -38,11 +41,22 @@ public:
     // `pkt` is in `src_time_base` and is consumed.
     void write_audio(AVPacket* pkt, AVRational src_time_base);
 
+    /// The same as on_packet, for a caller holding the public packet type rather than an
+    /// AVPacket. Costs one copy into an AVPacket the muxer can take; the alternative is
+    /// exposing libav's packet through the public API, which is the thing this library
+    /// spends effort not doing.
+    void write_video(const EncodedPacket& packet);
+
     void begin(AVCodecContext* enc) override;
+    /// The same, for a caller that has the public codec parameters rather than a context.
+    void begin(const CodecParameters& params);
     void on_packet(AVPacket* pkt, AVRational enc_time_base) override;
     void end() override;
 
 private:
+    void open_video_stream();
+    void finish_begin();
+
     std::string m_path;
     std::string m_movflags;
     roiav::FmtOut m_out;
