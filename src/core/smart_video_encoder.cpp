@@ -297,6 +297,28 @@ Result<std::unique_ptr<SmartVideoEncoder>> SmartVideoEncoder::Create(
     ep.gop = config.settings.gop;
     ep.preset = config.settings.preset;
 
+    // §8.2: P010 needs Main10, and a profile that cannot carry the input's depth is
+    // refused here rather than producing a file nothing will play.
+    {
+        const bool ten_bit = config.input.pixel_format == PixelFormat::P010;
+        const CodecProfile profile = config.settings.profile;
+        if (ten_bit && profile != CodecProfile::Auto && profile != CodecProfile::H265Main10) {
+            return Status::InvalidArgument(std::string("P010 input needs the h265-main10 "
+                "profile, not ") + codec_profile_name(profile));
+        }
+        if (!ten_bit && profile == CodecProfile::H265Main10) {
+            return Status::InvalidArgument(
+                "the h265-main10 profile needs ten-bit input; this one is eight");
+        }
+        if (ten_bit && ep.codec == Codec::H264) {
+            // §15.3's ten-bit profile is HEVC. H.264 has a ten-bit profile of its own, but
+            // nothing in this specification asks for it, and claiming it would be inventing
+            // a contract.
+            return Status::InvalidArgument("ten-bit input is supported for H.265 only");
+        }
+        ep.profile = profile;
+    }
+
     if (ep.codec == Codec::SameAsSource) {
         // No source to follow here: this entry point is handed frames, not a file. A caller
         // transcoding a clip resolves it against the input's own codec before Create.

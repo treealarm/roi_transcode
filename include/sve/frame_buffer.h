@@ -45,6 +45,14 @@ enum class PixelFormat : int32_t {
     YUV444P,
     /// Luma only.
     GRAY8,
+    /// Ten bits a sample, laid out like NV12: a 16-bit luma plane and a 16-bit interleaved
+    /// chroma plane, with the ten bits in the high end of each sample. §17 makes it a P0
+    /// input format, and §15.3 the 10-bit profile.
+    ///
+    /// What an encoder takes is not always this: libx265 accepts yuv420p10le and not P010,
+    /// while Quick Sync accepts P010 and not yuv420p10le. The conversion is the backend's,
+    /// counted like any other in frames_converted.
+    P010,
     /// The pixels live on the device and are not addressable from the CPU. plane() is
     /// empty for these, which is the answer rather than an error.
     HardwareSurface,

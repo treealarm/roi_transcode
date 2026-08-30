@@ -47,6 +47,16 @@ struct EncoderCapabilities {
     /// BitrateBudget loop.
     bool native_bitrate = false;
 
+    /// HEVC Main10 -- ten bits a sample. Asked of the encoder rather than assumed: whether
+    /// libx265 was built with a ten-bit path, and whether the driver exposes one, are
+    /// properties of the machine this runs on. §48's AT-009 turns on this answer, and a
+    /// SKIP without it would be a SKIP without evidence.
+    bool main10 = false;
+
+    /// Takes AV_PIX_FMT_P010 directly. False does not mean ten bits are unavailable -- it
+    /// means the frame is converted first, which is why this is separate from main10.
+    bool p010_input = false;
+
     /// Upper bound on regions the backend accepts. 0 means "no limit it can name".
     /// Requests above it are truncated strongest-first and the loss is reported.
     /// Ignored for truncation when qp_map is true: the map is the interface then.

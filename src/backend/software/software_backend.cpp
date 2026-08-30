@@ -50,6 +50,14 @@ public:
         // is unstable on our stack, so HEVC stays on CRF/CQP + outer BitrateBudget.
         c.native_bitrate = (codec == Codec::H264);
         c.max_roi_regions = 0;  // no limit worth naming
+
+        // §15.3's profile is HEVC, so ten bits are only claimed for H.265 even where the
+        // H.264 encoder would take them.
+        if (codec == Codec::H265) {
+            const auto ten = backend_common::query_ten_bit("libx265");
+            c.main10 = ten.main10;
+            c.p010_input = ten.p010_input;
+        }
         return c;
     }
 
@@ -60,8 +68,20 @@ public:
 
     Status configure_context(LibavSession& out, const EncoderConfig& p) const override
     {
-        out.enc.p->pix_fmt = AV_PIX_FMT_YUV420P;
-        out.sw_pix = AV_PIX_FMT_YUV420P;
+        if (p.input.pixel_format == PixelFormat::P010) {
+            const auto ten = backend_common::query_ten_bit(codec_name(p.codec));
+            if (!ten.main10) {
+                return Status::Unsupported(std::string(codec_name(p.codec))
+                    + " in this build has no ten-bit path");
+            }
+            // libx265 takes yuv420p10le and not P010, so the frame is converted on the way
+            // in -- counted in frames_converted like any other conversion.
+            out.enc.p->pix_fmt = static_cast<AVPixelFormat>(ten.encode_format);
+            out.sw_pix = static_cast<AVPixelFormat>(ten.encode_format);
+        } else {
+            out.enc.p->pix_fmt = AV_PIX_FMT_YUV420P;
+            out.sw_pix = AV_PIX_FMT_YUV420P;
+        }
         av_opt_set(out.enc.p->priv_data, "preset", libx26x_preset(p.preset), 0);
         av_opt_set(out.enc.p->priv_data, "aq-mode", "1", 0);
         // Accept AV_FRAME_DATA_SEI_UNREGISTERED as user-data-unregistered SEI (§19).

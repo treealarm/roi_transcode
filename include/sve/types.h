@@ -75,6 +75,22 @@ enum class Codec {
     SameAsSource,
 };
 
+/// What the bitstream declares itself to be -- TZ v3.4 §8.2.
+///
+/// Auto picks from the pixel format: ten bits in means Main10, eight means Main. Naming one
+/// explicitly is how a caller says the pairing matters to them, and a pairing that cannot
+/// work is refused at Create rather than discovered in a file nothing will play.
+enum class CodecProfile {
+    Auto,
+    H264Baseline,
+    H264Main,
+    H264High,
+    H265Main,
+    H265Main10,
+};
+
+const char* codec_profile_name(CodecProfile p);
+
 enum class InputCodec {
     // Tightly packed planes in the pixel format named by the frame.
     Raw,
@@ -232,6 +248,8 @@ struct Settings {
     // Keyframe interval in frames; 0 means two seconds.
     int32_t gop = 0;
     Preset preset = Preset::Balanced;
+    /// §8.2. Auto follows the input's bit depth.
+    CodecProfile profile = CodecProfile::Auto;
     Quality quality;
 
     /// §14. Only OBJECT_FIRST is implemented; the others are refused at open rather than

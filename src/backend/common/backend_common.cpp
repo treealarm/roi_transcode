@@ -35,8 +35,66 @@ LibavSession& libav(BackendSession& session)
 
 namespace backend_common {
 
+TenBitSupport query_ten_bit(const char* encoder_name)
+{
+    TenBitSupport out;
+    const AVCodec* codec = avcodec_find_encoder_by_name(encoder_name);
+    if (codec == nullptr) {
+        return out;
+    }
+    // A context is needed because in this libavcodec the answer can depend on one -- a
+    // hardware encoder reports what its device can do, not what the codec can in principle.
+    AVCodecContext* probe = avcodec_alloc_context3(codec);
+    if (probe == nullptr) {
+        return out;
+    }
+    const void* configs = nullptr;
+    int count = 0;
+    const int err = avcodec_get_supported_config(
+        probe, codec, AV_CODEC_CONFIG_PIX_FORMAT, 0, &configs, &count);
+    if (err >= 0 && configs != nullptr) {
+        const auto* formats = static_cast<const AVPixelFormat*>(configs);
+        for (int i = 0; i < count; ++i) {
+            const AVPixelFormat f = formats[i];
+            if (f == AV_PIX_FMT_P010) {
+                out.main10 = true;
+                out.p010_input = true;
+                out.encode_format = f;
+                break;
+            }
+            if (f == AV_PIX_FMT_YUV420P10LE && !out.main10) {
+                // Kept looking: P010 is preferred when both are offered, because taking it
+                // directly is one conversion fewer.
+                out.main10 = true;
+                out.encode_format = f;
+            }
+        }
+    }
+    avcodec_free_context(&probe);
+    return out;
+}
+
+
+/// The profile in libavcodec's numbering. Auto is left unset, so the encoder picks from the
+/// pixel format -- which is what §8.2 says Auto means.
+int av_profile_of(CodecProfile profile)
+{
+    switch (profile) {
+    case CodecProfile::H264Baseline: return AV_PROFILE_H264_BASELINE;
+    case CodecProfile::H264Main:     return AV_PROFILE_H264_MAIN;
+    case CodecProfile::H264High:     return AV_PROFILE_H264_HIGH;
+    case CodecProfile::H265Main:     return AV_PROFILE_HEVC_MAIN;
+    case CodecProfile::H265Main10:   return AV_PROFILE_HEVC_MAIN_10;
+    case CodecProfile::Auto:         break;
+    }
+    return AV_PROFILE_UNKNOWN;
+}
+
 void apply_shared(AVCodecContext* enc, const EncoderConfig& p)
 {
+    if (const int profile = av_profile_of(p.profile); profile != AV_PROFILE_UNKNOWN) {
+        enc->profile = profile;
+    }
     const AVRational fps{p.input.frame_rate.num, std::max(p.input.frame_rate.den, 1)};
     enc->width = p.input.width;
     enc->height = p.input.height;

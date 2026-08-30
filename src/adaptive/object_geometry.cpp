@@ -179,6 +179,19 @@ void dilate_mask(uint8_t* mask, int32_t width, int32_t height, int32_t radius)
     }
 }
 
+const char* codec_profile_name(CodecProfile p)
+{
+    switch (p) {
+    case CodecProfile::Auto:         return "auto";
+    case CodecProfile::H264Baseline: return "h264-baseline";
+    case CodecProfile::H264Main:     return "h264-main";
+    case CodecProfile::H264High:     return "h264-high";
+    case CodecProfile::H265Main:     return "h265-main";
+    case CodecProfile::H265Main10:   return "h265-main10";
+    }
+    return "?";
+}
+
 const char* fallback_policy_name(FallbackPolicy p)
 {
     switch (p) {

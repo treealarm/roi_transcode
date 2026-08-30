@@ -19,6 +19,21 @@ namespace sve {
 
 namespace backend_common {
 
+/// What an encoder will actually take, asked of it rather than assumed.
+///
+/// §48's AT-009 allows a SKIP for a backend without ten-bit support, but only with
+/// capability evidence -- so the answer has to come from the encoder, not from a table
+/// somebody wrote down. Whether libx265 was built with a ten-bit path, and whether the
+/// driver exposes one, are properties of the machine.
+struct TenBitSupport {
+    bool main10 = false;      ///< accepts some ten-bit pixel format
+    bool p010_input = false;  ///< accepts AV_PIX_FMT_P010 without conversion
+    int encode_format = -1;   ///< AV_PIX_FMT_NONE when main10 is false
+};
+
+TenBitSupport query_ten_bit(const char* encoder_name);
+
+
 /// Fills the parts of an AVCodecContext that are the same whoever encodes.
 void apply_shared(AVCodecContext* enc, const EncoderConfig& p);
 

@@ -170,6 +170,13 @@ if(SVE_BUILD_TESTS)
     target_compile_options(push_encoder_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME push_encoder COMMAND push_encoder_test)
 
+    # AT-009 from §48. Runs where a backend reports main10 and skips with the encoder's own
+    # words where it does not, which is the capability evidence §50 asks a SKIP to carry.
+    add_executable(ten_bit_test tests/unit/ten_bit_test.cpp)
+    target_link_libraries(ten_bit_test PRIVATE sve)
+    target_compile_options(ten_bit_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME ten_bit COMMAND ten_bit_test)
+
     add_executable(public_api_test tests/unit/public_api_test.cpp)
     target_link_libraries(public_api_test PRIVATE sve)
     target_compile_options(public_api_test PRIVATE ${SVE_WARNINGS})

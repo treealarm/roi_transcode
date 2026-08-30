@@ -21,6 +21,7 @@ const char* pixel_format_name(PixelFormat f)
     case PixelFormat::YUV422P:         return "YUV422P";
     case PixelFormat::YUV444P:         return "YUV444P";
     case PixelFormat::GRAY8:           return "GRAY8";
+    case PixelFormat::P010:            return "P010";
     case PixelFormat::HardwareSurface: return "HardwareSurface";
     case PixelFormat::Unknown:         break;
     }
@@ -35,6 +36,7 @@ int to_av_pix_fmt(PixelFormat f)
     case PixelFormat::YUV422P: return AV_PIX_FMT_YUV422P;
     case PixelFormat::YUV444P: return AV_PIX_FMT_YUV444P;
     case PixelFormat::GRAY8:   return AV_PIX_FMT_GRAY8;
+    case PixelFormat::P010:    return AV_PIX_FMT_P010;
     default:                   return AV_PIX_FMT_NONE;
     }
 }
@@ -47,6 +49,7 @@ PixelFormat from_av_pix_fmt(int f)
     case AV_PIX_FMT_YUV422P: return PixelFormat::YUV422P;
     case AV_PIX_FMT_YUV444P: return PixelFormat::YUV444P;
     case AV_PIX_FMT_GRAY8:   return PixelFormat::GRAY8;
+    case AV_PIX_FMT_P010:    return PixelFormat::P010;
     // A frame the CPU cannot address: QSV, VAAPI, CUDA and the rest. They share one
     // answer here because what a caller can do with them is the same -- nothing directly.
     case AV_PIX_FMT_QSV:

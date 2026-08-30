@@ -31,6 +31,11 @@ public:
         c.roi_rectangles = true;
         c.runtime_roi_update = true;
         c.max_roi_regions = intel_max_roi_regions(codec);
+        if (codec == Codec::H265) {
+            const auto ten = backend_common::query_ten_bit("hevc_qsv");
+            c.main10 = ten.main10;
+            c.p010_input = ten.p010_input;
+        }
         return c;
     }
 
@@ -63,13 +68,21 @@ public:
         // instead of happening a layer down where nothing counts it. And the pool is what
         // CreateFrame hands surfaces out of -- a factory surface has to come from the pool
         // the encoder will read, or it is just another buffer to copy from.
+        // The surface pool's own format follows the input's depth: eight bits ride in NV12,
+        // ten in P010, and Quick Sync takes both directly.
+        const bool ten_bit = p.input.pixel_format == PixelFormat::P010;
+        const AVPixelFormat surface = ten_bit ? AV_PIX_FMT_P010 : AV_PIX_FMT_NV12;
+        if (ten_bit && !backend_common::query_ten_bit(codec_name(p.codec)).main10) {
+            return Status::Unsupported(
+                std::string(codec_name(p.codec)) + " on this device has no ten-bit path");
+        }
         if (!backend_common::init_hw_frames(out.hw_device, out.hw_frames, AV_PIX_FMT_QSV,
-                AV_PIX_FMT_NV12, p.input.width, p.input.height, 24)) {
+                surface, p.input.width, p.input.height, 24)) {
             return Status::DeviceUnavailable("QSV device opened but allocates no surfaces");
         }
         out.enc.p->pix_fmt = AV_PIX_FMT_QSV;
         out.enc.p->hw_frames_ctx = av_buffer_ref(out.hw_frames.p);
-        out.sw_pix = AV_PIX_FMT_NV12;
+        out.sw_pix = surface;
         out.hw_upload = true;
 
         // Alder Lake encodes through EncSliceLP only: VDENC + CQP. ICQ and global_quality
