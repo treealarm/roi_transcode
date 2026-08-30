@@ -5,6 +5,7 @@
 // Lake and is commented where it happens; none of it follows from the documentation.
 
 #include "backend/common/backend_common.h"
+#include "backend/common/intel_roi_limit.h"
 #include "preset.h"
 
 #include <string>
@@ -22,24 +23,14 @@ class OneVplBackend final : public LibavBackend {
 public:
     Encoder kind() const override { return Encoder::Qsv; }
 
-    EncoderCapabilities GetCapabilities(Codec) const override
+    EncoderCapabilities GetCapabilities(Codec codec) const override
     {
         EncoderCapabilities c;
         c.h264 = true;
         c.h265 = true;
         c.roi_rectangles = true;
         c.runtime_roi_update = true;
-        // Eight, not the 256 mfxExtEncoderROI can carry: that number is the capacity of the
-        // struct, and the struct is not what runs out. On Linux oneVPL encodes through VA-API on
-        // the same iHD driver the VA-API backend uses, and iHD copies the regions into a
-        // fixed-size local array -- so the limit that binds is the driver's, and it is the eight
-        // named in vaapi_backend.cpp beside the identical constant.
-        //
-        // Exceeding it is not a dropped region here, the way it is on the VA-API path where
-        // libavcodec trims the list. libmfx-gen forwards all of them, iHD overruns its array, and
-        // the process dies inside vaEndPicture on __stack_chk_fail -- a crash with no bad frame
-        // and no error status, in a thread that belongs to the runtime rather than to us.
-        c.max_roi_regions = 8;
+        c.max_roi_regions = intel_max_roi_regions(codec);
         return c;
     }
 

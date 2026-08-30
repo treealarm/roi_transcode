@@ -1,0 +1,16 @@
+{
+  "background_qp_delta": 20,
+  "hold_sec": 20,
+  "kinds": {
+    "plate": { "qp_delta": -8, "pad_norm": 0.01 }
+  },
+  "_why": "Six well-separated regions, which is more than the Intel driver takes for H.264 (four) and not more than it takes for H.265 (eight). The point is the boundary between those two: a ROI set of this size used to abort the process inside iHD on the QSV H.264 path, because both backends declared one limit for both codecs.",
+  "samples": [
+    { "t": 0, "kind": "plate", "bbox_x": 0.05, "bbox_y": 0.08, "bbox_w": 0.16, "bbox_h": 0.12 },
+    { "t": 0, "kind": "plate", "bbox_x": 0.42, "bbox_y": 0.08, "bbox_w": 0.16, "bbox_h": 0.12 },
+    { "t": 0, "kind": "plate", "bbox_x": 0.78, "bbox_y": 0.08, "bbox_w": 0.16, "bbox_h": 0.12 },
+    { "t": 0, "kind": "plate", "bbox_x": 0.05, "bbox_y": 0.72, "bbox_w": 0.16, "bbox_h": 0.12 },
+    { "t": 0, "kind": "plate", "bbox_x": 0.42, "bbox_y": 0.72, "bbox_w": 0.16, "bbox_h": 0.12 },
+    { "t": 0, "kind": "plate", "bbox_x": 0.78, "bbox_y": 0.72, "bbox_w": 0.16, "bbox_h": 0.12 }
+  ]
+}

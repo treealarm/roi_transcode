@@ -5,6 +5,7 @@
 // (see the runtime image's libmfx-gen dependency).
 
 #include "backend/common/backend_common.h"
+#include "backend/common/intel_roi_limit.h"
 
 extern "C" {
 #include <libavutil/hwcontext.h>
@@ -19,17 +20,14 @@ class VaapiBackend final : public LibavBackend {
 public:
     Encoder kind() const override { return Encoder::Vaapi; }
 
-    EncoderCapabilities GetCapabilities(Codec) const override
+    EncoderCapabilities GetCapabilities(Codec codec) const override
     {
         EncoderCapabilities c;
         c.h264 = true;
         c.h265 = true;
         c.roi_rectangles = true;
         c.runtime_roi_update = true;
-        // Deliberately conservative. The VA-API limit is the driver's, not the API's, and
-        // there is no query for it that works across drivers -- so this is the number the
-        // caller truncates to rather than a number iHD promised.
-        c.max_roi_regions = 8; // iHD accepts eight; claiming 32 lets libavcodec drop the rest
+        c.max_roi_regions = intel_max_roi_regions(codec);
         return c;
     }
 

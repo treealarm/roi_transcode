@@ -166,6 +166,7 @@ Report transcode_file(const std::string& input_path,
     roiav::Frame dec_frame;
     roiav::Packet ipkt;
     bool logged_roi = false;
+    bool logged_roi_dropped = false;
     int64_t frames = 0;
     int64_t dropped = 0;
     std::vector<RoiLagSample> lag_samples;
@@ -193,6 +194,7 @@ Report transcode_file(const std::string& input_path,
         FrameRoiPipelineOutput roi_out = pipeline.process(pipeline_in);
         auto& rects = roi_out.rects;
         dropped += roi_out.regions_dropped;
+        warn_roi_regions_dropped_once(dropped, caps, ep.codec, logged_roi_dropped);
         lag_samples.insert(lag_samples.end(), roi_out.lag_samples.begin(), roi_out.lag_samples.end());
 
         if (!logged_roi) {

@@ -298,6 +298,34 @@ if [[ -e /dev/dri/renderD128 ]]; then
 
         step "the ROI mechanism does what it claims (QSV, CQP, H.264)"
         ENC=auto CODEC=h264 mechanism_checks qsv_h264 yes
+
+        # The iHD driver takes four ROI regions for H.264 and eight for H.265. Both Intel
+        # backends used to declare eight for both, and on the oneVPL path the surplus was
+        # forwarded rather than trimmed -- iHD then overran a fixed-size array and the
+        # process died inside vaEndPicture with no error status anywhere.
+        #
+        # This asserts the contract rather than the crash: the crash needs a region layout
+        # this synthetic one does not reproduce, but the limits and the fact that hitting
+        # them is said out loud are what stay true on every machine. §50 is the reason the
+        # guard line is asserted too -- a truncation nobody can observe is a silent fallback.
+        step "the Intel ROI region limit is per codec, and hitting it is audible"
+        for _codec in h264 h265; do
+            _log="${WORK}/manyroi_${_codec}.log"
+            if "${BUILD}/roi-transcode" --in "${SRC}" --roi "${ROOT}/testdata/synth_manyroi.json" \
+                --out "${WORK}/manyroi_${_codec}.mp4" --encoder qsv --codec "${_codec}" \
+                --crf 28 >"${_log}" 2>&1; then
+                _want=4; [[ "${_codec}" == h265 ]] && _want=8
+                _got=$(grep -oE 'ROI: [0-9]+ rects' "${_log}" | head -1 | grep -oE '[0-9]+')
+                assert_eq "qsv ${_codec} truncates to the driver's limit" "${_got:-none}" "${_want}"
+                if grep -Eq "guard: [0-9]+ roi region\(s\) dropped; ${_codec} backend takes ${_want}" "${_log}"; then
+                    pass "qsv ${_codec} says how many regions it dropped"
+                else
+                    fail "qsv ${_codec} dropped regions without saying so"
+                fi
+            else
+                fail "qsv ${_codec} failed on a ROI set larger than the driver's limit"
+            fi
+        done
     else
         printf '  skip  Intel runtime not fetched (integration/scripts/fetch-intel-qsv.sh)\n'
     fi
@@ -491,6 +519,20 @@ PY
         fi
     else
         fail "real-clip lag probe failed"
+    fi
+
+    # The clip that actually reproduced the iHD abort. Its regions are tracked vehicles --
+    # small, close together, and nothing synthetic here has provoked the driver the same
+    # way -- so this is the only place the crash itself is under test rather than the
+    # limit that avoids it. Optional, because the clip is not in the repository.
+    if [[ -e /dev/dri/renderD128 ]] && source "${ROOT}/integration/scripts/qsv-env.sh" 2>/dev/null; then
+        if "${BUILD}/roi-transcode" --in "${REAL_LAG_CLIP}" --roi "${REAL_LAG_ROI}" \
+            --out "${WORK}/real_qsv_h264.mp4" --encoder qsv --codec h264 --crf 28 \
+            >"${WORK}/real_qsv_h264.log" 2>&1; then
+            pass "qsv h264 survives the real clip's region set"
+        else
+            fail "qsv h264 died on the real clip (rc=$?, see ${WORK}/real_qsv_h264.log)"
+        fi
     fi
 else
     printf '  skip  real clip fixtures missing (set REAL_LAG_CLIP/REAL_LAG_ROI or run integration/scripts/prepare-real-lag-fixture.sh)\n'

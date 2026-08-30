@@ -95,6 +95,7 @@ struct Session::Impl : PacketSink {
     std::vector<RoiLagSample> lag_samples;
     bool finished = false;
     bool sei_unsupported_logged = false;
+    bool roi_dropped_logged = false;
     // Submitted-but-not-yet-decoded regions, keyed by the pts they arrived with.
     std::map<int64_t, HeldRegions> pending;
 
@@ -235,6 +236,8 @@ struct Session::Impl : PacketSink {
             int32_t dropped = 0;
             auto rects = rects_from_qp_map(grid, budget, &dropped);
             report.regions_dropped += dropped;
+            warn_roi_regions_dropped_once(report.regions_dropped, encoder.capabilities(),
+                out_codec, roi_dropped_logged);
             return rects;
         }
 
@@ -253,6 +256,8 @@ struct Session::Impl : PacketSink {
         FrameRoiPipeline pipeline(bitrate, box_smooth, qp_slew, builder);
         FrameRoiPipelineOutput out = pipeline.process(pipeline_in);
         report.regions_dropped += out.regions_dropped;
+        warn_roi_regions_dropped_once(
+            report.regions_dropped, encoder.capabilities(), out_codec, roi_dropped_logged);
         lag_samples.insert(lag_samples.end(), out.lag_samples.begin(), out.lag_samples.end());
         return out.rects;
     }
