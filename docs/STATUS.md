@@ -1,10 +1,13 @@
 # Текущий статус (handoff)
 
-Дата среза: 2026-08-28.
+Дата среза: 2026-08-30. **Сверка идёт против ТЗ 3.4**
+([`smart-video-encoder_34.md`](smart-video-encoder_34.md)), не против 3.1.
 
-Коротко: библиотечный трек v3 в части ROI/temporal/rate-control существенно продвинут;
-последние изменения закрывали наблюдаемость fallback для CPU H.265 и observability по
-ROI lag (§14). Полный `integration/scripts/check.sh` на этом состоянии проходит.
+Коротко: библиотечный трек в части ROI/temporal/rate-control существенно продвинут — то, что
+ниже перечислено как сделанное, сделано и проверяется `integration/scripts/check.sh`. Но
+3.4 переписала публичный API (§8.3–8.13), и вот этого в коде нет вовсе: вход по-прежнему
+`Session` и `transcode_file`. Полный разбор расхождений —
+[`plan-v2.md`](plan-v2.md), раздел «Изменения ТЗ v3.1 → v3.4».
 
 ## Что уже сделано (по коду)
 
@@ -45,21 +48,41 @@ ROI lag (§14). Полный `integration/scripts/check.sh` на этом сос
 ## На какой мы стадии сейчас
 
 - По порядку из `plan-v2.md`: практически закрыты этапы 1–4 на текущем уровне реализации.
-- Основные незакрытые направления:
-  - NVENC полноценный ROI path.
-  - Rockchip MPP backend.
-  - HW-native bitrate path с сохранением ROI semantics.
-  - Датасеты/quality stack уровня приёмки ТЗ (VMAF/task-aware/regression framework).
+- Сверх того открылся новый и самый крупный фронт — публичный API 3.4 (§8.3–8.13).
+- Прочие незакрытые направления: NVENC полноценный ROI path, Rockchip MPP backend,
+  HW-native bitrate path с сохранением ROI semantics, датасеты/quality stack уровня
+  приёмки ТЗ (VMAF/task-aware/regression framework).
 
-## Что брать следующим агентом (рекомендуемый порядок)
+## Что брать следующим агентом (принятый порядок)
 
-1. **CPU H.265 контракт (зафиксировать и держать до отдельного снятия):**
-   `target_bitrate` на CPU H.265 всегда даунгрейдится в CRF/CQP, `sei=false`,
-   guard обязан быть наблюдаем в логах и telemetry (`Report`/gRPC/job event).
-2. **Стабилизация H.265 roadmap:** отдельным срезом доказуемо вернуть SEI/native bitrate
-   на CPU H.265 только с regression-покрытием (без тихой смены поведения).
-3. **HW-native bitrate path:** QSV/VA-API/NVENC native bitrate с сохранением ROI semantics.
-4. **Датасеты/quality stack уровня приёмки ТЗ:** VMAF/task-aware/regression framework.
+Публичный API §8 идёт срезами; каждый срез — один коммит, проверяемый до пуша.
+
+1. **Переименование в `sve`** — `namespace smartvideo` → `sve`, `include/smartvideo/` →
+   `include/sve/`, таргет `sve`. Механически, ничего кроме имён. Дёшево: `smartvideo::` за
+   пределами `roi_transcode/` не используется нигде.
+2. **Фундаментальные типы (§8.3, 8.5–8.7, 8.10):** `InputVideoFormat`, `MediaTimestamp`,
+   shared immutable `PacketBuffer`, владеющие `Frame`/`TimedFrame`, `RawFrameView`.
+   FFmpeg допускается ровно в одном заголовке — `frame.h`; остальные остаются чистыми, и
+   `public_headers_isolated` продолжает это охранять.
+3. **`SmartVideoEncoder` и lifecycle (§8.1, 8.13, §25):** submit/receive, `EncoderState`,
+   `Reconfigure`, `RequestKeyFrame`, `EncoderStatistics`; `StatusCode` дополняется кодами
+   §25. Садится поверх существующих `IEncoderBackend` и `frame_roi_pipeline` — нижний слой
+   уже соответствует §21.
+4. **`BackendSelection` и `FallbackPolicy` (§8.4, §22)** + инжектируемый log sink: §50
+   запрещает silent fallback, а логирование сейчас идёт прямым `fprintf(stderr)`.
+5. **Push facade и снятие `Session` (§8.8–8.9):** `PushVideoEncoder` с типизированными
+   событиями; `Session` — тонкий адаптер, потом удаляется. `transcode_file` остаётся
+   примером приложения (§52).
+6. **`CodecParameters` и фабрики (§8.11–8.12).**
+
+Потом — долги 3.2/3.3, в этом порядке: CBOR + CRC-32C и лимит 16 KiB в SEI (§19.2),
+sidecar NDJSON (§19.3), `sve-capabilities` CLI (§23), 10-bit P010/Main10 и AT-009,
+GitLab CI (§44), Python wrapper (§58 — отложен осознанно, но не снят: он в DoD).
+
+**Контракт CPU H.265 держится до отдельного снятия:** `target_bitrate` всегда
+даунгрейдится в CRF/CQP, `sei=false`, guard обязан быть наблюдаем в логах и телеметрии
+(`Report` / gRPC / job event). Вернуть SEI и native bitrate можно только отдельным срезом с
+regression-покрытием, не тихой сменой поведения.
 
 ## Быстрые команды проверки
 

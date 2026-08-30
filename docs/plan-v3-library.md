@@ -1,4 +1,4 @@
-# Library work toward TZ v3 (implementation notes)
+# Library work toward TZ v3.4 (implementation notes)
 
 Companion to the Cursor plan «План v3 библиотеки». Does **not** replace
 [`plan-v2.md`](plan-v2.md): baton for that file is with Danil (see
@@ -79,6 +79,24 @@ Vendored into `video_a/proto/roi_transcode.proto`. ta_vms archive callers adjust
 - Soft backend `libx265`: `capabilities.sei=false` (guarded off due to unstable
   ROI+SEI path on current stack).
 - Unit: `sei_payload_test`. HW SEI and sidecar file writer still open.
+
+## Slice G — public API rewrite (§8.3–8.13) — open
+
+3.4 rewrote section 8, and none of it is in the tree yet. The delta and the decisions
+behind it are in [`plan-v2.md`](plan-v2.md), section «Изменения ТЗ v3.1 → v3.4»; the
+running order is in [`STATUS.md`](STATUS.md). Two decisions bind the slices below:
+
+- `SmartVideoEncoder` becomes the public layer. `Session` is rewritten as a thin adapter
+  over it and then removed; `transcode_file` stays as the §52 example application.
+- Namespace and target become `sve` — §23 links its CLI against a library of that name, and
+  `smartvideo::` is used nowhere outside `roi_transcode/`, so the rename is contained.
+
+The FFmpeg boundary is the one invariant not to lose. Public headers carry no FFmpeg type
+today, guarded by `public_headers_isolated` / `public_headers_selfcontained`. §8.5 and §8.11
+need `AVFrame` and extradata, so FFmpeg gets exactly one header (`frame.h`) rather than
+spreading. §8.3's own `PixelFormat`/`Rational` — rather than §8.2's `AVPixelFormat`/
+`AVRational` — point the same way; the contradiction between those two subsections is an
+open question for the customer.
 
 ## Current explicit contract (CPU H.265)
 
