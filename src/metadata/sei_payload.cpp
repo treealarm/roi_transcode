@@ -1,8 +1,11 @@
 #include "sve/metadata.h"
+
+#include "cbor.h"
 #include "sve/types.h"
 
 #include <algorithm>
-#include <cstring>
+#include <cmath>
+#include <cstddef>
 
 namespace sve {
 
@@ -12,109 +15,124 @@ namespace {
 constexpr uint8_t kUuid[16] = {
     's', 'v', 'e', '-', 'r', 'o', 'i', 'm', 'e', 't', 'a', 0, 0, 0, 1};
 
-constexpr uint16_t kVersion = 1;
-constexpr char kMagic[4] = {'S', 'V', 'E', '1'};
+/// Bumped only by an incompatible change. §19.2 requires a parser to refuse a version it
+/// does not know rather than read what it can of it, so this is checked before anything
+/// else in the payload.
+constexpr uint64_t kVersion = 1;
 
-// IEEE CRC-32 (reflected), poly 0xEDB88320.
-uint32_t crc32(std::span<const uint8_t> data)
+/// §19.2: a frame's whole SEI payload stays under 16 KiB. Above it, objects are dropped
+/// from the least important upward, and the fact is reported to the caller.
+constexpr std::size_t kMaxPayloadBytes = 16 * 1024;
+
+/// CRC-32C (Castagnoli), polynomial 0x1EDC6F41 in the reflected form 0x82F63B78 that a
+/// table-free implementation uses. §19.2 names this one specifically, and it is not the
+/// CRC-32 of zip and PNG that this payload used to carry.
+uint32_t crc32c(std::span<const uint8_t> data)
 {
     uint32_t c = 0xFFFFFFFFu;
-    for (uint8_t b : data) {
+    for (const uint8_t b : data) {
         c ^= b;
         for (int i = 0; i < 8; ++i) {
-            const uint32_t mask = -(c & 1u);
-            c = (c >> 1) ^ (0xEDB88320u & mask);
+            const uint32_t mask = static_cast<uint32_t>(-static_cast<int32_t>(c & 1u));
+            c = (c >> 1) ^ (0x82F63B78u & mask);
         }
     }
     return ~c;
 }
 
-void put_u16(std::vector<uint8_t>& out, uint16_t v)
+/// Geometry and confidence travel as scaled integers rather than floats.
+///
+/// CBOR has three float widths and choosing between them is the encoder's business, so two
+/// encoders that choose differently produce payloads that differ without meaning to. This
+/// payload is checksummed, which turns "differs without meaning to" into a rejected frame.
+/// A normalised coordinate to four decimal places is finer than any block grid can act on.
+constexpr float kGeometryScale = 10000.0f;
+constexpr float kConfidenceScale = 1000.0f;
+
+int64_t scaled(float value, float scale)
 {
-    out.push_back(static_cast<uint8_t>(v));
-    out.push_back(static_cast<uint8_t>(v >> 8));
+    return static_cast<int64_t>(std::lround(value * scale));
 }
 
-void put_u32(std::vector<uint8_t>& out, uint32_t v)
+/// One object, as a fixed-order CBOR array.
+///
+/// An array rather than a map: the keys would be the larger half of the payload, and §19.2
+/// caps what a frame may spend. The order is the schema, and `version` is what allows it to
+/// change.
+///
+/// No mask data, by §19.2 -- only whether the object had one.
+void put_object(std::vector<uint8_t>& out, const SeiObject& o)
 {
-    out.push_back(static_cast<uint8_t>(v));
-    out.push_back(static_cast<uint8_t>(v >> 8));
-    out.push_back(static_cast<uint8_t>(v >> 16));
-    out.push_back(static_cast<uint8_t>(v >> 24));
-}
-
-void put_u64(std::vector<uint8_t>& out, uint64_t v)
-{
-    for (int i = 0; i < 8; ++i) {
-        out.push_back(static_cast<uint8_t>(v >> (8 * i)));
+    cbor::put_array(out, 9);
+    cbor::put_uint(out, o.track_id);
+    cbor::put_int(out, scaled(o.x, kGeometryScale));
+    cbor::put_int(out, scaled(o.y, kGeometryScale));
+    cbor::put_int(out, scaled(o.width, kGeometryScale));
+    cbor::put_int(out, scaled(o.height, kGeometryScale));
+    cbor::put_int(out, scaled(o.confidence, kConfidenceScale));
+    cbor::put_uint(out, static_cast<uint64_t>(o.priority));
+    cbor::put_int(out, o.has_desired_qp_delta ? o.desired_qp_delta : 0);
+    std::string name = o.class_name;
+    if (name.size() > 32) {
+        name.resize(32);
     }
+    cbor::put_text(out, name);
 }
 
-void put_i64(std::vector<uint8_t>& out, int64_t v)
+bool read_object(cbor::Reader& r, SeiObject& o)
 {
-    put_u64(out, static_cast<uint64_t>(v));
-}
-
-void put_f32(std::vector<uint8_t>& out, float v)
-{
-    uint32_t bits = 0;
-    static_assert(sizeof(float) == 4);
-    std::memcpy(&bits, &v, 4);
-    put_u32(out, bits);
-}
-
-bool read_u16(std::span<const uint8_t>& in, uint16_t& v)
-{
-    if (in.size() < 2) {
+    uint64_t fields = 0;
+    if (!r.array(fields) || fields < 9) {
         return false;
     }
-    v = static_cast<uint16_t>(in[0]) | (static_cast<uint16_t>(in[1]) << 8);
-    in = in.subspan(2);
+    int64_t x = 0, y = 0, w = 0, h = 0, conf = 0, qp = 0;
+    uint64_t priority = 0;
+    if (!r.uint(o.track_id) || !r.integer(x) || !r.integer(y) || !r.integer(w)
+        || !r.integer(h) || !r.integer(conf) || !r.uint(priority) || !r.integer(qp)
+        || !r.text(o.class_name)) {
+        return false;
+    }
+    o.x = static_cast<float>(x) / kGeometryScale;
+    o.y = static_cast<float>(y) / kGeometryScale;
+    o.width = static_cast<float>(w) / kGeometryScale;
+    o.height = static_cast<float>(h) / kGeometryScale;
+    o.confidence = static_cast<float>(conf) / kConfidenceScale;
+    o.priority = static_cast<ObjectPriority>(priority);
+    o.desired_qp_delta = static_cast<int32_t>(qp);
+    o.has_desired_qp_delta = qp != 0;
+    // A newer writer may have added fields to the end. Skipping them keeps this reader
+    // working against it, which is the half of versioning that is not the version number.
+    for (uint64_t i = 9; i < fields; ++i) {
+        if (!r.skip()) {
+            return false;
+        }
+    }
     return true;
 }
 
-bool read_u32(std::span<const uint8_t>& in, uint32_t& v)
+/// Everything but the checksum, so it can be taken over exactly these bytes.
+std::vector<uint8_t> encode_body(const SeiFrame& frame, const std::vector<SeiObject>& objs)
 {
-    if (in.size() < 4) {
-        return false;
+    std::vector<uint8_t> out;
+    out.reserve(32 + objs.size() * 48);
+    cbor::put_array(out, 4);
+    cbor::put_uint(out, kVersion);
+    cbor::put_uint(out, frame.frame_id);
+    cbor::put_int(out, frame.pts);
+    cbor::put_array(out, objs.size());
+    for (const SeiObject& o : objs) {
+        put_object(out, o);
     }
-    v = static_cast<uint32_t>(in[0]) | (static_cast<uint32_t>(in[1]) << 8)
-        | (static_cast<uint32_t>(in[2]) << 16) | (static_cast<uint32_t>(in[3]) << 24);
-    in = in.subspan(4);
-    return true;
+    return out;
 }
 
-bool read_u64(std::span<const uint8_t>& in, uint64_t& v)
+/// Least important first, so a cap removes the ones that matter least.
+void order_by_priority(std::vector<SeiObject>& objs)
 {
-    if (in.size() < 8) {
-        return false;
-    }
-    v = 0;
-    for (int i = 0; i < 8; ++i) {
-        v |= static_cast<uint64_t>(in[i]) << (8 * i);
-    }
-    in = in.subspan(8);
-    return true;
-}
-
-bool read_i64(std::span<const uint8_t>& in, int64_t& v)
-{
-    uint64_t u = 0;
-    if (!read_u64(in, u)) {
-        return false;
-    }
-    v = static_cast<int64_t>(u);
-    return true;
-}
-
-bool read_f32(std::span<const uint8_t>& in, float& v)
-{
-    uint32_t bits = 0;
-    if (!read_u32(in, bits)) {
-        return false;
-    }
-    std::memcpy(&v, &bits, 4);
-    return true;
+    std::stable_sort(objs.begin(), objs.end(),
+        [](const SeiObject& a, const SeiObject& b) {
+            return priority_rank(a.priority) > priority_rank(b.priority);
+        });
 }
 
 } // namespace
@@ -128,46 +146,31 @@ std::vector<uint8_t> encode_sei_payload(const SeiFrame& frame, uint32_t max_obje
 {
     std::vector<SeiObject> objs = frame.objects;
     if (max_objects > 0 && objs.size() > max_objects) {
-        // Keep strongest protection first (Critical before Background).
-        std::stable_sort(objs.begin(), objs.end(),
-            [](const SeiObject& a, const SeiObject& b) {
-                return priority_rank(a.priority) > priority_rank(b.priority);
-            });
+        order_by_priority(objs);
         objs.resize(max_objects);
     }
 
-    std::vector<uint8_t> out;
-    out.reserve(64 + objs.size() * 48);
-    out.insert(out.end(), kMagic, kMagic + 4);
-    put_u16(out, kVersion);
-    put_u16(out, 0); // flags
-    put_u64(out, frame.frame_id);
-    put_i64(out, frame.pts);
-    put_u32(out, static_cast<uint32_t>(objs.size()));
+    std::vector<uint8_t> body = encode_body(frame, objs);
 
-    for (const SeiObject& o : objs) {
-        put_u64(out, o.track_id);
-        put_f32(out, o.x);
-        put_f32(out, o.y);
-        put_f32(out, o.width);
-        put_f32(out, o.height);
-        put_f32(out, o.confidence);
-        out.push_back(static_cast<uint8_t>(o.priority));
-        out.push_back(o.has_desired_qp_delta ? 1 : 0);
-        out.push_back(0);
-        out.push_back(0);
-        put_u32(out, static_cast<uint32_t>(o.desired_qp_delta));
-        std::string name = o.class_name;
-        if (name.size() > 32) {
-            name.resize(32);
+    // §19.2's byte cap, which the object count alone cannot enforce: a class name is up to
+    // 32 bytes, so a frame within its object budget can still be over its byte budget.
+    // Drop from the least important upward until it fits.
+    if (body.size() + 4 > kMaxPayloadBytes && !objs.empty()) {
+        order_by_priority(objs);
+        while (!objs.empty() && body.size() + 4 > kMaxPayloadBytes) {
+            objs.pop_back();
+            body = encode_body(frame, objs);
         }
-        put_u16(out, static_cast<uint16_t>(name.size()));
-        out.insert(out.end(), name.begin(), name.end());
     }
 
-    const uint32_t sum = crc32(out);
-    put_u32(out, sum);
-    return out;
+    const uint32_t sum = crc32c(body);
+    // The checksum is not part of the CBOR item: §19.2 puts it after all previous fields
+    // of the payload, and a reader takes it from the tail before parsing anything.
+    body.push_back(static_cast<uint8_t>(sum));
+    body.push_back(static_cast<uint8_t>(sum >> 8));
+    body.push_back(static_cast<uint8_t>(sum >> 16));
+    body.push_back(static_cast<uint8_t>(sum >> 24));
+    return body;
 }
 
 std::vector<uint8_t> encode_sei_side_data(const SeiFrame& frame, uint32_t max_objects)
@@ -186,73 +189,52 @@ bool decode_sei_payload(std::span<const uint8_t> bytes, SeiFrame& out_frame)
     if (bytes.size() >= 16 && std::equal(bytes.begin(), bytes.begin() + 16, kUuid)) {
         bytes = bytes.subspan(16);
     }
-    if (bytes.size() < 4 + 2 + 2 + 8 + 8 + 4 + 4) {
+    if (bytes.size() < 5) {
         return false;
     }
-    const uint32_t expect = crc32(bytes.first(bytes.size() - 4));
-    uint32_t got = 0;
-    auto crc_span = bytes.subspan(bytes.size() - 4);
-    if (!read_u32(crc_span, got) || got != expect) {
-        return false;
-    }
-    bytes = bytes.first(bytes.size() - 4);
 
-    if (bytes.size() < 4 || bytes[0] != 'S' || bytes[1] != 'V' || bytes[2] != 'E'
-        || bytes[3] != '1') {
+    const std::span<const uint8_t> body = bytes.first(bytes.size() - 4);
+    const std::span<const uint8_t> tail = bytes.subspan(bytes.size() - 4);
+    const uint32_t got = static_cast<uint32_t>(tail[0])
+        | (static_cast<uint32_t>(tail[1]) << 8) | (static_cast<uint32_t>(tail[2]) << 16)
+        | (static_cast<uint32_t>(tail[3]) << 24);
+    if (got != crc32c(body)) {
         return false;
     }
-    bytes = bytes.subspan(4);
-    uint16_t version = 0;
-    uint16_t flags = 0;
-    if (!read_u16(bytes, version) || !read_u16(bytes, flags) || version != kVersion) {
+
+    cbor::Reader r(body);
+    uint64_t fields = 0;
+    if (!r.array(fields) || fields < 4) {
         return false;
     }
-    (void)flags;
-    if (!read_u64(bytes, out_frame.frame_id) || !read_i64(bytes, out_frame.pts)) {
+    uint64_t version = 0;
+    if (!r.uint(version) || version != kVersion) {
+        // §19.2: an unknown version is refused rather than read as far as it goes.
         return false;
     }
-    uint32_t count = 0;
-    if (!read_u32(bytes, count)) {
+    if (!r.uint(out_frame.frame_id) || !r.integer(out_frame.pts)) {
         return false;
     }
-    out_frame.objects.reserve(count);
-    for (uint32_t i = 0; i < count; ++i) {
+    uint64_t count = 0;
+    if (!r.array(count)) {
+        return false;
+    }
+    // The count is the writer's claim; the reader still has to find that many objects in
+    // the bytes it actually holds, and read_object is what enforces that.
+    out_frame.objects.reserve(static_cast<std::size_t>(std::min<uint64_t>(count, 4096)));
+    for (uint64_t i = 0; i < count; ++i) {
         SeiObject o;
-        uint32_t qp_bits = 0;
-        uint16_t name_len = 0;
-        uint8_t prio = 0;
-        uint8_t has_qp = 0;
-        uint8_t pad0 = 0;
-        uint8_t pad1 = 0;
-        if (!read_u64(bytes, o.track_id) || !read_f32(bytes, o.x) || !read_f32(bytes, o.y)
-            || !read_f32(bytes, o.width) || !read_f32(bytes, o.height)
-            || !read_f32(bytes, o.confidence)) {
+        if (!read_object(r, o)) {
             return false;
         }
-        if (bytes.size() < 4) {
-            return false;
-        }
-        prio = bytes[0];
-        has_qp = bytes[1];
-        pad0 = bytes[2];
-        pad1 = bytes[3];
-        (void)pad0;
-        (void)pad1;
-        bytes = bytes.subspan(4);
-        if (!read_u32(bytes, qp_bits) || !read_u16(bytes, name_len)) {
-            return false;
-        }
-        if (bytes.size() < name_len) {
-            return false;
-        }
-        o.priority = static_cast<ObjectPriority>(prio);
-        o.has_desired_qp_delta = has_qp != 0;
-        o.desired_qp_delta = static_cast<int32_t>(qp_bits);
-        o.class_name.assign(reinterpret_cast<const char*>(bytes.data()), name_len);
-        bytes = bytes.subspan(name_len);
         out_frame.objects.push_back(std::move(o));
     }
-    return bytes.empty();
+    for (uint64_t i = 4; i < fields; ++i) {
+        if (!r.skip()) {
+            return false;
+        }
+    }
+    return r.done();
 }
 
 std::vector<SeiObject> sei_objects_from_boxes(std::span<const Box> boxes, uint32_t max_objects)

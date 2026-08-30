@@ -48,6 +48,7 @@ add_library(sve_adaptive STATIC
     src/adaptive/qp_slew.cpp
     src/adaptive/box_smoother.cpp
     src/adaptive/roi_lag.cpp
+    src/metadata/cbor.cpp
     src/metadata/sei_payload.cpp
 )
 target_include_directories(sve_adaptive
@@ -136,6 +137,12 @@ if(SVE_BUILD_TESTS)
     target_link_libraries(geometry_test PRIVATE sve_adaptive)
     target_compile_options(geometry_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME geometry COMMAND geometry_test)
+
+    # cbor_test compiles the encoder directly rather than linking the library: it checks a
+    # format against RFC 8949's own vectors, and has no business needing FFmpeg to do it.
+    add_executable(cbor_test tests/unit/cbor_test.cpp src/metadata/cbor.cpp)
+    target_compile_options(cbor_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME cbor COMMAND cbor_test)
 
     add_executable(sei_payload_test tests/unit/sei_payload_test.cpp)
     target_link_libraries(sei_payload_test PRIVATE sve_adaptive)
