@@ -11,6 +11,16 @@
 // thing was called roi_transcode, and smartvideo.h after that; a consumer should not have
 // to know that history to find the door.
 //
+// Two headers are deliberately not pulled in from here, because both name an AVFrame:
+//
+//   #include "sve/frame.h"          // owning frames and raw-plane views (§8.5, §8.10)
+//   #include "sve/push_encoder.h"   // the callback API (§8.8), which takes one
+//
+// Everything reachable from this header compiles with include/ and nothing else on the
+// path, which is what lets an embedder write a PacketHandler without libavutil. A caller
+// who submits frames has FFmpeg already -- §55 makes AVFrame the input interface -- so for
+// them the extra include costs nothing, and for everyone else it saves a dependency.
+//
 // Every other header here is self-contained and can be included on its own -- a caller who
 // only writes a PacketHandler needs packet_handler.h and nothing else. The
 // public_headers_selfcontained target is what keeps that true: one generated translation

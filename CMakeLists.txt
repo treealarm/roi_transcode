@@ -75,6 +75,7 @@ add_library(sve STATIC
     src/core/preset.cpp
     src/core/transcode_file.cpp
     src/core/frame_roi_pipeline.cpp
+    src/core/push_encoder.cpp
     src/core/roi_encoder.cpp
     src/core/smart_video_encoder.cpp
     src/core/file_mux_sink.cpp
@@ -166,6 +167,11 @@ if(SVE_BUILD_TESTS)
     target_compile_options(encoder_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME encoder COMMAND encoder_test)
 
+    add_executable(push_encoder_test tests/unit/push_encoder_test.cpp)
+    target_link_libraries(push_encoder_test PRIVATE sve)
+    target_compile_options(push_encoder_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME push_encoder COMMAND push_encoder_test)
+
     add_executable(public_api_test tests/unit/public_api_test.cpp)
     target_link_libraries(public_api_test PRIVATE sve)
     target_compile_options(public_api_test PRIVATE ${SVE_WARNINGS})
@@ -189,8 +195,8 @@ if(SVE_BUILD_TESTS)
     add_library(public_headers_selfcontained OBJECT ${SVE_SELFCONTAINED_SOURCES})
     target_include_directories(public_headers_selfcontained
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    # frame.h is the one public header that names an FFmpeg type (TZ v3.4 §8.5 and §8.10),
-    # so this target needs libavutil on its path to compile that one alone. It does not
+    # frame.h and push_encoder.h are the public headers that name an FFmpeg type (TZ v3.4
+    # §8.5, §8.8 and §8.10), so this target needs libavutil on its path to compile them. It does not
     # weaken what the target checks -- self-containment -- and it does not weaken the
     # FFmpeg-free claim either: public_headers_isolated below is what checks that, and it
     # still sees include/ and nothing else.
