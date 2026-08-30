@@ -238,6 +238,10 @@ struct Settings {
     /// treated as the default, so asking for one and getting the other cannot happen.
     QualityPolicy policy = QualityPolicy::OBJECT_FIRST;
 
+    /// §22 and Appendix C. Whether a capability the hardware lacks is worked around and
+    /// announced, or refused outright.
+    FallbackPolicy fallback = FallbackPolicy::Permissive;
+
     /// §13 and §15. Temporal ROI is partly implemented (see TemporalROIConfig). Rate
     /// control's average target drives the outer BitrateBudget loop; peak/recovery are
     /// still refused at open when set.

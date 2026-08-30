@@ -18,6 +18,8 @@
 #include <cstddef>
 #include <memory>
 #include <span>
+#include <string_view>
+#include <vector>
 #include <utility>
 
 namespace {
@@ -77,8 +79,19 @@ private:
     sve::BackendFrameControl control;
     sve::EncoderCapabilities caps;
     const sve::Status status = sve::Status::Ok();
-    const std::span<const sve::BackendRef> backend =
-        sve::backend_chain(sve::Encoder::Cpu);
+    const sve::BackendSelection selection;
+    const std::vector<sve::BackendRef> backend =
+        sve::resolve_backends(sve::Encoder::Cpu, selection);
+
+    // §22 and §29: the policy and the log sink are part of the public vocabulary, and
+    // neither drags FFmpeg in with it.
+    sve::Settings with_policy;
+    with_policy.fallback = sve::FallbackPolicy::Strict;
+    const sve::LogSink sink = [](sve::LogLevel, std::string_view) {};
+    (void)sve::fallback_policy_name(with_policy.fallback);
+    (void)sve::log_level_name(sve::LogLevel::Warning);
+    (void)sink;
+    (void)selection.allow_unlisted;
 
     // §8 and §10: memory types, objects, policies.
     const sve::MemoryType memory = sve::MemoryType::ONEVPL;

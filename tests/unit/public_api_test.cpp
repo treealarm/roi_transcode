@@ -77,14 +77,15 @@ public:
 // without libav* on the include path at all.
 [[maybe_unused]] void names_the_backend_interface()
 {
-    for (const sve::IEncoderBackend& b :
-        sve::backend_chain(sve::Encoder::Cpu)) {
+    for (const sve::BackendRef& ref :
+        sve::resolve_backends(sve::Encoder::Cpu, {})) {
+        const sve::IEncoderBackend& b = ref.get();
         const sve::EncoderCapabilities named = b.GetCapabilities(
             sve::Codec::H264);
         (void)named.h264;
     }
     const sve::EncoderCapabilities caps =
-        sve::backend_chain(sve::Encoder::Cpu)[0].get().GetCapabilities(
+        sve::resolve_backends(sve::Encoder::Cpu, {})[0].get().GetCapabilities(
             sve::Codec::H264);
     (void)caps.h264;
     (void)caps.qp_map;
@@ -106,7 +107,7 @@ public:
         std::exit(1);
     }
     const sve::EncoderCapabilities hevc =
-        sve::backend_chain(sve::Encoder::Cpu)[0].get().GetCapabilities(
+        sve::resolve_backends(sve::Encoder::Cpu, {})[0].get().GetCapabilities(
             sve::Codec::H265);
     if (!hevc.qp_map || hevc.qp_map_block_width != 32) {
         std::fprintf(stderr, "fail: Cpu H.265 must advertise qp_map 32x32\n");

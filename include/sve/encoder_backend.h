@@ -36,6 +36,7 @@
 //
 //   * kind() is an addition, for reporting which backend opened under Encoder::Auto.
 
+#include "sve/backend_selection.h"
 #include "sve/capabilities.h"
 #include "sve/frame_buffer.h"
 #include "sve/input_format.h"
@@ -74,11 +75,11 @@ struct EncoderConfig {
     /// §14; only OBJECT_FIRST opens, see RoiEncoder::open_deferred.
     QualityPolicy policy = QualityPolicy::OBJECT_FIRST;
 
-    /// §13 and §15. Declared so a caller has somewhere to put values it already has, and
-    /// refused at open unless left at their defaults -- neither is implemented, and
-    /// accepting them silently would be the misleading answer.
     TemporalROIConfig temporal;
     RateControlPolicy rate_control;
+
+    /// Which backends Encoder::Auto may consider, and in what order (§8.4).
+    BackendSelection backend_selection;
 };
 
 /// Per-frame instructions that are not the pixels: where the quality goes, and when the
@@ -199,14 +200,14 @@ public:
 /// that are never released.
 using BackendRef = std::reference_wrapper<const IEncoderBackend>;
 
-/// The backends to try, in order, for a requested kind. Encoder::Auto gives the whole
-/// fallback chain; a named kind gives just that one, so asking for QSV and getting libx264
-/// is not something that can happen silently.
+/// The backends to try, in order -- TZ v3.4 §8.4.
 ///
-/// A span over storage that outlives the program, so nothing is allocated to answer and
-/// nothing has to be freed:
+/// Encoder::Auto walks `selection`; a named kind gives just that one and ignores the
+/// selection's permissions, because the caller has already been explicit and asking for
+/// QSV while getting libx264 is exactly what must not happen silently.
 ///
-///     for (const IEncoderBackend& b : backend_chain(Encoder::Auto)) { ... }
-std::span<const BackendRef> backend_chain(Encoder requested);
+/// Returns a vector rather than a span over static storage: the order is now the caller's
+/// to choose, so there is no fixed list to point at.
+std::vector<BackendRef> resolve_backends(Encoder requested, const BackendSelection& selection);
 
 } // namespace sve

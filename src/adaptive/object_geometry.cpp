@@ -179,6 +179,15 @@ void dilate_mask(uint8_t* mask, int32_t width, int32_t height, int32_t radius)
     }
 }
 
+const char* fallback_policy_name(FallbackPolicy p)
+{
+    switch (p) {
+    case FallbackPolicy::Permissive: return "permissive";
+    case FallbackPolicy::Strict:     return "strict";
+    }
+    return "?";
+}
+
 const char* quality_policy_name(QualityPolicy p)
 {
     switch (p) {

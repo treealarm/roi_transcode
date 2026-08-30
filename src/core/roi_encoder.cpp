@@ -123,9 +123,15 @@ void RoiEncoder::open_deferred(const EncoderConfig& config)
     // bitrate target and gets neither has been misled.
 
     std::string errors;
-    for (const IEncoderBackend& backend : backend_chain(config.kind)) {
+    const std::vector<BackendRef> chain =
+        resolve_backends(config.kind, config.backend_selection);
+    if (chain.empty()) {
+        fail("backend selection excludes every backend this build has");
+    }
+    for (const IEncoderBackend& backend : chain) {
         auto opened = backend.Configure(config);
         if (!opened) {
+            ++m_backends_declined;
             errors += std::format(" {};", opened.status().message());
             continue;
         }
@@ -136,6 +142,7 @@ void RoiEncoder::open_deferred(const EncoderConfig& config)
             const bool ok = probe_one_frame(backend, *opened.value().get());
             opened.value().reset();
             if (!ok) {
+                ++m_backends_declined;
                 errors += std::format(" {}: opened but encodes nothing;",
                     backend_name(backend.kind()));
                 continue;
@@ -225,5 +232,6 @@ void RoiEncoder::flush()
     }
     drain();
 }
+
 
 } // namespace sve

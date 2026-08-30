@@ -32,6 +32,9 @@ public:
     void attach(PacketSink& sink);
 
     Encoder kind() const { return m_kind; }
+    /// Backends that were tried and declined before one opened. Normal on a machine
+    /// without the hardware; §22 wants the choice observable rather than inferred.
+    long backends_declined() const { return m_backends_declined; }
     /// What the backend that actually opened is able to do. Only meaningful after open;
     /// before that there is no backend to ask.
     EncoderCapabilities capabilities() const;
@@ -79,6 +82,7 @@ private:
     LibavSession& session() const { return libav(*m_session.get()); }
 
     Encoder m_kind = Encoder::Cpu;
+    long m_backends_declined = 0;
     Codec m_codec = Codec::H265;
     const IEncoderBackend* m_backend = nullptr;
     SessionPtr m_session;

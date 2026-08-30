@@ -19,8 +19,10 @@
 // lookahead or B-frames and to emit in decode order later. Nothing here assumes a packet
 // belongs to the frame that was just submitted.
 
+#include "sve/backend_selection.h"
 #include "sve/capabilities.h"
 #include "sve/codec_parameters.h"
+#include "sve/logging.h"
 #include "sve/encoder_backend.h"
 #include "sve/frame_metadata.h"
 #include "sve/packet.h"
@@ -96,6 +98,16 @@ struct EncoderStatistics {
     /// that only appeared in a log would be invisible to anything but a human reading it.
     bool cpu_h265_target_guard = false;
 
+    /// Backends that were tried and declined before one opened. Non-zero is normal on a
+    /// machine without the hardware; it is here so "which one opened, and what did it beat"
+    /// can be answered without reading a log (§22).
+    int64_t backends_declined = 0;
+
+    /// Distinct degradations applied under FallbackPolicy::Permissive: regions cut to the
+    /// hardware's limit, a quality map quantized to rectangles, metadata the encoder cannot
+    /// carry, a rate-control mode refused. Each is counted once, not per frame.
+    int64_t fallbacks_applied = 0;
+
     /// Which backend actually opened. With Encoder::Auto this is the only way to find out.
     Encoder encoder_used = Encoder::Cpu;
     std::string encoder_name;
@@ -119,6 +131,14 @@ struct EncoderStatistics {
 struct SmartEncoderConfig {
     InputVideoFormat input;
     Settings settings;
+
+    /// Which backends Encoder::Auto may consider, and in what order (§8.4). Ignored when
+    /// settings.encoder names one.
+    BackendSelection backend_selection;
+
+    /// Where diagnostics go (§29). Left unset they go to stderr, one line each, which is
+    /// what a command-line tool and the acceptance scripts want.
+    LogSink log;
 };
 
 class SmartVideoEncoder {

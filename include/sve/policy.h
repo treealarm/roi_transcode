@@ -10,6 +10,23 @@
 
 namespace sve {
 
+/// What to do when the hardware cannot do what was asked -- TZ v3.4 §22 and Appendix C.
+///
+/// The choice is between a documented degradation and an honest refusal, and which one is
+/// right depends on the caller. A transcoding service wants the clip encoded even if a few
+/// regions had to be dropped; a measurement run wants to know that the thing it is
+/// measuring did not happen.
+///
+/// Permissive still says what it did -- §50 forbids a fallback nobody can see -- so the
+/// difference is whether the caller is told through a log and a counter, or through a
+/// returned Unsupported.
+enum class FallbackPolicy {
+    Permissive,
+    Strict,
+};
+
+const char* fallback_policy_name(FallbackPolicy p);
+
 /// §14. OBJECT_FIRST is the default and the only one implemented; the others are rejected
 /// at configure time rather than quietly treated as the default.
 enum class QualityPolicy {

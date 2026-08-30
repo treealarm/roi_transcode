@@ -13,6 +13,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace sve;
@@ -240,6 +243,112 @@ void cpu_h265_refuses_a_target_bitrate_out_loud()
     CHECK(enc->Reconfigure(again).code() == StatusCode::Unsupported);
 }
 
+void the_selection_orders_the_backends_and_can_exclude_them()
+{
+    // A named backend means it: the selection's permissions do not apply, because the
+    // caller has already been explicit and quietly getting libx264 instead is the failure
+    // this rule exists to prevent.
+    BackendSelection none;
+    none.preferred.clear();
+    none.allow_software_fallback = false;
+    CHECK(resolve_backends(Encoder::Cpu, none).size() == 1);
+
+    // Auto walks the list, in the order given.
+    BackendSelection cpu_first;
+    cpu_first.preferred = {Encoder::Cpu, Encoder::Qsv};
+    const auto chain = resolve_backends(Encoder::Auto, cpu_first);
+    CHECK(chain.size() == 2);
+    CHECK(chain[0].get().kind() == Encoder::Cpu);
+    CHECK(chain[1].get().kind() == Encoder::Qsv);
+
+    // Software can be shut out of the automatic path entirely.
+    BackendSelection hardware_only;
+    hardware_only.allow_software_fallback = false;
+    for (const BackendRef& ref : resolve_backends(Encoder::Auto, hardware_only)) {
+        CHECK(ref.get().kind() != Encoder::Cpu);
+    }
+
+    // And a backend absent from the list is not reached unless unlisted ones are allowed.
+    BackendSelection only_nvenc;
+    only_nvenc.preferred = {Encoder::Nvenc};
+    CHECK(resolve_backends(Encoder::Auto, only_nvenc).size() == 1);
+    only_nvenc.allow_unlisted = true;
+    CHECK(resolve_backends(Encoder::Auto, only_nvenc).size() > 1);
+}
+
+void a_selection_that_excludes_everything_fails_to_open()
+{
+    SmartEncoderConfig cfg = config_for(Encoder::Auto);
+    cfg.backend_selection.preferred.clear();
+    cfg.backend_selection.allow_software_fallback = false;
+    CHECK(!SmartVideoEncoder::Create(cfg).ok());
+}
+
+void diagnostics_go_where_the_caller_says()
+{
+    std::vector<std::pair<LogLevel, std::string>> lines;
+    SmartEncoderConfig cfg = config_for(Encoder::Cpu, Codec::H265);
+    cfg.settings.rate_control.target_bitrate = 800000;   // trips the CPU H.265 guard
+    cfg.log = [&lines](LogLevel level, std::string_view message) {
+        lines.emplace_back(level, std::string(message));
+    };
+
+    auto enc = open_encoder(cfg);
+    CHECK(enc->GetStatistics().cpu_h265_target_guard);
+
+    // §50: the degradation reached the caller's sink, not somebody's terminal.
+    bool guarded = false;
+    for (const auto& [level, text] : lines) {
+        if (level == LogLevel::Warning && text.find("cpu h265 target-bitrate") != std::string::npos) {
+            guarded = true;
+        }
+    }
+    CHECK(guarded);
+    CHECK(enc->GetStatistics().fallbacks_applied == 1);
+
+    // And which backend opened is said out loud rather than left to be inferred.
+    bool announced = false;
+    for (const auto& [level, text] : lines) {
+        if (level == LogLevel::Info && text.find("backend:") != std::string::npos) {
+            announced = true;
+        }
+    }
+    CHECK(announced);
+}
+
+void strict_refuses_where_permissive_degrades()
+{
+    // Same request, two policies. Under Permissive the encoder opens and records that it
+    // had to downgrade; under Strict it refuses, and the caller learns before encoding a
+    // single frame rather than from a counter afterwards.
+    SmartEncoderConfig permissive = config_for(Encoder::Cpu, Codec::H265);
+    permissive.settings.rate_control.target_bitrate = 800000;
+    permissive.log = [](LogLevel, std::string_view) {};
+    CHECK(SmartVideoEncoder::Create(permissive).ok());
+
+    SmartEncoderConfig strict = permissive;
+    strict.settings.fallback = FallbackPolicy::Strict;
+    const auto refused = SmartVideoEncoder::Create(strict);
+    CHECK(!refused.ok());
+    CHECK(refused.status().code() == StatusCode::Unsupported);
+}
+
+void strict_refuses_a_frame_whose_regions_do_not_fit()
+{
+    // The software backend has no region limit, so this asserts the shape rather than the
+    // hardware's number: with nothing dropped, Strict changes nothing.
+    auto pixels = std::make_shared<Pixels>();
+    SmartEncoderConfig cfg = config_for();
+    cfg.settings.fallback = FallbackPolicy::Strict;
+    cfg.log = [](LogLevel, std::string_view) {};
+    auto enc = open_encoder(cfg);
+
+    const Frame frame = make_frame(pixels, 0);
+    FrameMetadata meta;
+    CHECK(enc->SubmitFrame(frame.get(), meta).ok());
+    CHECK(enc->GetStatistics().fallbacks_applied == 0);
+}
+
 } // namespace
 
 int main()
@@ -254,6 +363,11 @@ int main()
     a_keyframe_request_is_counted_even_though_it_is_best_effort();
     reconfigure_takes_what_8_2_allows_and_refuses_the_rest();
     cpu_h265_refuses_a_target_bitrate_out_loud();
+    the_selection_orders_the_backends_and_can_exclude_them();
+    a_selection_that_excludes_everything_fails_to_open();
+    diagnostics_go_where_the_caller_says();
+    strict_refuses_where_permissive_degrades();
+    strict_refuses_a_frame_whose_regions_do_not_fit();
     std::printf("ok\n");
     return 0;
 }

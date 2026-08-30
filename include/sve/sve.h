@@ -32,16 +32,22 @@
 //   sve::Report r = s.finish();
 
 #include "sve/capabilities.h"
+#include "sve/codec_parameters.h"
+#include "sve/encoder.h"
 #include "sve/encoder_backend.h"
 #include "sve/frame_buffer.h"
+#include "sve/frame_metadata.h"
 #include "sve/geometry.h"
+#include "sve/logging.h"
 #include "sve/memory.h"
 #include "sve/metadata.h"
 #include "sve/object.h"
 #include "sve/object_priority.h"
+#include "sve/packet.h"
 #include "sve/packet_handler.h"
 #include "sve/report.h"
 #include "sve/session.h"
+#include "sve/timestamp.h"
 #include "sve/types.h"
 
 #include <atomic>

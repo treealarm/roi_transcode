@@ -7,6 +7,7 @@
 #include "encoder_runtime_warnings.h"
 #include "frame_roi_pipeline.h"
 #include "importance_map.h"
+#include "logger.h"
 #include "object_normalizer.h"
 #include "packet_sink.h"
 #include "qp_slew.h"
@@ -14,7 +15,7 @@
 #include "roi_lag.h"
 #include "sve/metadata.h"
 
-#include <cstdio>
+#include <format>
 #include <deque>
 #include <utility>
 #include <vector>
@@ -68,6 +69,9 @@ struct SmartVideoEncoder::Impl : PacketSink {
     EncoderState state = EncoderState::Created;
     Status fatal;
 
+    Logger log;
+    FallbackPolicy policy = FallbackPolicy::Permissive;
+
     Codec out_codec = Codec::H265;
     double frame_sec = 1.0 / 25.0;
     bool key_frame_pending = false;
@@ -75,6 +79,16 @@ struct SmartVideoEncoder::Impl : PacketSink {
     bool warned_roi = false;
     bool warned_roi_dropped = false;
     bool warned_sei = false;
+    bool warned_qp_map = false;
+
+    /// Counts a degradation the first time it is applied, so fallbacks_applied is a number
+    /// of distinct capabilities worked around rather than of frames.
+    void count_fallback(bool& already)
+    {
+        if (!already) {
+            ++stats.fallbacks_applied;
+        }
+    }
 
     // --- PacketSink: where the backend's output lands until the caller asks for it. ---
 
@@ -113,18 +127,30 @@ struct SmartVideoEncoder::Impl : PacketSink {
     bool queue_full() const { return queued.size() >= kMaxQueuedPackets; }
 
     /// ROI for one frame, plus the guards that must be audible when it degrades.
-    std::vector<Rect> rects_for(const FrameMetadata& meta)
+    Status rects_for(const FrameMetadata& meta, std::vector<Rect>* out_rects)
     {
         const EncoderCapabilities caps = encoder.capabilities();
+        const bool have_map = !meta.regions.qp_map.deltas.empty();
 
-        if (!meta.regions.qp_map.deltas.empty()) {
+        if (const Status s =
+                guard_qp_map_quantized(have_map, caps, policy, log, warned_qp_map);
+            !s.ok()) {
+            return s;
+        }
+        if (have_map && !caps.qp_map) {
+            count_fallback(warned_qp_map);
+        }
+
+        if (have_map) {
             int32_t dropped = 0;
             const int32_t budget = effective_region_budget(config.settings.quality, caps);
-            auto rects = rects_from_qp_map(meta.regions.qp_map, budget, &dropped);
+            *out_rects = rects_from_qp_map(meta.regions.qp_map, budget, &dropped);
             stats.regions_dropped += dropped;
-            warn_roi_regions_dropped_once(
-                stats.regions_dropped, caps, out_codec, warned_roi_dropped);
-            return rects;
+            if (dropped > 0) {
+                count_fallback(warned_roi_dropped);
+            }
+            return guard_roi_regions_dropped(
+                stats.regions_dropped, caps, out_codec, policy, log, warned_roi_dropped);
         }
 
         FrameRoiPipelineInput in{
@@ -139,14 +165,21 @@ struct SmartVideoEncoder::Impl : PacketSink {
         FrameRoiPipeline pipeline(bitrate, box_smooth, qp_slew, roi_builder);
         FrameRoiPipelineOutput out = pipeline.process(in);
         stats.regions_dropped += out.regions_dropped;
-        warn_roi_regions_dropped_once(
-            stats.regions_dropped, caps, out_codec, warned_roi_dropped);
+        if (out.regions_dropped > 0) {
+            count_fallback(warned_roi_dropped);
+        }
+        if (const Status s = guard_roi_regions_dropped(stats.regions_dropped, caps,
+                out_codec, policy, log, warned_roi_dropped);
+            !s.ok()) {
+            return s;
+        }
         lag_samples.insert(
             lag_samples.end(), out.lag_samples.begin(), out.lag_samples.end());
         last_applied = std::move(out.applied_boxes);
         last_block = out.coding_block;
         log_roi_once(out.rects, caps);
-        return std::move(out.rects);
+        *out_rects = std::move(out.rects);
+        return Status::Ok();
     }
 
     std::vector<Box> last_applied;
@@ -165,26 +198,34 @@ struct SmartVideoEncoder::Impl : PacketSink {
         QpDeltaMapBuilder builder;
         const auto grid =
             builder.build(config.input.width, config.input.height, last_block, rects);
-        std::fprintf(stderr, "ROI: %zu rects, qpDeltaMap %dx%d blocks of %d%s\n",
+        log.info(std::format("ROI: {} rects, qpDeltaMap {}x{} blocks of {}{}",
             rects.size(), grid.cols, grid.rows, last_block,
-            caps.qp_map ? " (qp_map)" : "");
+            caps.qp_map ? " (qp_map)" : ""));
         warned_roi_map = true;
     }
     bool warned_roi_map = false;
 
-    std::vector<uint8_t> sei_for(int64_t pts)
+    Status sei_for(int64_t pts, std::vector<uint8_t>* out)
     {
         const EncoderCapabilities caps = encoder.capabilities();
-        warn_sei_unsupported_once(config.settings.metadata.bitstream_sei, caps, warned_sei);
-        if (!config.settings.metadata.bitstream_sei || !caps.sei) {
-            return {};
+        const bool wanted = config.settings.metadata.bitstream_sei;
+        if (wanted && !caps.sei) {
+            count_fallback(warned_sei);
+        }
+        if (const Status s = guard_sei_unsupported(wanted, caps, policy, log, warned_sei);
+            !s.ok()) {
+            return s;
+        }
+        if (!wanted || !caps.sei) {
+            return Status::Ok();
         }
         SeiFrame meta;
         meta.frame_id = static_cast<uint64_t>(stats.frames_submitted);
         meta.pts = pts;
         meta.objects =
             sei_objects_from_boxes(last_applied, config.settings.metadata.max_objects);
-        return encode_sei_side_data(meta, config.settings.metadata.max_objects);
+        *out = encode_sei_side_data(meta, config.settings.metadata.max_objects);
+        return Status::Ok();
     }
 };
 
@@ -199,9 +240,12 @@ Result<std::unique_ptr<SmartVideoEncoder>> SmartVideoEncoder::Create(
     }
 
     auto impl = std::make_unique<Impl>(config);
+    impl->log = Logger(config.log);
+    impl->policy = config.settings.fallback;
 
     EncoderConfig& ep = impl->backend_config;
     ep.input = config.input;
+    ep.backend_selection = config.backend_selection;
     ep.kind = config.settings.encoder;
     ep.codec = config.settings.codec;
     ep.policy = config.settings.policy;
@@ -222,9 +266,12 @@ Result<std::unique_ptr<SmartVideoEncoder>> SmartVideoEncoder::Create(
     // refused rather than half-honoured, and the refusal is both logged and counted.
     if (ep.kind == Encoder::Cpu && ep.codec == Codec::H265
         && ep.rate_control.target_bitrate > 0) {
+        if (const Status s = guard_cpu_h265_target(true, impl->policy, impl->log); !s.ok()) {
+            return s;
+        }
         impl->stats.cpu_h265_target_guard = true;
+        ++impl->stats.fallbacks_applied;
         ep.rate_control.target_bitrate = 0;
-        std::fprintf(stderr, "guard: cpu h265 target-bitrate disabled; using CRF/CQP\n");
     }
 
     impl->bitrate = BitrateBudget(ep.rate_control);
@@ -241,6 +288,9 @@ Result<std::unique_ptr<SmartVideoEncoder>> SmartVideoEncoder::Create(
 
     impl->stats.encoder_used = impl->encoder.kind();
     impl->stats.encoder_name = impl->encoder.label();
+    impl->stats.backends_declined = impl->encoder.backends_declined();
+    impl->log.info(std::format("backend: {} opened; {} declined before it",
+        impl->encoder.label(), impl->stats.backends_declined));
     impl->state = EncoderState::Configured;
     return std::unique_ptr<SmartVideoEncoder>(new SmartVideoEncoder(std::move(impl)));
 }
@@ -267,14 +317,19 @@ Status SmartVideoEncoder::SubmitFrame(const AVFrame* frame, const FrameMetadata&
     const int64_t pts = metadata.timestamp.valid() ? metadata.timestamp.value : 0;
 
     try {
-        const std::vector<Rect> rects = s.rects_for(metadata);
+        std::vector<Rect> rects;
+        if (const Status made = s.rects_for(metadata, &rects); !made.ok()) {
+            return made;
+        }
         if (!s.warned_roi && s.encoder.kind() == Encoder::Nvenc) {
-            std::fprintf(stderr,
-                "warning: stock FFmpeg hevc_nvenc ignores ROI; "
-                "qpDeltaMap is built but not submitted to NVENC SDK\n");
+            s.log.warn("warning: stock FFmpeg hevc_nvenc ignores ROI; "
+                       "qpDeltaMap is built but not submitted to NVENC SDK");
             s.warned_roi = true;
         }
-        const std::vector<uint8_t> sei = s.sei_for(pts);
+        std::vector<uint8_t> sei;
+        if (const Status made = s.sei_for(pts, &sei); !made.ok()) {
+            return made;
+        }
         if (metadata.force_key_frame || s.key_frame_pending) {
             ++s.stats.keyframes_requested;
             s.key_frame_pending = false;
@@ -388,10 +443,9 @@ Status SmartVideoEncoder::Reconfigure(const RuntimeEncoderSettings& settings)
         rc.target_bitrate = *settings.target_bitrate;
         if (s.encoder.kind() == Encoder::Cpu && s.out_codec == Codec::H265
             && rc.target_bitrate > 0) {
-            // Same guard as at Create, for the same reason -- and it has to answer here
-            // rather than quietly ignore, because the caller is asking now.
-            return Status::Unsupported(
-                "cpu h265 has no target-bitrate mode in this build; see STATUS.md Р5");
+            // Same guard as at Create, and it answers rather than quietly ignores: the
+            // caller is asking now, so Permissive would still be misleading here.
+            return guard_cpu_h265_target(true, FallbackPolicy::Strict, s.log);
         }
         s.config.settings.rate_control = rc;
         // The budget is an outer loop over the encoder's constant quantizer, so a new
