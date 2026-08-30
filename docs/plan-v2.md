@@ -1,13 +1,16 @@
 # План работ по ТЗ smart-video-encoder
 
-Источники: [`smart-video-encoder-v3.pdf`](smart-video-encoder-v3.pdf) — действующая версия,
+Источники: [`smart-video-encoder_34.md`](smart-video-encoder_34.md) — действующая версия,
+[`Smart Video Encoder v3.1.pdf`](Smart%20Video%20Encoder%20v3.1.pdf) и
+[`smart-video-encoder-v3.pdf`](smart-video-encoder-v3.pdf) — предыдущие,
 и [`smart-video-encoder_TZ_v2.0.pdf`](smart-video-encoder_TZ_v2.0.pdf), по которой написан
 остальной план и на чьи номера разделов он ссылается.
 Порядок совместной работы над этим файлом — [`COLLABORATION.md`](COLLABORATION.md).
 
-> **Внимание.** План ниже сверен с v2.0. Раздел «Что изменила v3» перечисляет расхождения;
-> всё, чего он не касается, читается по-прежнему. Пока перенумерация не выполнена, ссылки
-> вида «§11» означают v2.0.
+> **Внимание.** План ниже сверен с v2.0. Два раздела с расхождениями — «Что изменила v3» и
+> «Изменения ТЗ v3.1 → v3.4» — читаются поверх него; всё, чего они не касаются, читается
+> по-прежнему. Пока перенумерация не выполнена, ссылки вида «§11» означают v2.0, а в двух
+> названных разделах — версию, о которой раздел говорит.
 
 ---
 
@@ -92,6 +95,81 @@ v2.0 позволял считать §15 неначатым, и наш аргу
    ещё нет — outer `BitrateBudget` мост.
 
 Детали и статус: [`plan-v3-library.md`](plan-v3-library.md).
+
+---
+
+## Изменения ТЗ v3.1 → v3.4 (2026-08-30)
+
+Источник: [`smart-video-encoder_34.md`](smart-video-encoder_34.md). Три версии за два дня;
+«История изменений» самого ТЗ разбивает их на 3.2 (контракты времени и потока), 3.3 (правки
+по аудиту) и 3.4 (рефакторинг публичного API). Ниже — только расхождения с кодом, сверка на
+`tz-v3` после влития `f3a1ae2` (срезы A–F, см. [`plan-v3-library.md`](plan-v3-library.md)).
+
+### 3.4 переписывает публичный API — этого нет в коде вовсе
+
+Раздел §8 вырос с одного подраздела до одиннадцати (§8.3–8.13). Сегодня публичный вход —
+`Session` и `transcode_file`; класса `SmartVideoEncoder` с submit/receive нет.
+
+| § | Требование 3.4 | Сейчас |
+|---|---|---|
+| 8.1 | `SmartVideoEncoder` c `RequestKeyFrame` / `Reconfigure` / `GetStatistics` | нет |
+| 8.3 | `InputVideoFormat` отдельно от параметров кодирования | поля размазаны по `SessionParams` и `EncoderConfig` |
+| 8.4 | `BackendSelection`: порядок, `allow_unlisted`, `allow_software_fallback` | жёсткая `backend_chain(Encoder)` |
+| 8.5 | владеющие `Frame::Ref` / `Frame::Adopt`, `TimedFrame` | `IFrameBuffer&`, владения нет |
+| 8.6 | shared immutable `PacketBuffer`, копия — shallow | `EncodedPacket` копирует байты |
+| 8.7 | `MediaTimestamp` с явным `time_base` | голый `int64_t pts` |
+| 8.8–8.9 | `PushVideoEncoder` и типизированные события вместо `nullptr` как EOS | `PacketHandler` |
+| 8.10 | `RawFrameView` + `WrapRawFrame` с явным `owner` | `PlaneBuffer` без owner |
+| 8.11 | `CodecParameters` с extradata наружу | только внутри `src/core/packet_sink.h` |
+| 8.12 | единые фабрики, кодек и backend не в имени | конструктор `Session` |
+| 8.13 | `EncoderState` и семантика `Stop` / `Flush` | состояния нет |
+
+**Решено 2026-08-30:** публичным слоем становится `SmartVideoEncoder`, `Session`
+переписывается тонким адаптером над ним и затем удаляется; `transcode_file` остаётся как
+пример приложения (§52). Namespace и таргет переименовываются в `sve` — §23 требует
+линковки с библиотекой `sve`, а `smartvideo::` за пределами `roi_transcode/` не используется
+нигде (проверено по `ta_vms` и по `../video_a`), так что переименование замкнуто внутри
+подпроекта.
+
+**Расхождение внутри самого ТЗ, требует ответа заказчика.** §8.2 держит в `EncoderConfig`
+поля `AVRational frame_rate` и `AVPixelFormat pixel_format`, а §8.3 вводит `InputVideoFormat`
+с собственными `Rational` / `PixelFormat` и полем `EncoderConfig::input`. Это либо
+дублирование, либо §8.3 отменяет соответствующие поля §8.2. Мы исходим из второго: свои типы
+на входе, FFmpeg — только в интероп-заголовке. Причина не вкусовая: публичные заголовки
+сегодня не содержат ни одного типа FFmpeg, и это охраняется целями
+`public_headers_isolated` / `public_headers_selfcontained`. §8.5 и §8.11 требуют `AVFrame` и
+extradata, поэтому FFmpeg получает **один** заголовок, а не расползается по всем.
+
+### Хвосты 3.2 и 3.3, ещё не закрытые
+
+Проверено грепом по `include/`, `src/`, `integration/` — ни одного вхождения:
+
+- **CBOR (RFC 8949) + CRC-32C** как единственный нормативный формат SEI (§19.2). У нас свой
+  little-endian формат с обычным CRC32 (`src/metadata/sei_payload.cpp`), плюс не сделаны
+  лимит 16 KiB на кадр и усечение по возрастанию priority с отметкой в телеметрии.
+- **Sidecar NDJSON** `<output_basename>.svemeta.ndjson`, синхронный с выдачей пакетов (§19.3).
+- **`FallbackPolicy`** `Strict` / `Permissive` (§22 и Приложение C).
+- **10-bit P010/Main10** и приёмочный тест AT-009 (§15.3, §32, §48).
+- **`sve-capabilities`** — CLI из `tools/` под `SVE_BUILD_TOOLS=ON` (§23). Данные для него
+  уже есть в `EncoderCapabilities`, нет самой утилиты.
+- **Python wrapper** (§58) — P0 в §2.1, в Milestone 1, в DoD §55 и в матрице приёмки §49.
+  **Отложен 2026-08-30:** обёртка биндит публичный C++ API, а §8.3–8.13 этот API
+  переписывают целиком — биндинги к тому, что сейчас будет заменено, это работа дважды.
+  Возвращаемся после §8. Отложен, но не снят.
+- **GitLab CI** (§44) — сегодня в `ci/` только README.
+
+### Что подтвердилось
+
+- §21 `Submit` / `Receive` с `Again` и `1 → 0..N` — ровно текущий `IEncoderBackend`.
+- §22 fallback matrix и §25 error model близки к тому, что есть; §25 требует дополнить
+  `StatusCode` кодами `InvalidArgument`, `DeviceUnavailable`, `BackendError`, `OutOfMemory`,
+  `Timeout`.
+- §49 объявлен **единственным** нормативным источником порогов; §14, §16 и §34 описывают
+  методику и ссылаются туда. Пороги ROI lag, под которые написан `src/adaptive/roi_lag.*`,
+  не изменились: `IoU ≥ 0.50`, P95 ≤ 3 кадра и ≤ 100 мс, P99 ≤ 6 и ≤ 200 мс.
+- Приложение C прямо оставляет открытыми определения `AdaptiveConfig`, `MetadataConfig`,
+  `EncoderStatistics`, `BackendStatistics`, `AppliedROIInfo`, `ResolvedROI`, `QPMap`,
+  `FrameQualityBudget` — они фиксируются на design review до code freeze Milestone 1.
 
 ---
 
