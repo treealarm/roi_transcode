@@ -5,7 +5,11 @@
 // Deliberately free of FFmpeg types: a consumer gets bytes and timestamps, and
 // does not need libav* on its include path to write a handler. Muxing to a file
 // is not done this way -- set SessionParams::output_path and the session does it.
+//
+// The packet itself lives in packet.h (TZ v3.4 §8.6); this header is the sink it
+// arrives at.
 
+#include "sve/packet.h"
 #include "sve/types.h"
 
 #include <cstddef>
@@ -14,21 +18,6 @@
 #include <string>
 
 namespace sve {
-
-// One encoded access unit. `data` belongs to whoever handed it over and stays valid until
-// the next call on the same session -- copy it if you need it longer.
-struct EncodedPacket {
-    // Borrowed: valid until the next call on the same session.
-    std::span<const uint8_t> data;
-    int64_t pts = 0;
-    int64_t dts = 0;
-    int64_t duration = 0;
-    bool key = false;
-    // Units of pts, dts and duration. The session's time base on the way out to a handler,
-    // the encoder's on the way out of a backend -- which are the same thing unless the
-    // caller asked for their own.
-    Rational time_base{1, 1};
-};
 
 // Reported once, before any packet.
 struct StreamInfo {

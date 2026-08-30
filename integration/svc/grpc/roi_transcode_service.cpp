@@ -437,8 +437,8 @@ public:
         auto* out = msg.mutable_packet();
         out->set_pts(pkt.pts);
         out->set_dts(pkt.dts);
-        out->set_key(pkt.key);
-        out->set_data(pkt.data.data(), pkt.data.size());
+        out->set_key(pkt.key_frame);
+        out->set_data(pkt.payload.data(), pkt.payload.size());
         m_writer->Write(msg);
     }
 

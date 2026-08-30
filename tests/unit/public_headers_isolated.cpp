@@ -10,7 +10,10 @@
 // compiling, a public header grew a dependency it must not have -- which is exactly the
 // property TZ v2.0 §7 and §8 rely on, and the reason BackendSession is opaque.
 
+#include "sve/input_format.h"
+#include "sve/packet.h"
 #include "sve/sve.h"
+#include "sve/timestamp.h"
 
 #include <cstddef>
 #include <memory>
@@ -58,6 +61,17 @@ private:
     sve::Mask mask;
     sve::Rational rational;
 
+    // §8.3, §8.6 and §8.7. These three are named here rather than only in frame_test
+    // because the claim being made is not that they work -- it is that they compile with
+    // no FFmpeg anywhere. frame.h is deliberately absent: it is the one public header that
+    // does name an AVFrame, and it is not reachable from sve.h.
+    sve::InputVideoFormat input_format;
+    sve::MediaTimestamp timestamp;
+    sve::PacketBuffer payload;
+    (void)input_format.valid();
+    (void)timestamp.valid();
+    (void)payload.empty();
+
     // §7: the backend contract, opaque session and all.
     sve::EncoderConfig config;
     sve::BackendFrameControl control;
@@ -86,6 +100,7 @@ private:
 
     (void)settings; (void)params; (void)report; (void)info; (void)packet;
     (void)rect; (void)box; (void)mask; (void)rational; (void)config;
+    (void)input_format; (void)timestamp; (void)payload;
     (void)control; (void)caps; (void)status; (void)backend; (void)memory;
 
     // The owning types are named, and the caller never writes a delete.

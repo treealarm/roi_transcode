@@ -22,6 +22,9 @@ enum class StatusCode {
     Unavailable,
     /// The caller asked for something this backend cannot do.
     Unsupported,
+    /// The request itself does not make sense -- a plane shorter than its own stride
+    /// claims, a format paired with a profile that cannot carry it. TZ v3.4 §25.
+    InvalidArgument,
     /// Correct request, wrong moment -- no packet ready yet, more input needed.
     Again,
     /// No more output will come.
@@ -41,6 +44,10 @@ public:
     static Status Ok() { return {}; }
     static Status Unavailable(std::string m) { return {StatusCode::Unavailable, std::move(m)}; }
     static Status Unsupported(std::string m) { return {StatusCode::Unsupported, std::move(m)}; }
+    static Status InvalidArgument(std::string m)
+    {
+        return {StatusCode::InvalidArgument, std::move(m)};
+    }
     static Status Again() { return {StatusCode::Again, {}}; }
     static Status EndOfStream() { return {StatusCode::EndOfStream, {}}; }
     static Status Error(std::string m) { return {StatusCode::Error, std::move(m)}; }

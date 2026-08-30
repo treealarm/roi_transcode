@@ -3,6 +3,7 @@
 #include "av_raii.h"
 #include "bitrate_budget.h"
 #include "box_smoother.h"
+#include "codec_id.h"
 #include "encoder_runtime_warnings.h"
 #include "frame_roi_pipeline.h"
 #include "frame_input.h"
@@ -88,6 +89,9 @@ struct Session::Impl : PacketSink {
     RoiMapBuilder builder;
     roiav::Frame wrapper;
     Report report;
+    /// What the encoder actually opened as, learned in begin() and reported on every
+    /// packet. Not derived per packet: the answer cannot change mid-stream.
+    Codec out_codec = Codec::H265;
     std::vector<RoiLagSample> lag_samples;
     bool finished = false;
     bool sei_unsupported_logged = false;
@@ -118,6 +122,7 @@ struct Session::Impl : PacketSink {
 
     void begin(AVCodecContext* enc) override
     {
+        out_codec = codec_from_av_id(enc->codec_id);
         if (file) {
             file->begin(enc);
         }
@@ -154,8 +159,8 @@ struct Session::Impl : PacketSink {
         }
         if (handler) {
             EncodedPacket out;
-            out.data = std::span<const uint8_t>(
-                pkt->data, static_cast<std::size_t>(pkt->size));
+            out.payload = PacketBuffer::Copy(std::span<const uint8_t>(
+                pkt->data, static_cast<std::size_t>(pkt->size)));
             out.pts = pkt->pts;
             out.dts = pkt->dts;
             out.duration = pkt->duration;
@@ -164,7 +169,8 @@ struct Session::Impl : PacketSink {
             // in milliseconds -- which is the default -- would be out by a factor of a
             // thousand, consistently, in a way that looks like working code.
             out.time_base = Rational{tb.num, tb.den};
-            out.key = (pkt->flags & AV_PKT_FLAG_KEY) != 0;
+            out.key_frame = (pkt->flags & AV_PKT_FLAG_KEY) != 0;
+            out.codec = out_codec;
             handler->on_packet(out);
         }
         if (file) {

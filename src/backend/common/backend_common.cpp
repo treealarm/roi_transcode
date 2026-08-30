@@ -1,6 +1,7 @@
 #include "backend/common/backend_common.h"
 
 #include "backend/common/av_frame_buffer.h"
+#include "codec_id.h"
 #include "pixel_format.h"
 
 #include <algorithm>
@@ -203,8 +204,7 @@ Result<SessionPtr> LibavBackend::Configure(const EncoderConfig& config) const
     if (!codec && kind() == Encoder::Cpu) {
         // A build without libx264/libx265 may still have some other encoder for the codec;
         // better that than refusing to run at all.
-        codec = avcodec_find_encoder(
-            config.codec == Codec::H264 ? AV_CODEC_ID_H264 : AV_CODEC_ID_HEVC);
+        codec = avcodec_find_encoder(av_id_from_codec(config.codec));
     }
     if (!codec) {
         return Status::Unavailable(std::string(name) + ": not in this FFmpeg build");
@@ -368,12 +368,13 @@ Result<EncodedPacket> LibavBackend::ReceivePacket(BackendSession& session) const
     }
 
     EncodedPacket out;
-    out.data = std::span<const uint8_t>(
-        s.pkt.p->data, static_cast<std::size_t>(s.pkt.p->size));
+    out.payload = PacketBuffer::Copy(std::span<const uint8_t>(
+        s.pkt.p->data, static_cast<std::size_t>(s.pkt.p->size)));
     out.pts = s.pkt.p->pts;
     out.dts = s.pkt.p->dts;
     out.duration = s.pkt.p->duration;
-    out.key = (s.pkt.p->flags & AV_PKT_FLAG_KEY) != 0;
+    out.key_frame = (s.pkt.p->flags & AV_PKT_FLAG_KEY) != 0;
+    out.codec = codec_from_av_id(s.enc.p->codec_id);
     out.time_base = Rational{s.enc.p->time_base.num, s.enc.p->time_base.den};
     return out;
 }

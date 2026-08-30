@@ -62,10 +62,21 @@
    `sve_adaptive`. На переходный период оставлены alias `namespace smartvideo = sve` в
    `include/sve/sve.h` и CMake-alias'ы `smartvideo` / `smartvideo_adaptive` / `roi_core` /
    `roi_geometry`; они снимаются вместе с `Session` в срезе 5.
-2. **Фундаментальные типы (§8.3, 8.5–8.7, 8.10):** `InputVideoFormat`, `MediaTimestamp`,
-   shared immutable `PacketBuffer`, владеющие `Frame`/`TimedFrame`, `RawFrameView`.
-   FFmpeg допускается ровно в одном заголовке — `frame.h`; остальные остаются чистыми, и
-   `public_headers_isolated` продолжает это охранять.
+2. ~~**Фундаментальные типы (§8.3, 8.5–8.7, 8.10)**~~ — **сделано 2026-08-30.**
+   `include/sve/input_format.h`, `timestamp.h`, `packet.h`, `frame.h`. FFmpeg допущен ровно
+   в один заголовок — `frame.h`, и он намеренно **не** включается из `sve.h`, поэтому
+   `public_headers_isolated` по-прежнему компилирует всю остальную поверхность без FFmpeg.
+   Что изменилось по существу, а не по именам:
+   - `EncodedPacket` переехал из `packet_handler.h` в `packet.h` и держит payload в
+     shared immutable `PacketBuffer` вместо заимствованного span'а с контрактом «до
+     следующего вызова». Цена — одна аллокация и копия на пакет.
+   - `WrapRawFrame` **удерживает** `RawFrameView::owner` внутри самого `AVFrame`
+     (через `av_buffer_create`), а не только требует этого от вызывающего.
+   - `StatusCode::InvalidArgument` добавлен (§25) — по месту использования, остальные
+     коды §25 придут в срезе 3.
+   - `TimedFrame` отложен до среза 3: он состоит из `FrameMetadata`, а её определяет §8.1
+     вместе с самим энкодером.
+   Покрытие: `tests/unit/frame_test.cpp` (девять случаев, из них шесть — отказы).
 3. **`SmartVideoEncoder` и lifecycle (§8.1, 8.13, §25):** submit/receive, `EncoderState`,
    `Reconfigure`, `RequestKeyFrame`, `EncoderStatistics`; `StatusCode` дополняется кодами
    §25. Садится поверх существующих `IEncoderBackend` и `frame_roi_pipeline` — нижний слой

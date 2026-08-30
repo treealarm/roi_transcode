@@ -76,6 +76,7 @@ add_library(sve STATIC
     src/core/frame_roi_pipeline.cpp
     src/core/roi_encoder.cpp
     src/core/file_mux_sink.cpp
+    src/core/frame.cpp
     src/core/frame_input.cpp
     src/core/session.cpp
 )
@@ -149,6 +150,13 @@ if(SVE_BUILD_TESTS)
 
     # Compiles against the public headers only -- no src/ on the include path. That is the
     # point of it: it stops compiling the moment an internal type leaks into the surface.
+    # frame_test links sve: Frame and WrapRawFrame are the FFmpeg interop, so unlike the
+    # tests above there is a libavutil behind this one.
+    add_executable(frame_test tests/unit/frame_test.cpp)
+    target_link_libraries(frame_test PRIVATE sve)
+    target_compile_options(frame_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME frame COMMAND frame_test)
+
     add_executable(public_api_test tests/unit/public_api_test.cpp)
     target_link_libraries(public_api_test PRIVATE sve)
     target_compile_options(public_api_test PRIVATE ${SVE_WARNINGS})
@@ -172,6 +180,13 @@ if(SVE_BUILD_TESTS)
     add_library(public_headers_selfcontained OBJECT ${SVE_SELFCONTAINED_SOURCES})
     target_include_directories(public_headers_selfcontained
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    # frame.h is the one public header that names an FFmpeg type (TZ v3.4 §8.5 and §8.10),
+    # so this target needs libavutil on its path to compile that one alone. It does not
+    # weaken what the target checks -- self-containment -- and it does not weaken the
+    # FFmpeg-free claim either: public_headers_isolated below is what checks that, and it
+    # still sees include/ and nothing else.
+    target_include_directories(public_headers_selfcontained
+        SYSTEM PRIVATE ${FFMPEG_INCLUDE_DIRS})
     target_compile_options(public_headers_selfcontained PRIVATE ${SVE_WARNINGS})
 
     # And this one holds the other half of that line. public_api_test links sve, so

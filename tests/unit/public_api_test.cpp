@@ -60,7 +60,7 @@ public:
     void on_packet(const sve::EncodedPacket& p) override
     {
         ++packets;
-        bytes += p.data.size();
+        bytes += p.payload.size();
     }
     void on_end() override { ++ends; }
 

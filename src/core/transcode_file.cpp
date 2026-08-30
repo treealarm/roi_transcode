@@ -1,6 +1,7 @@
 #include "sve/sve.h"
 
 #include "av_raii.h"
+#include "codec_id.h"
 #include "bitrate_budget.h"
 #include "box_smoother.h"
 #include "encoder_runtime_warnings.h"
@@ -29,7 +30,7 @@ Codec resolve_codec(Codec asked, AVCodecID input)
     if (asked != Codec::SameAsSource) {
         return asked;
     }
-    return input == AV_CODEC_ID_HEVC ? Codec::H265 : Codec::H264;
+    return codec_from_av_id(input);
 }
 
 } // namespace
