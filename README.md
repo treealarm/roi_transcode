@@ -340,11 +340,12 @@ service's side.
 2026-08-26 libmfx aborted the service process after a handful of frames when it
 encoded from a gRPC worker thread, while the same frames went through
 `roi-frame-push --push raw --encoder qsv` on the same machine. Re-tested on
-2026-08-30 against a clip with a dense region set: the service completed on
-`h264_qsv` and survived, and the acceptance suite exercises that path. The clip
-that originally provoked it is not on this machine, so the finding is recorded
-as unreproduced rather than fixed -- see [`docs/STATUS.md`](docs/STATUS.md),
-"gRPC-сервис и QSV". VA-API remains a hardware path that has never shown it.
+2026-08-30 on that same clip and on a denser one: both completed as `h264_qsv`
+through the service and the process survived. What the retest does not cover is
+the path the abort actually came in on -- video_a pushing raw frames into the
+stream API -- so this is recorded as unreproduced rather than fixed; see
+[`docs/STATUS.md`](docs/STATUS.md), "gRPC-сервис и QSV". VA-API remains a
+hardware path that has never shown it.
 
 ## Synthetic scenes
 
