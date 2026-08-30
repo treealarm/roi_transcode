@@ -60,10 +60,10 @@ run_case() { # name [extra args...]
     fi
     local target_guard="false"
     local sei_warning="false"
-    if rg -q "guard: cpu h265 target-bitrate disabled" "$log"; then
+    if grep -Eq "guard: cpu h265 target-bitrate disabled" "$log"; then
         target_guard="true"
     fi
-    if rg -q "warning: bitstream SEI requested but not supported by encoder capabilities" "$log"; then
+    if grep -Eq "warning: bitstream SEI requested but not supported by encoder capabilities" "$log"; then
         sei_warning="true"
     fi
 

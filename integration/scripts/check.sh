@@ -213,13 +213,13 @@ CODEC=h264 mechanism_checks cpu_h264 no
 step "cpu h265 guards are explicit and stable"
 CODEC=h265
 encode "guard_h265" synth_roi.json cpu --target-bitrate 400000 || true
-if [[ -f "${WORK}/guard_h265.log" ]] && rg -q "guard: cpu h265 target-bitrate disabled" \
+if [[ -f "${WORK}/guard_h265.log" ]] && grep -Eq "guard: cpu h265 target-bitrate disabled" \
     "${WORK}/guard_h265.log"; then
     pass "[guard_h265] target-bitrate downgrade is logged"
 else
     fail "[guard_h265] missing target-bitrate guard log"
 fi
-if [[ -f "${WORK}/guard_h265.log" ]] && rg -q \
+if [[ -f "${WORK}/guard_h265.log" ]] && grep -Eq \
     "warning: bitstream SEI requested but not supported by encoder capabilities" \
     "${WORK}/guard_h265.log"; then
     pass "[guard_h265] bitstream SEI downgrade is logged"
@@ -382,7 +382,7 @@ PY
     if "${BUILD}/roi-transcode" --in "${SCENES}/moving/source.mp4" \
         --roi "${WORK}/moving_tracked_roi.json" --out "${WORK}/moving_tracked.mp4" \
         --encoder cpu --codec h264 --crf 32 >"${WORK}/moving_tracked.log" 2>&1; then
-        if rg -q "roi lag: samples=[1-9][0-9]* .*acceptance=pass" "${WORK}/moving_tracked.log"; then
+        if grep -Eq "roi lag: samples=[1-9][0-9]* .*acceptance=pass" "${WORK}/moving_tracked.log"; then
             pass "roi lag metrics are reported for tracked samples"
         else
             fail "roi lag report is missing or failed acceptance"
@@ -393,7 +393,7 @@ PY
     if "${BUILD}/roi-frame-push" --in "${SCENES}/moving/source.mp4" \
         --roi "${WORK}/moving_tracked_roi.json" --out "${WORK}/moving_tracked_push.mp4" \
         --push raw --encoder cpu --codec h264 --crf 32 >"${WORK}/moving_tracked_push.log" 2>&1; then
-        if rg -q "roi lag: samples=[1-9][0-9]* .*acceptance=pass" "${WORK}/moving_tracked_push.log"; then
+        if grep -Eq "roi lag: samples=[1-9][0-9]* .*acceptance=pass" "${WORK}/moving_tracked_push.log"; then
             pass "roi lag metrics are reported on session path too"
         else
             fail "session path roi lag report is missing or failed acceptance"
@@ -653,7 +653,7 @@ if [[ -x "${BUILD}/roi-transcode-svc" && -x "${BUILD}/roi_grpc_smoke" ]]; then
         assert_eq "job reports the backend it used" \
             "$(grep -oE 'encoder=.+' "${WORK}/grpc_job.log" | head -1 | cut -d= -f2- | cut -d' ' -f1)" \
             "h264_qsv"
-        if rg -q "roi_lag.measured=false roi_lag.samples=0" "${WORK}/grpc_job.log"; then
+        if grep -Eq "roi_lag.measured=false roi_lag.samples=0" "${WORK}/grpc_job.log"; then
             pass "file job exposes roi lag telemetry"
         else
             fail "file job roi lag telemetry missing"
@@ -666,7 +666,7 @@ if [[ -x "${BUILD}/roi-transcode-svc" && -x "${BUILD}/roi_grpc_smoke" ]]; then
         >"${WORK}/grpc_stream.log" 2>&1; then
         streamed=$(grep -oE '[0-9]+ packets streamed back' "${WORK}/grpc_stream.log" | grep -oE '^[0-9]+')
         assert_eq "stream returns a packet per frame" "${streamed:-0}" "$src_frames"
-        if rg -q "roi_lag.measured=true roi_lag.samples=[1-9][0-9]*" "${WORK}/grpc_stream.log"; then
+        if grep -Eq "roi_lag.measured=true roi_lag.samples=[1-9][0-9]*" "${WORK}/grpc_stream.log"; then
             pass "stream done exposes roi lag telemetry"
         else
             fail "stream done roi lag telemetry missing"
