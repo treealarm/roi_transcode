@@ -336,11 +336,15 @@ Both paths given to the worker must sit under the service's `ROI_ALLOWED_ROOTS`:
 the caller and the service share a filesystem, and the sandbox is checked on the
 service's side.
 
-**Do not point this at `--encoder qsv`.** libmfx aborts the service process after
-a handful of frames when it encodes from a gRPC worker thread, though the same
-frames go through `roi-frame-push --push raw --encoder qsv` on the same machine.
-VA-API is the hardware path that works and is the same silicon. Details, and what
-the region budget does on VA-API, in [`docs/stream-mode-hw.md`](docs/stream-mode-hw.md).
+**QSV through the service was once fatal, and no longer reproduces.** On
+2026-08-26 libmfx aborted the service process after a handful of frames when it
+encoded from a gRPC worker thread, while the same frames went through
+`roi-frame-push --push raw --encoder qsv` on the same machine. Re-tested on
+2026-08-30 against a clip with a dense region set: the service completed on
+`h264_qsv` and survived, and the acceptance suite exercises that path. The clip
+that originally provoked it is not on this machine, so the finding is recorded
+as unreproduced rather than fixed -- see [`docs/STATUS.md`](docs/STATUS.md),
+"gRPC-сервис и QSV". VA-API remains a hardware path that has never shown it.
 
 ## Synthetic scenes
 

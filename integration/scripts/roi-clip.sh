@@ -200,8 +200,8 @@ if [ -z "$ENCODER" ]; then
     ENCODER=$([ -e /dev/dri/renderD128 ] && echo vaapi || echo cpu)
 fi
 if [ "$ENCODER" = "qsv" ]; then
-    echo "warning: qsv crashes the service on this machine (docs/stream-mode-hw.md); " \
-         "vaapi is the same silicon" >&2
+    echo "note: qsv through the service aborted here on 2026-08-26 and did not " \
+         "reproduce on 2026-08-30 (docs/STATUS.md); vaapi is the same silicon" >&2
 fi
 WORKER_ARGS+=(--encoder "$ENCODER")
 
