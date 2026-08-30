@@ -76,10 +76,3 @@ Report transcode_file(const std::string& input_path,
 
 } // namespace sve
 
-// Transitional, added 2026-08-30 with the rename to `sve`. TZ v3.4 §23 links the capability
-// CLI against a library called `sve`, and the namespace follows the library. Nothing outside
-// roi_transcode/ ever spelled `smartvideo::`, so this alias exists only to keep integration/
-// and the tests compiling across the slices of the §8 rewrite that follow. It goes away with
-// the CMake aliases once those call sites move to the new API -- do not write new code
-// against it.
-namespace smartvideo = sve;

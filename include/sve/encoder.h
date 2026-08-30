@@ -24,6 +24,7 @@
 #include "sve/codec_parameters.h"
 #include "sve/logging.h"
 #include "sve/encoder_backend.h"
+#include "sve/frame_buffer.h"
 #include "sve/frame_metadata.h"
 #include "sve/packet.h"
 #include "sve/report.h"
@@ -158,6 +159,11 @@ public:
     /// The frame is borrowed for the length of the call; the implementation takes its own
     /// reference if it keeps it. `metadata` is borrowed too, spans and all.
     Status SubmitFrame(const AVFrame* frame, const FrameMetadata& metadata);
+
+    /// The same, for pixels the caller holds as an IFrameBuffer. This is the zero-copy
+    /// path: a buffer the backend handed out through CreateFrame is already in the
+    /// encoder's own memory, and an AVFrame cannot say that.
+    Status SubmitFrame(IFrameBuffer& pixels, const FrameMetadata& metadata);
 
     /// Takes one packet if there is one. `Again` means feed more frames; `EndOfStream`
     /// means there will be no more. Neither is a failure.

@@ -96,15 +96,6 @@ target_link_libraries(sve PUBLIC sve_adaptive ${FFMPEG_LIBRARIES})
 target_compile_definitions(sve PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_compile_options(sve PRIVATE ${SVE_WARNINGS})
 
-# Names earlier versions of this library answered to. Kept only until integration/ moves
-# onto the §8 API; they are removed together with the `smartvideo` namespace alias in
-# include/sve/sve.h, and one target should not answer to three names for longer than a
-# rename takes.
-add_library(smartvideo ALIAS sve)
-add_library(smartvideo_adaptive ALIAS sve_adaptive)
-add_library(roi_core ALIAS sve)
-add_library(roi_geometry ALIAS sve_adaptive)
-
 # ---------------------------------------------------------------------------
 # Tests -- §52 tests/unit
 # ---------------------------------------------------------------------------

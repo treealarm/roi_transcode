@@ -69,7 +69,9 @@ set(DAPR_PROTO_FILE ${ROI_PROTO_DIR}/dapr/dapr_runtime.proto)
 add_executable(roi-transcode-svc
     svc/svc_main.cpp
     svc/job/roi_job_manager.cpp
-    svc/grpc/roi_transcode_service.cpp
+    svc/grpc/proto_convert.cpp
+    svc/grpc/roi_file_service.cpp
+    svc/grpc/roi_stream_service.cpp
     svc/grpc/dapr_publisher.cpp
     svc/grpc/path_guard.cpp
 )

@@ -17,6 +17,8 @@
 
 #include <format>
 #include <deque>
+#include <functional>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -126,6 +128,14 @@ struct SmartVideoEncoder::Impl : PacketSink {
 
     bool queue_full() const { return queued.size() >= kMaxQueuedPackets; }
 
+    /// How the pixels reach the backend. The two public overloads differ in nothing but
+    /// this call, so everything around it -- state checks, backpressure, regions, SEI,
+    /// keyframe requests, failure handling -- is written once.
+    using Handover = std::function<void(
+        const std::vector<Rect>& rects, int64_t pts, std::span<const uint8_t> sei)>;
+
+    Status submit(const FrameMetadata& metadata, const Handover& hand);
+
     /// ROI for one frame, plus the guards that must be audible when it degrades.
     Status rects_for(const FrameMetadata& meta, std::vector<Rect>* out_rects)
     {
@@ -149,6 +159,35 @@ struct SmartVideoEncoder::Impl : PacketSink {
             if (dropped > 0) {
                 count_fallback(warned_roi_dropped);
             }
+            log_roi_once(*out_rects, caps);
+            return guard_roi_regions_dropped(
+                stats.regions_dropped, caps, out_codec, policy, log, warned_roi_dropped);
+        }
+
+        // A mask is the second form Regions accepts, and it has to be sampled onto the
+        // block grid rather than fed to the box pipeline: it carries no kinds to weigh, so
+        // it interpolates between the background and the strongest value the settings name.
+        //
+        // Leaving this out is what the migration of Session found: a caller passing a mask
+        // got no regions at all, quietly, because the box path had nothing to work from.
+        if (meta.regions.mask.consistent()) {
+            const Quality quality = bitrate.apply(config.settings.quality);
+            MaskMapping mapping;
+            mapping.qp_delta_at_0 = quality.background_qp_delta;
+            mapping.qp_delta_at_255 = quality.mask_qp_delta_at_255;
+            mapping.levels = quality.mask_levels;
+            const int32_t block = effective_coding_block(caps);
+            const QpDeltaMap grid = qp_map_from_mask(meta.regions.mask, mapping,
+                config.input.width, config.input.height, block);
+            int32_t dropped = 0;
+            const int32_t budget = effective_region_budget(config.settings.quality, caps);
+            *out_rects = rects_from_qp_map(grid, budget, &dropped);
+            stats.regions_dropped += dropped;
+            if (dropped > 0) {
+                count_fallback(warned_roi_dropped);
+            }
+            last_block = block;
+            log_roi_once(*out_rects, caps);
             return guard_roi_regions_dropped(
                 stats.regions_dropped, caps, out_codec, policy, log, warned_roi_dropped);
         }
@@ -175,14 +214,12 @@ struct SmartVideoEncoder::Impl : PacketSink {
         }
         lag_samples.insert(
             lag_samples.end(), out.lag_samples.begin(), out.lag_samples.end());
-        last_applied = std::move(out.applied_boxes);
         last_block = out.coding_block;
         log_roi_once(out.rects, caps);
         *out_rects = std::move(out.rects);
         return Status::Ok();
     }
 
-    std::vector<Box> last_applied;
     int32_t last_block = 16;
 
     /// One line describing the region map, on the first frame that has one.
@@ -205,7 +242,12 @@ struct SmartVideoEncoder::Impl : PacketSink {
     }
     bool warned_roi_map = false;
 
-    Status sei_for(int64_t pts, std::vector<uint8_t>* out)
+    /// §19.1 keeps `objects` and `roi_info` as separate fields, and §19.2's payload is the
+    /// objects -- so what goes in is what the caller submitted, not what the pipeline made
+    /// of it after smoothing and normalisation. The two entry points disagreed about this
+    /// until they were built on one encoder: the file path embedded the applied boxes, the
+    /// session path the submitted ones. The session path was right.
+    Status sei_for(const FrameMetadata& meta, int64_t pts, std::vector<uint8_t>* out)
     {
         const EncoderCapabilities caps = encoder.capabilities();
         const bool wanted = config.settings.metadata.bitstream_sei;
@@ -219,12 +261,12 @@ struct SmartVideoEncoder::Impl : PacketSink {
         if (!wanted || !caps.sei) {
             return Status::Ok();
         }
-        SeiFrame meta;
-        meta.frame_id = static_cast<uint64_t>(stats.frames_submitted);
-        meta.pts = pts;
-        meta.objects =
-            sei_objects_from_boxes(last_applied, config.settings.metadata.max_objects);
-        *out = encode_sei_side_data(meta, config.settings.metadata.max_objects);
+        SeiFrame frame;
+        frame.frame_id = static_cast<uint64_t>(stats.frames_submitted);
+        frame.pts = pts;
+        frame.objects =
+            sei_objects_from_boxes(meta.regions.boxes, config.settings.metadata.max_objects);
+        *out = encode_sei_side_data(frame, config.settings.metadata.max_objects);
         return Status::Ok();
     }
 };
@@ -297,16 +339,27 @@ Result<std::unique_ptr<SmartVideoEncoder>> SmartVideoEncoder::Create(
 
 Status SmartVideoEncoder::SubmitFrame(const AVFrame* frame, const FrameMetadata& metadata)
 {
-    Impl& s = *m_impl;
+    if (frame == nullptr) {
+        return Status::InvalidArgument("SubmitFrame needs a frame");
+    }
+    return m_impl->submit(metadata, [&](const std::vector<Rect>& rects, int64_t pts,
+                                        std::span<const uint8_t> sei) {
+        // const_cast: the encoder only reads these pixels. The signature is const because
+        // §8.1 promises the caller's frame is not modified, and libavcodec's send takes a
+        // non-const pointer it likewise only reads.
+        m_impl->encoder.encode(const_cast<AVFrame*>(frame), rects, pts, sei);
+    });
+}
+
+Status SmartVideoEncoder::Impl::submit(const FrameMetadata& metadata, const Handover& hand)
+{
+    Impl& s = *this;
     if (s.state == EncoderState::Failed) {
         return s.fatal;
     }
     if (s.state != EncoderState::Configured && s.state != EncoderState::Running) {
         return Status::InvalidArgument(
             std::string("SubmitFrame in state ") + encoder_state_name(s.state));
-    }
-    if (frame == nullptr) {
-        return Status::InvalidArgument("SubmitFrame needs a frame");
     }
     if (s.queue_full()) {
         // Backpressure by §24: a code, not a block. The caller drains and comes back.
@@ -327,17 +380,14 @@ Status SmartVideoEncoder::SubmitFrame(const AVFrame* frame, const FrameMetadata&
             s.warned_roi = true;
         }
         std::vector<uint8_t> sei;
-        if (const Status made = s.sei_for(pts, &sei); !made.ok()) {
+        if (const Status made = s.sei_for(metadata, pts, &sei); !made.ok()) {
             return made;
         }
         if (metadata.force_key_frame || s.key_frame_pending) {
             ++s.stats.keyframes_requested;
             s.key_frame_pending = false;
         }
-        // const_cast: the encoder only reads these pixels. The signature is const because
-        // §8.1 promises the caller's frame is not modified, and libavcodec's send takes a
-        // non-const pointer it likewise only reads.
-        s.encoder.encode(const_cast<AVFrame*>(frame), rects, pts, sei);
+        hand(rects, pts, sei);
     } catch (const std::exception& e) {
         s.fatal = Status::BackendError(e.what());
         s.state = EncoderState::Failed;
@@ -348,6 +398,14 @@ Status SmartVideoEncoder::SubmitFrame(const AVFrame* frame, const FrameMetadata&
     s.stats.frames_converted = s.encoder.frames_converted();
     s.stats.frames_uploaded = s.encoder.frames_uploaded();
     return Status::Ok();
+}
+
+Status SmartVideoEncoder::SubmitFrame(IFrameBuffer& pixels, const FrameMetadata& metadata)
+{
+    return m_impl->submit(metadata, [&](const std::vector<Rect>& rects, int64_t pts,
+                                        std::span<const uint8_t> sei) {
+        m_impl->encoder.encode_buffer(pixels, rects, pts, sei);
+    });
 }
 
 Status SmartVideoEncoder::ReceivePacket(EncodedPacket* packet)

@@ -1,19 +1,9 @@
 #include "sve/session.h"
 
 #include "av_raii.h"
-#include "bitrate_budget.h"
-#include "box_smoother.h"
-#include "codec_id.h"
-#include "logger.h"
-#include "encoder_runtime_warnings.h"
-#include "frame_roi_pipeline.h"
 #include "frame_input.h"
-#include "object_normalizer.h"
 #include "packet_sink.h"
-#include "qp_slew.h"
-#include "roi_lag.h"
-#include "roi_encoder.h"
-#include "sve/metadata.h"
+#include "sve/encoder.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -75,38 +65,31 @@ HeldRegions hold(const Regions& in)
 
 } // namespace
 
-// Sits between the encoder and wherever packets are going: a file it owns, or
-// the caller's handler. Counts them on the way through so finish() can report
-// without the caller tallying.
-struct Session::Impl : PacketSink {
+// What a stream needs beyond the encoder itself: a decoder for callers who send compressed
+// access units, somewhere for the packets to go, and the bookkeeping that reconciles the
+// two.
+//
+// It owns a SmartVideoEncoder and adds nothing to it. The ROI pipeline, the bitrate budget,
+// the slew limiter and the region builder used to be assembled here as well as there, and
+// the second copy is where the two drifted -- only one of them was feeding its budget from
+// its own output. There is one now, and this class is the application layer on top: §3 puts
+// decoding and muxing outside the library's scope, and §52 calls this an example of using
+// it rather than part of it.
+struct Session::Impl {
     SessionParams params;
     std::unique_ptr<FileMuxSink> file;
     PacketHandler* handler = nullptr;
-    RoiEncoder encoder;
-    BitrateBudget bitrate;
-    QpSlewLimiter qp_slew;
-    BoxSmoother box_smooth;
+    std::unique_ptr<SmartVideoEncoder> encoder;
     FrameDecoder decoder;
-    RoiMapBuilder builder;
-    roiav::Frame wrapper;
     Report report;
-    /// What the encoder actually opened as, learned in begin() and reported on every
-    /// packet. Not derived per packet: the answer cannot change mid-stream.
-    Codec out_codec = Codec::H265;
-    std::vector<RoiLagSample> lag_samples;
+    CodecParameters codec_params;
+    bool opened_sink = false;
     bool finished = false;
-    /// Session keeps the built-in stderr sink: it is removed in the slice that replaces it
-    /// with PushVideoEncoder, and giving it a configurable one first would be work thrown
-    /// away.
-    Logger log;
-    bool sei_unsupported_logged = false;
-    bool roi_dropped_logged = false;
-    // Submitted-but-not-yet-decoded regions, keyed by the pts they arrived with.
+
+    // Regions arrive with the access unit that carried them and are applied to the frame
+    // the decoder eventually produces for it, which is not the next one out.
     std::map<int64_t, HeldRegions> pending;
 
-    // Matches a decoded frame to the regions submitted with it. Falls back to
-    // the oldest entry when the stream carries no usable timestamps, which is
-    // the right guess for a decoder that is not reordering.
     HeldRegions take_pending(int64_t pts, bool have_pts)
     {
         if (pending.empty()) {
@@ -120,72 +103,61 @@ struct Session::Impl : PacketSink {
             it = pending.begin();
         }
         HeldRegions held = std::move(it->second);
-        // Anything older can no longer be claimed: the decoder emits in
-        // presentation order, so those frames were dropped or already handled.
+        // Anything older can no longer be claimed: the decoder emits in presentation
+        // order, so those frames were dropped or already handled.
         pending.erase(pending.begin(), std::next(it));
         return held;
     }
 
-    void begin(AVCodecContext* enc) override
+    /// Declares the output stream on first use. The encoder knows its codec parameters as
+    /// soon as it exists, so this needs no packet to have arrived.
+    void open_sink()
     {
-        out_codec = codec_from_av_id(enc->codec_id);
+        if (opened_sink) {
+            return;
+        }
+        opened_sink = true;
         if (file) {
-            file->begin(enc);
+            file->begin(codec_params);
         }
         if (handler) {
             StreamInfo info;
-            info.width = enc->width;
-            info.height = enc->height;
-            if (enc->extradata && enc->extradata_size > 0) {
-                info.extradata = std::span<const uint8_t>(enc->extradata,
-                    static_cast<std::size_t>(enc->extradata_size));
-            }
+            info.width = codec_params.width;
+            info.height = codec_params.height;
+            info.extradata = codec_params.extradata.bytes();
             info.encoder_used = report.encoder_used;
             info.encoder_name = report.encoder_name;
             handler->on_open(info);
         }
     }
 
-    void on_packet(AVPacket* pkt, AVRational tb) override
+    /// Takes everything the encoder has ready and puts it where the caller asked.
+    void drain()
     {
-        ++report.packets;
-        report.bytes += pkt->size;
-        if (bitrate.active()) {
-            double dt = 0.0;
-            if (pkt->duration > 0 && tb.den > 0) {
-                dt = static_cast<double>(pkt->duration) * tb.num / tb.den;
+        for (;;) {
+            EncodedPacket packet;
+            const Status s = encoder->ReceivePacket(&packet);
+            if (s.code() == StatusCode::Again || s.code() == StatusCode::EndOfStream) {
+                return;
             }
-            if (dt <= 0.0) {
-                const int32_t den = std::max(params.fps_den, 1);
-                dt = params.fps_num > 0
-                    ? static_cast<double>(den) / static_cast<double>(params.fps_num)
-                    : 1.0 / 25.0;
+            if (!s.ok()) {
+                roiav::fail(s.message());
             }
-            bitrate.observe(pkt->size, dt);
-        }
-        if (handler) {
-            EncodedPacket out;
-            out.payload = PacketBuffer::Copy(std::span<const uint8_t>(
-                pkt->data, static_cast<std::size_t>(pkt->size)));
-            out.pts = pkt->pts;
-            out.dts = pkt->dts;
-            out.duration = pkt->duration;
-            // The units the timestamps above are in. Filling this is not optional: the
-            // field defaults to 1/1, and a handler that believed it while the session runs
-            // in milliseconds -- which is the default -- would be out by a factor of a
-            // thousand, consistently, in a way that looks like working code.
-            out.time_base = Rational{tb.num, tb.den};
-            out.key_frame = (pkt->flags & AV_PKT_FLAG_KEY) != 0;
-            out.codec = out_codec;
-            handler->on_packet(out);
-        }
-        if (file) {
-            file->on_packet(pkt, tb);
+            open_sink();
+            ++report.packets;
+            report.bytes += static_cast<int64_t>(packet.payload.size());
+            if (handler) {
+                handler->on_packet(packet);
+            }
+            if (file) {
+                file->write_video(packet);
+            }
         }
     }
 
-    void end() override
+    void end_sink()
     {
+        open_sink();
         if (file) {
             file->end();
         }
@@ -194,114 +166,33 @@ struct Session::Impl : PacketSink {
         }
     }
 
-    /// How many rectangle regions may actually be sent this frame.
-    ///
-    /// Two numbers meet here: what the caller asked for, and what the backend that opened
-    /// will accept (TZ v2.0 §6.4). The smaller wins. Before this the setting was obeyed
-    /// alone, which meant a request for 200 regions was silently truncated by the driver
-    /// instead of by us -- and the count in Report.regions_dropped was wrong, because we
-    /// did not know the loss had happened.
-    ///
-    /// When the backend exposes qp_map, the budget is not a rectangle cap: return 0 so
-    /// callers treat the map as unlimited (rects_from_qp_map / truncate skip on 0).
-    int region_budget() const
+    FrameMetadata metadata_for(const Regions& regions, int64_t pts) const
     {
-        return effective_region_budget(params.settings.quality, encoder.capabilities());
-    }
-
-    int32_t coding_block() const
-    {
-        return effective_coding_block(encoder.capabilities());
-    }
-
-    std::vector<Rect> rects_for(const Regions& regions)
-    {
-        const int32_t w = params.width;
-        const int32_t h = params.height;
-        const int32_t block = coding_block();
-        const int budget = region_budget();
-
-        if (!regions.qp_map.deltas.empty()) {
-            int32_t dropped = 0;
-            auto rects = rects_from_qp_map(regions.qp_map, budget, &dropped);
-            report.regions_dropped += dropped;
-            return rects;
-        }
-
-        if (regions.mask.consistent()) {
-            // The mask has no kind names: it interpolates between the
-            // background and the strongest strength the settings name.
-            const Quality quality = bitrate.apply(params.settings.quality);
-            MaskMapping mapping;
-            mapping.qp_delta_at_0 = quality.background_qp_delta;
-            mapping.qp_delta_at_255 = quality.mask_qp_delta_at_255;
-            mapping.levels = quality.mask_levels;
-            const QpDeltaMap grid =
-                qp_map_from_mask(regions.mask, mapping, w, h, block);
-            int32_t dropped = 0;
-            auto rects = rects_from_qp_map(grid, budget, &dropped);
-            report.regions_dropped += dropped;
-            (void)guard_roi_regions_dropped(report.regions_dropped, encoder.capabilities(),
-                out_codec, params.settings.fallback, log, roi_dropped_logged);
-            return rects;
-        }
-
-        FrameRoiPipelineInput pipeline_in{
-            .boxes = regions.boxes,
-            .quality = params.settings.quality,
-            .temporal = params.settings.temporal,
-            .caps = encoder.capabilities(),
-            .width = w,
-            .height = h,
-            .frame_interval_sec = params.fps_num > 0
-                ? static_cast<double>(std::max(params.fps_den, 1))
-                    / static_cast<double>(params.fps_num)
-                : 1.0 / 25.0,
-        };
-        FrameRoiPipeline pipeline(bitrate, box_smooth, qp_slew, builder);
-        FrameRoiPipelineOutput out = pipeline.process(pipeline_in);
-        report.regions_dropped += out.regions_dropped;
-        (void)guard_roi_regions_dropped(report.regions_dropped, encoder.capabilities(),
-            out_codec, params.settings.fallback, log, roi_dropped_logged);
-        lag_samples.insert(lag_samples.end(), out.lag_samples.begin(), out.lag_samples.end());
-        return out.rects;
-    }
-
-    std::vector<uint8_t> sei_bytes(const Regions& regions, int64_t pts)
-    {
-        if (!params.settings.metadata.bitstream_sei) {
-            return {};
-        }
-        const EncoderCapabilities caps = encoder.capabilities();
-        (void)guard_sei_unsupported(
-            true, caps, params.settings.fallback, log, sei_unsupported_logged);
-        if (!caps.sei) {
-            return {};
-        }
-        SeiFrame frame;
-        frame.frame_id = static_cast<uint64_t>(report.frames);
-        frame.pts = pts;
-        if (regions.qp_map.deltas.empty() && !regions.mask.consistent()) {
-            frame.objects = sei_objects_from_boxes(
-                regions.boxes, params.settings.metadata.max_objects);
-        }
-        return encode_sei_side_data(frame, params.settings.metadata.max_objects);
-    }
-
-    // Pixels the caller owns, handed straight to the encoder. No decode, no wrapping:
-    // this is the path a factory frame takes, and the one where zero copies is possible.
-    void encode_buffer(IFrameBuffer& pixels, const Regions& regions, int64_t pts)
-    {
-        const auto sei = sei_bytes(regions, pts);
-        encoder.encode_buffer(pixels, rects_for(regions), pts, sei);
-        ++report.frames;
+        FrameMetadata meta;
+        meta.timestamp = MediaTimestamp{pts,
+            Rational{params.time_base_num, std::max(params.time_base_den, 1)}};
+        meta.regions = regions;
+        return meta;
     }
 
     void encode(AVFrame* frame, const Regions& regions, int64_t pts)
     {
-        const auto sei = sei_bytes(regions, pts);
-        encoder.encode(frame, rects_for(regions), pts, sei);
+        const Status s = encoder->SubmitFrame(frame, metadata_for(regions, pts));
+        if (!s.ok()) {
+            roiav::fail(s.message());
+        }
         ++report.frames;
+        drain();
+    }
+
+    void encode_buffer(IFrameBuffer& pixels, const Regions& regions, int64_t pts)
+    {
+        const Status s = encoder->SubmitFrame(pixels, metadata_for(regions, pts));
+        if (!s.ok()) {
+            roiav::fail(s.message());
+        }
+        ++report.frames;
+        drain();
     }
 };
 
@@ -326,42 +217,32 @@ Session::Session(const SessionParams& params, PacketHandler* handler)
         params.extradata.empty() ? nullptr : params.extradata.data(),
         static_cast<int>(params.extradata.size()));
 
-    EncoderConfig ep;
-    ep.input.width = params.width;
-    ep.input.height = params.height;
-    ep.input.frame_rate = Rational{params.fps_num, std::max(params.fps_den, 1)};
-    ep.input.time_base =
+    SmartEncoderConfig cfg;
+    cfg.input.width = params.width;
+    cfg.input.height = params.height;
+    cfg.input.frame_rate = Rational{params.fps_num, std::max(params.fps_den, 1)};
+    cfg.input.time_base =
         Rational{params.time_base_num, std::max(params.time_base_den, 1)};
-    ep.kind = params.settings.encoder;
-    ep.policy = params.settings.policy;
-    ep.temporal = params.settings.temporal;
-    ep.rate_control = params.settings.rate_control;
+    cfg.settings = params.settings;
     // SameAsSource, answered from what the caller said it is submitting. Raw frames have no
     // source codec to mirror, so they take the same H.264 fallback an unrecognised one does.
-    ep.codec = params.settings.codec != Codec::SameAsSource ? params.settings.codec
+    cfg.settings.codec = params.settings.codec != Codec::SameAsSource
+        ? params.settings.codec
         : (params.codec == InputCodec::H265 ? Codec::H265 : Codec::H264);
-    bool cpu_h265_target_guard = false;
-    if (ep.kind == Encoder::Cpu && ep.codec == Codec::H265) {
-        // Guard: CPU HEVC target-bitrate path is unstable on our stack.
-        cpu_h265_target_guard = ep.rate_control.target_bitrate > 0;
-        ep.rate_control.target_bitrate = 0;
-        if (cpu_h265_target_guard) {
-            std::fprintf(stderr,
-                "guard: cpu h265 target-bitrate disabled; using CRF/CQP\n");
-        }
-    }
-    ep.crf = params.settings.crf;
-    ep.gop = params.settings.gop;
-    ep.preset = params.settings.preset;
 
-    // The report is filled before begin() runs, because StreamInfo carries the
-    // backend and the sink is what reports it.
-    m_impl->encoder.open_deferred(ep);
-    m_impl->report.encoder_used = m_impl->encoder.kind();
-    m_impl->report.encoder_name = m_impl->encoder.label();
-    m_impl->report.cpu_h265_target_guard = cpu_h265_target_guard;
-    m_impl->bitrate = BitrateBudget(ep.rate_control);
-    m_impl->encoder.attach(*m_impl);
+    auto made = SmartVideoEncoder::Create(cfg);
+    if (!made) {
+        roiav::fail(made.status().message());
+    }
+    m_impl->encoder = std::move(made.value());
+
+    const EncoderStatistics stats = m_impl->encoder->GetStatistics();
+    m_impl->report.encoder_used = stats.encoder_used;
+    m_impl->report.encoder_name = stats.encoder_name;
+    if (const Status s = m_impl->encoder->GetCodecParameters(&m_impl->codec_params);
+        !s.ok()) {
+        roiav::fail(s.message());
+    }
 }
 
 Session::~Session() = default;
@@ -416,11 +297,22 @@ Report Session::finish()
             const HeldRegions held = m_impl->take_pending(pts, have_pts);
             m_impl->encode(decoded, held.view(), pts);
         });
-        m_impl->encoder.flush();
-        m_impl->end();
-        m_impl->report.frames_converted = m_impl->encoder.frames_converted();
-        m_impl->report.frames_uploaded = m_impl->encoder.frames_uploaded();
-        fill_lag_report(m_impl->lag_samples, m_impl->report);
+        if (const Status s = m_impl->encoder->Flush(); !s.ok()) {
+            roiav::fail(s.message());
+        }
+        m_impl->drain();
+        m_impl->end_sink();
+
+        // Everything but the frame count comes from the encoder, which is the only thing
+        // that knows it. Frames are counted here because a frame submitted and a frame
+        // encoded are the same number only when nothing was refused.
+        const int64_t frames = m_impl->report.frames;
+        const int64_t packets = m_impl->report.packets;
+        const int64_t bytes = m_impl->report.bytes;
+        m_impl->report = m_impl->encoder->ToReport();
+        m_impl->report.frames = frames;
+        m_impl->report.packets = packets;
+        m_impl->report.bytes = bytes;
     }
     return m_impl->report;
 }
