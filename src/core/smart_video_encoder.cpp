@@ -94,33 +94,30 @@ struct SmartVideoEncoder::Impl : PacketSink {
 
     // --- PacketSink: where the backend's output lands until the caller asks for it. ---
 
-    void begin(AVCodecContext* enc) override
+    void begin(const CodecParameters& params) override
     {
-        out_codec = codec_from_av_id(enc->codec_id);
+        out_codec = params.codec;
     }
 
-    void on_packet(AVPacket* pkt, AVRational tb) override
+    void on_packet(const EncodedPacket& packet) override
     {
         if (bitrate.active()) {
             double dt = 0.0;
-            if (pkt->duration > 0 && tb.den > 0) {
-                dt = static_cast<double>(pkt->duration) * tb.num / tb.den;
+            const Rational tb = packet.time_base;
+            if (packet.duration > 0 && tb.den > 0) {
+                dt = static_cast<double>(packet.duration) * tb.num / tb.den;
             }
-            bitrate.observe(pkt->size, dt > 0.0 ? dt : frame_sec);
+            bitrate.observe(static_cast<int64_t>(packet.payload.size()),
+                dt > 0.0 ? dt : frame_sec);
         }
 
-        EncodedPacket out;
-        out.payload = PacketBuffer::Copy(std::span<const uint8_t>(
-            pkt->data, static_cast<std::size_t>(pkt->size)));
-        out.pts = pkt->pts;
-        out.dts = pkt->dts;
-        out.duration = pkt->duration;
-        out.key_frame = (pkt->flags & AV_PKT_FLAG_KEY) != 0;
+        EncodedPacket out = packet;
+        // The backend reports the codec it opened; out_codec is what the caller asked for
+        // and what the rest of this class reasons about, and they agree by construction.
         out.codec = out_codec;
-        out.time_base = Rational{tb.num, tb.den};
 
         ++stats.packets_received;
-        stats.bytes_encoded += pkt->size;
+        stats.bytes_encoded += static_cast<int64_t>(packet.payload.size());
         queued.push_back(std::move(out));
     }
 
@@ -398,8 +395,13 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const EncoderConfig& confi
     for (const std::string& reason : impl->encoder.backends_skipped()) {
         impl->log.warn("backend skipped: " + reason);
     }
-    impl->log.info(std::format("backend: {} opened; {} declined before it",
-        impl->encoder.label(), impl->stats.backends_declined));
+    // The kind first, then the prose. The kind is what the caller selected and what a
+    // script can read back; the label is a sentence for a person, and two backends can
+    // legitimately start it with the same word -- x264 and x264direct both say "libx264",
+    // which is true of both and useless for telling them apart.
+    impl->log.info(std::format("backend: {} ({}) opened; {} declined before it",
+        backend_name(impl->stats.encoder_used), impl->encoder.label(),
+        impl->stats.backends_declined));
     impl->state = EncoderState::Configured;
     return std::unique_ptr<SmartVideoEncoder>(new SmartVideoEncoder(std::move(impl)));
 }
@@ -586,18 +588,12 @@ Status SmartVideoEncoder::GetCodecParameters(CodecParameters* parameters) const
     if (parameters == nullptr) {
         return Status::InvalidArgument("GetCodecParameters needs somewhere to write");
     }
-    const AVCodecContext* ctx = m_impl->encoder.ctx();
-    if (ctx == nullptr) {
+    if (m_impl->state == EncoderState::Created) {
         return Status::InvalidArgument("no encoder is open");
     }
-    parameters->codec = codec_from_av_id(ctx->codec_id);
-    parameters->width = ctx->width;
-    parameters->height = ctx->height;
-    parameters->time_base = Rational{ctx->time_base.num, ctx->time_base.den};
-    if (ctx->extradata != nullptr && ctx->extradata_size > 0) {
-        parameters->extradata = PacketBuffer::Copy(std::span<const uint8_t>(
-            ctx->extradata, static_cast<std::size_t>(ctx->extradata_size)));
-    }
+    // Read once at open from whichever backend answered, so this no longer needs a codec
+    // context and works for a backend that has none.
+    *parameters = m_impl->encoder.codec_parameters();
     return Status::Ok();
 }
 

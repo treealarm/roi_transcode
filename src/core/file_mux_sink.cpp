@@ -26,18 +26,6 @@ void FileMuxSink::declare_audio(const AVCodecParameters* par, AVRational time_ba
     m_audio_tb = time_base;
 }
 
-void FileMuxSink::begin(AVCodecContext* enc)
-{
-    if (m_started) {
-        return;
-    }
-    open_video_stream();
-    roiav::check(avcodec_parameters_from_context(m_video->codecpar, enc),
-        "encoder params");
-    m_video->time_base = enc->time_base;
-    finish_begin();
-}
-
 void FileMuxSink::begin(const CodecParameters& params)
 {
     if (m_started) {
@@ -98,7 +86,7 @@ void FileMuxSink::finish_begin()
     m_started = true;
 }
 
-void FileMuxSink::on_packet(AVPacket* pkt, AVRational enc_time_base)
+void FileMuxSink::write_muxed(AVPacket* pkt, AVRational enc_time_base)
 {
     av_packet_rescale_ts(pkt, enc_time_base, m_video->time_base);
     pkt->stream_index = m_video->index;
@@ -131,7 +119,7 @@ void FileMuxSink::on_packet(AVPacket* pkt, AVRational enc_time_base)
     roiav::check(av_interleaved_write_frame(m_out.p, pkt), "write video");
 }
 
-void FileMuxSink::write_video(const EncodedPacket& packet)
+void FileMuxSink::on_packet(const EncodedPacket& packet)
 {
     roiav::Packet pkt;
     if (av_new_packet(pkt.p, static_cast<int>(packet.payload.size())) < 0) {
@@ -144,7 +132,7 @@ void FileMuxSink::write_video(const EncodedPacket& packet)
     if (packet.key_frame) {
         pkt.p->flags |= AV_PKT_FLAG_KEY;
     }
-    on_packet(pkt.p, AVRational{packet.time_base.num, packet.time_base.den});
+    write_muxed(pkt.p, AVRational{packet.time_base.num, packet.time_base.den});
 }
 
 void FileMuxSink::write_audio(AVPacket* pkt, AVRational src_time_base)

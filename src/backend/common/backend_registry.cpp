@@ -29,6 +29,7 @@ const IEncoderBackend& vaapi_backend();
 const IEncoderBackend& nvenc_backend();
 const IEncoderBackend& x264_backend();
 const IEncoderBackend& x265_backend();
+const IEncoderBackend& x264_direct_backend();
 
 namespace {
 
@@ -40,6 +41,7 @@ const IEncoderBackend* backend_for(Backend kind)
     case Backend::NvidiaNvenc: return &nvenc_backend();
     case Backend::X264:  return &x264_backend();
     case Backend::X265:  return &x265_backend();
+    case Backend::X264Direct: return &x264_direct_backend();
     case Backend::Auto:  break;
     }
     return nullptr;
@@ -49,7 +51,8 @@ const IEncoderBackend* backend_for(Backend kind)
 /// excluded. Used only to honour allow_unlisted -- it is not a default preference order,
 /// which 4.1 removed on purpose.
 constexpr Backend kAllBackends[] = {
-    Backend::IntelOneVpl, Backend::Vaapi, Backend::NvidiaNvenc, Backend::X264, Backend::X265};
+    Backend::IntelOneVpl, Backend::Vaapi, Backend::NvidiaNvenc, Backend::X264,
+    Backend::X265, Backend::X264Direct};
 
 } // namespace
 

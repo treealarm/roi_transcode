@@ -70,6 +70,7 @@ add_library(sve STATIC
     src/backend/ffmpeg/vaapi_backend.cpp
     src/backend/nvenc/nvenc_backend.cpp
     src/backend/software/software_backend.cpp
+    src/backend/x264/x264_backend.cpp
     src/core/logging.cpp
     src/core/memory_type.cpp
     src/core/pixel_format.cpp

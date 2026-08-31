@@ -70,6 +70,8 @@ public:
         const BackendFrameControl& control) const override;
     Result<EncodedPacket> ReceivePacket(BackendSession& session) const override;
     Status Flush(BackendSession& session) const override;
+    Result<CodecParameters> GetCodecParameters(BackendSession& session) const override;
+    BackendStatistics Statistics(const BackendSession& session) const override;
 
 protected:
     /// The libavcodec encoder to open, by output codec.

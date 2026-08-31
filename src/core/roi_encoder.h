@@ -44,14 +44,16 @@ public:
     EncoderCapabilities capabilities() const;
     // Human-readable name of the backend that actually opened, codec included.
     const char* label() const;
-    AVCodecContext* ctx() { return session().enc.p; }
-    AVRational time_base() const { return session().enc.p->time_base; }
+    /// What the opened encoder produces -- codec, geometry, time base, extradata. Read
+    /// from the backend once at open, because that is the only thing every backend can
+    /// answer; there is no AVCodecContext here any more to reach into.
+    const CodecParameters& codec_parameters() const { return m_params; }
 
     /// How many frames needed a pixel-format conversion or an upload to the GPU before the
     /// encoder would take them. Both zero is what zero-copy means, and the only way to
     /// tell a factory frame that avoided the copy from one that merely moved it.
-    long frames_converted() const { return session().frames_converted; }
-    long frames_uploaded() const { return session().frames_uploaded; }
+    long frames_converted() const { return statistics().frames_converted; }
+    long frames_uploaded() const { return statistics().frames_uploaded; }
 
     /// A frame in memory the encoder reads directly, when the backend can hand one out.
     Result<FrameBufferPtr> create_frame(MemoryType memory);
@@ -79,13 +81,17 @@ private:
     // frame entry points, is this class.
     void drain();
 
-    // These four backends are all libavcodec, and the file pipeline still needs the codec
-    // context for the muxer's stream parameters. A backend on its own SDK would not go
-    // through RoiEncoder at all in its present shape -- which is the next thing to fix,
-    // not something to pretend is already done.
-    LibavSession& session() const { return libav(*m_session.get()); }
+    /// What the session did, asked of the backend that owns it. This used to reach into
+    /// LibavSession directly, which meant every backend had to be a libavcodec backend --
+    /// and the first one that was not crashed here rather than at its own code.
+    BackendStatistics statistics() const
+    {
+        return m_backend && m_session ? m_backend->Statistics(*m_session.get())
+                                      : BackendStatistics{};
+    }
 
     Backend m_kind = Backend::X264;
+    CodecParameters m_params;
     long m_backends_declined = 0;
     std::vector<std::string> m_backends_skipped;
     Codec m_codec = Codec::H265;

@@ -147,7 +147,7 @@ Report transcode_file(const std::string& input_path,
                 fail(s.message());
             }
             open_mux();
-            file_sink.write_video(packet);
+            file_sink.on_packet(packet);
         }
     };
 

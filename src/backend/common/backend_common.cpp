@@ -410,6 +410,30 @@ Status LibavBackend::SubmitFrame(BackendSession& session, IFrameBuffer& frame,
     return Status::Ok();
 }
 
+Result<CodecParameters> LibavBackend::GetCodecParameters(BackendSession& session) const
+{
+    const LibavSession& s = libav(session);
+    if (s.enc.p == nullptr) {
+        return Status::InvalidArgument("no encoder is open");
+    }
+    CodecParameters out;
+    out.codec = codec_from_av_id(s.enc.p->codec_id);
+    out.width = s.enc.p->width;
+    out.height = s.enc.p->height;
+    out.time_base = Rational{s.enc.p->time_base.num, s.enc.p->time_base.den};
+    if (s.enc.p->extradata != nullptr && s.enc.p->extradata_size > 0) {
+        out.extradata = PacketBuffer::Copy(std::span<const uint8_t>(
+            s.enc.p->extradata, static_cast<std::size_t>(s.enc.p->extradata_size)));
+    }
+    return out;
+}
+
+BackendStatistics LibavBackend::Statistics(const BackendSession& session) const
+{
+    const LibavSession& s = libav(const_cast<BackendSession&>(session));
+    return BackendStatistics{s.frames_converted, s.frames_uploaded};
+}
+
 Result<EncodedPacket> LibavBackend::ReceivePacket(BackendSession& session) const
 {
     LibavSession& s = libav(session);

@@ -28,7 +28,9 @@ const char* RoiEncoder::label() const
         return h264 ? "h264_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)"
                     : "hevc_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)";
     case Backend::X264:
-        return "libx264 (CPU, per-macroblock quantOffsets)";
+        return "libx264 (CPU, via libavcodec)";
+    case Backend::X264Direct:
+        return "libx264 (CPU, direct API, per-macroblock quant_offsets)";
     case Backend::X265:
         return "libx265 (CPU, per-block quantOffsets)";
     default:
@@ -88,7 +90,7 @@ void RoiEncoder::open(const BackendConfig& config, PacketSink& sink)
 void RoiEncoder::attach(PacketSink& sink)
 {
     m_sink = &sink;
-    m_sink->begin(session().enc.p);
+    m_sink->begin(m_params);
 }
 
 EncoderCapabilities RoiEncoder::capabilities() const
@@ -165,13 +167,23 @@ void RoiEncoder::open_deferred(const BackendConfig& config)
 
     m_codec = config.codec;
 
+    // Asked of the backend rather than read off its session: this is what replaced
+    // reaching for an AVCodecContext, and it is why a backend on its own SDK can now
+    // reach the muxer at all.
+    auto params = m_backend->GetCodecParameters(*m_session.get());
+    if (!params) {
+        fail(params.status().message());
+    }
+    m_params = std::move(params.value());
+
     // libx265 and the hardware wrappers hand back packets with no duration. The
     // mp4 muxer derives each sample's duration from the next packet, so with
     // nothing following it the final sample is silently dropped -- one frame
     // short, and the file a frame shorter than the source. MPEG-TS does not
     // care, which is why this only ever showed up in mp4.
     const AVRational fps{config.input.frame_rate.num, std::max(config.input.frame_rate.den, 1)};
-    m_frame_duration = av_rescale_q(1, av_inv_q(fps), session().enc.p->time_base);
+    const AVRational tb{m_params.time_base.num, std::max(m_params.time_base.den, 1)};
+    m_frame_duration = av_rescale_q(1, av_inv_q(fps), tb);
     if (m_frame_duration <= 0) {
         m_frame_duration = 1;
     }
@@ -188,13 +200,18 @@ void RoiEncoder::drain()
             }
             fail(pkt.status().message());
         }
-        // The public EncodedPacket only borrows; the AVPacket behind it is the session's,
-        // and the sink wants that -- it rescales and muxes with libav's own calls.
-        AVPacket* raw = session().pkt.p;
-        if (raw->duration <= 0) {
-            raw->duration = m_frame_duration;
+        // The packet the backend handed back, and nothing reached past it to get here.
+        // A duration the encoder left unset is filled in from the frame rate: the mp4
+        // muxer derives a sample's duration from the next packet, so with nothing
+        // following it the last sample is silently dropped.
+        EncodedPacket out = pkt.value();
+        if (out.duration <= 0) {
+            out.duration = m_frame_duration;
         }
-        m_sink->on_packet(raw, session().enc.p->time_base);
+        if (out.time_base.den <= 0) {
+            out.time_base = m_params.time_base;
+        }
+        m_sink->on_packet(out);
     }
 }
 

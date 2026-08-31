@@ -151,7 +151,7 @@ struct Session::Impl {
                 handler->on_packet(packet);
             }
             if (file) {
-                file->write_video(packet);
+                file->on_packet(packet);
             }
         }
     }

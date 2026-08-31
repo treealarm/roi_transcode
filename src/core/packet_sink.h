@@ -20,9 +20,16 @@ public:
     virtual ~PacketSink() = default;
 
     // Called once, after the encoder is open and before any packet arrives.
-    virtual void begin(AVCodecContext* enc) = 0;
-    // `pkt` is in `enc_time_base` and is consumed by the sink.
-    virtual void on_packet(AVPacket* pkt, AVRational enc_time_base) = 0;
+    //
+    // CodecParameters rather than an AVCodecContext, and that is the change TZ v4.1 §20
+    // forces. A sink taking a context could only ever be fed by a backend that had one,
+    // which made this interface -- the one the whole file pipeline hangs off -- a
+    // libavcodec interface wearing a neutral name. A backend on its own SDK could compile
+    // and could not deliver a packet anywhere.
+    virtual void begin(const CodecParameters& params) = 0;
+    // The packet carries its own time base, so there is nothing to pass beside it and
+    // nothing for a caller to get out of step with.
+    virtual void on_packet(const EncodedPacket& packet) = 0;
     virtual void end() = 0;
 };
 
@@ -41,21 +48,16 @@ public:
     // `pkt` is in `src_time_base` and is consumed.
     void write_audio(AVPacket* pkt, AVRational src_time_base);
 
-    /// The same as on_packet, for a caller holding the public packet type rather than an
-    /// AVPacket. Costs one copy into an AVPacket the muxer can take; the alternative is
-    /// exposing libav's packet through the public API, which is the thing this library
-    /// spends effort not doing.
-    void write_video(const EncodedPacket& packet);
-
-    void begin(AVCodecContext* enc) override;
-    /// The same, for a caller that has the public codec parameters rather than a context.
-    void begin(const CodecParameters& params);
-    void on_packet(AVPacket* pkt, AVRational enc_time_base) override;
+    void begin(const CodecParameters& params) override;
+    void on_packet(const EncodedPacket& packet) override;
     void end() override;
 
 private:
     void open_video_stream();
     void finish_begin();
+    /// The muxer's own step: rescale, guard DTS monotonicity, write. Takes an
+    /// AVPacket because libavformat does; nothing above this line does.
+    void write_muxed(AVPacket* pkt, AVRational enc_time_base);
 
     std::string m_path;
     std::string m_movflags;
@@ -69,38 +71,6 @@ private:
     // Last DTS handed to the muxer, in the video stream's time base. Guards the monotonicity
     // the mp4 muxer requires; see on_packet.
     int64_t m_last_dts = AV_NOPTS_VALUE;
-};
-
-// Hands packets to a callback instead of a file.
-class CallbackSink : public PacketSink {
-public:
-    using OnPacket = std::function<void(const AVPacket*, AVRational)>;
-    // `on_open` reports the opened encoder so a caller can read codecpar out of
-    // it -- a remote consumer needs the extradata before the first packet.
-    using OnOpen = std::function<void(AVCodecContext*)>;
-
-    explicit CallbackSink(OnPacket on_packet, OnOpen on_open = {})
-        : m_on_packet(std::move(on_packet)), m_on_open(std::move(on_open))
-    {
-    }
-
-    void begin(AVCodecContext* enc) override
-    {
-        if (m_on_open) {
-            m_on_open(enc);
-        }
-    }
-    void on_packet(AVPacket* pkt, AVRational tb) override
-    {
-        if (m_on_packet) {
-            m_on_packet(pkt, tb);
-        }
-    }
-    void end() override {}
-
-private:
-    OnPacket m_on_packet;
-    OnOpen m_on_open;
 };
 
 } // namespace sve

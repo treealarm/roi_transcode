@@ -38,6 +38,7 @@
 
 #include "sve/backend_selection.h"
 #include "sve/capabilities.h"
+#include "sve/codec_parameters.h"
 #include "sve/frame_buffer.h"
 #include "sve/input_format.h"
 #include "sve/packet_handler.h"
@@ -105,6 +106,14 @@ struct BackendFrameControl {
     int64_t pts = 0;
     /// Optional H.264/H.265 user-data-unregistered SEI (UUID || payload). Empty skips.
     std::span<const uint8_t> sei_unregistered;
+};
+
+/// What one session did on its way to producing packets -- §21 and Appendix C.
+struct BackendStatistics {
+    /// Frames the encoder would not take in the format they arrived in.
+    long frames_converted = 0;
+    /// Frames that had to be uploaded to device memory first.
+    long frames_uploaded = 0;
 };
 
 /// One opened encoder. What is inside depends entirely on the backend -- libavcodec's
@@ -198,6 +207,22 @@ public:
     /// Tells the encoder no more frames are coming. Packets still come out through
     /// ReceivePacket afterwards.
     virtual Status Flush(BackendSession& session) const = 0;
+
+    /// What the opened encoder produces, in the public vocabulary -- §8.11.
+    ///
+    /// On the interface rather than read off the session by the caller, and that is the
+    /// whole point of it being here. The file pipeline needs the codec, the geometry, the
+    /// time base and the extradata to open a muxer; it used to reach into the session for
+    /// an AVCodecContext, which meant every backend had to have one. A backend on its own
+    /// SDK has no such thing and answers this from its own headers.
+    virtual Result<CodecParameters> GetCodecParameters(BackendSession& session) const = 0;
+
+    /// What this session did that the caller did not ask for -- §21.
+    ///
+    /// Conversions and uploads are the two that matter: both zero is what zero-copy means,
+    /// and without a number there is no way to tell a factory frame that avoided the copy
+    /// from one that merely moved it.
+    virtual BackendStatistics Statistics(const BackendSession& session) const = 0;
 
     /// Some backends open successfully and only fail on the first frame. Those ask for a
     /// probe: the caller encodes one throwaway frame, and reopens if it worked.

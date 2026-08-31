@@ -43,6 +43,11 @@ enum class Backend {
     NvidiaNvenc,
     X264,
     X265,
+    /// libx264 through its own API rather than through libavcodec -- TZ v4.1 §5.4.
+    /// Alongside X264 rather than instead of it, for as long as the two need comparing:
+    /// integration/scripts/backend-compare.sh is what says whether the direct path keeps
+    /// the zone as well, and it cannot say that if only one of them exists.
+    X264Direct,
 };
 
 

@@ -91,7 +91,13 @@ EncoderConfig config_for(Backend backend, Codec codec)
     cfg.settings.encoder = backend;
     cfg.settings.codec = codec;
     cfg.settings.crf = 30;
-    cfg.settings.metadata.bitstream_sei = false;
+    // On, and on deliberately. It was off here until a submitted SEI payload turned out to
+    // outlive the call that submitted it -- x264 writes it when the frame is finally coded,
+    // which with lookahead is several calls later -- and the crash landed in the file
+    // pipeline rather than in this suite, because this suite was not asking for any SEI.
+    // A conformance test that skips the metadata path does not cover the metadata path.
+    cfg.settings.metadata.bitstream_sei = true;
+    cfg.settings.quality.kinds["plate"] = KindQuality{-10, 0.02};
     cfg.log = [](LogLevel, std::string_view) {};
     return cfg;
 }
@@ -224,10 +230,24 @@ void conformance(Backend backend, Codec codec, const char* label)
         }
     };
 
+    // A box that moves with the drawn square, so every frame carries regions: without one
+    // the encoder submits an empty region list and the whole adaptive path -- the quant
+    // offsets, the SEI, the thing this library is for -- goes untested.
+    std::vector<Box> boxes(1);
     for (int i = 0; i < kFrames; ++i) {
         draw(*pixels, i);
+        boxes[0] = Box{};
+        boxes[0].kind = "plate";
+        boxes[0].x = static_cast<float>((i * 7) % (kWidth - 64) + 32) / kWidth;
+        boxes[0].y = static_cast<float>((i * 3) % (kHeight - 64) + 32) / kHeight;
+        boxes[0].width = 64.0f / kWidth;
+        boxes[0].height = 64.0f / kHeight;
+        boxes[0].confidence = 0.9f;
+        boxes[0].track_id = 1;
+
         FrameMetadata meta;
         meta.timestamp = MediaTimestamp{i, Rational{1, kTimeBase}};
+        meta.regions.boxes = boxes;
         Status s = enc->SubmitFrame(TimedFrame{make_frame(pixels, i), meta});
         while (s.code() == StatusCode::Again) {
             collect();
@@ -332,6 +352,7 @@ int main()
     // of it runs, and the output says which.
     const Candidate candidates[] = {
         {Backend::X264, "x264"},
+        {Backend::X264Direct, "x264direct"},
         {Backend::X265, "x265"},
         {Backend::IntelOneVpl, "onevpl"},
         {Backend::Vaapi, "vaapi"},
