@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package dapr.proto.runtime.v1;
+import "google/protobuf/empty.proto";
+
+service Dapr {
+  // Publishes events to the specific topic.
+  rpc PublishEvent(PublishEventRequest) returns (google.protobuf.Empty) {}
+}
+
+// PublishEventRequest is the message to publish event data to pubsub topic
+message PublishEventRequest {
+  // The name of the pubsub component
+  string pubsub_name = 1;
+
+  // The pubsub topic
+  string topic = 2;
+
+  // The data which will be published to topic.
+  bytes data = 3;
+
+  // The content type for the data (optional).
+  string data_content_type = 4;
+
+  // The metadata passing to pub components
+  //
+  // metadata property:
+  // - key : the key of the message.
+  map<string, string> metadata = 5;
+}
+
+

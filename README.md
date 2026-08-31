@@ -48,7 +48,7 @@ once.
 ## Layout
 
 The tree follows TZ v2.0 §52, which describes the **library**. Everything of ours that the
-specification does not mention -- the gRPC service, its JSON adapter, the CLI, the ta_vms
+specification does not mention -- the gRPC service, its JSON adapter, the CLI and the
 scripts -- lives under `integration/` and is built only with `SVE_BUILD_INTEGRATION=ON`.
 `check.sh` verifies that separation on every run by configuring the library with the
 integration switched off.
@@ -108,8 +108,8 @@ Writes `testdata/synth.mp4` (plate `A123BC 77` on `testsrc2`) and
 ## gRPC service (+ optional Dapr)
 
 Two entry points, one `Settings` shared by both. Proto:
-`../proto/roi_transcode.proto` (repository-wide, with every other ta_vms
-service contract).
+`proto/roi_transcode.proto`. ta_vms keeps its own copy of that file for its VmsFs
+client -- the reasoning is in `integration/CMakeLists.txt`, above `ROI_PROTO_DIR`.
 
 - **File job** — `StartFileJob` / `GetJob` / `CancelJob` / `ListJobs`, the same
   pattern as `ta_vms/media_server` EdgeImport: start returns immediately, poll
@@ -366,6 +366,19 @@ given proves nothing; one built from `truth.json` is independent of it. `check.s
 verifies the truth actually describes the video before trusting it -- a clip and
 a JSON that disagreed would make every mask derived from them a lie, and nothing
 downstream would notice.
+
+## Docker
+
+```bash
+./docker/build.sh          # roi-deps (once), then treealarm/roitrc
+./docker/build.sh --deps   # rebuild the base too
+```
+
+`roi-deps` is the C++ toolchain and the vcpkg tree with FFmpeg built for qsv/vaapi. It is a
+separate image because it takes most of the build time and changes almost never, and it is
+deliberately not shared with ta_vms' `ta-deps`: this is the only consumer that needs
+qsv/vaapi, and the only one that does not link openvino, which is most of what `ta-deps`
+spends its time on.
 
 ## Checks
 

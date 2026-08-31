@@ -6,10 +6,8 @@
 
 FROM roi-deps AS builder
 
-WORKDIR /build
-COPY . /build
-
-WORKDIR /build/roi_transcode
+WORKDIR /src
+COPY . /src
 
 # Release, deliberately: roi-deps uses a release-only vcpkg overlay triplet, so a
 # Debug configure would look for debug libraries that were never built.
@@ -73,7 +71,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY --from=builder /build/roi_transcode/build/integration/roi-transcode-svc /app/
+COPY --from=builder /src/build/integration/roi-transcode-svc /app/
 COPY --from=builder /runtime-libs /app/
 
 ENV LD_LIBRARY_PATH=/app

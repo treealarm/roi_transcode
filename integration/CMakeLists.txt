@@ -54,13 +54,16 @@ if(SVE_BUILD_TESTS)
 endif()
 
 # ---------------------------------------------------------------------------
-# The gRPC service. Protos live in the repository-wide proto/ directory, next to every
-# other ta_vms service contract; overridable so an extracted copy can point elsewhere.
+# The gRPC service. The contract lives in this repository because the server does; ta_vms
+# keeps its own copy of the same file for its VmsFs client. Two copies is the price of the
+# split, and protobuf will not complain about a drift between them -- a field added on one
+# side is ignored on the other -- so they are changed together or not at all. Still
+# overridable, so a build driven from a ta_vms checkout can point at that copy instead.
 # ---------------------------------------------------------------------------
 find_package(Protobuf CONFIG REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
 
-set(ROI_PROTO_DIR "${CMAKE_SOURCE_DIR}/../proto" CACHE PATH
+set(ROI_PROTO_DIR "${CMAKE_SOURCE_DIR}/proto" CACHE PATH
     "Directory holding roi_transcode.proto and dapr/dapr_runtime.proto")
 cmake_path(SET ROI_PROTO_DIR NORMALIZE "${ROI_PROTO_DIR}")
 set(ROI_PROTO_FILE ${ROI_PROTO_DIR}/roi_transcode.proto)
