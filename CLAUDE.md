@@ -1,5 +1,20 @@
 # Architecture rules
 
+## Start here, every session
+
+**Read `docs/STATUS.md` before doing anything else.** This file holds the rules; that one
+holds the state — what is done and verified, what was decided and why, what is open, and
+what to pick up next. A chat is not shared state and does not survive a new window; that
+file is what does, and the repository's rule is that anything which must outlive a session
+gets written there and committed.
+
+The pair is deliberate and there are exactly two documents in `docs/`: the customer's
+specification, which says where we are going, and `STATUS.md`, which says where we are.
+
+When you finish a piece of work, update `STATUS.md` in the same commit — its "Где мы
+сейчас" and "Что дальше" sections above all. A stale status file is worse than none: the
+next session trusts it and re-derives from a wrong starting point.
+
 ## What this repository is
 
 `smart-video-encoder` — the adaptive ROI encoder built to the customer's specification
@@ -8,10 +23,15 @@
 its own with its own specification, its own acceptance tests and its own dependency
 profile. The whole history came with it — `git log` here goes back to the first commit.
 
-`ta_vms` is now a **client**: it deploys `roi-transcode-svc` as a prebuilt image and calls
-it over `proto/roi_transcode.proto`, of which it keeps its own copy for its C# `VmsFs`
-client. Nothing in `include/` or `src/` knows ta_vms exists, and the targets
-`public_headers_isolated` / `public_headers_selfcontained` are what keep that true.
+`ta_vms` is a **consumer**: it pins this repository as a submodule and builds its own
+service, `roitrc`, on top of the library. That service — gRPC, Dapr, a job model, a path
+sandbox — lived here until 2026-08-31 and does not any more, because none of it appears in
+the specification and it dragged grpc and protobuf in beside a library that needs neither.
+
+So the rule for anything new: if it would only make sense to ta_vms, it belongs in ta_vms.
+This repository holds the library, its examples and its acceptance. Nothing in `include/`
+or `src/` knows ta_vms exists, and the targets `public_headers_isolated` /
+`public_headers_selfcontained` are what keep that true.
 
 ## Language conventions
 
@@ -65,11 +85,14 @@ compiled by the embedding project, not by us.
 ## The library / integration split is load-bearing
 
 `include/`, `src/`, `tests/` and `benchmarks/` are the library the specification describes
-(§52). Everything of ours that the specification does not mention — the gRPC service, its
-JSON adapter, the CLI, the scripts — lives under `integration/` and is built only with
-`SVE_BUILD_INTEGRATION=ON`, which is **off** by default. `check.sh` configures the library
-with the integration switched off on every run, so the separation is checked rather than
-merely intended.
+(§52). What it does not mention — the CLI, its JSON adapter, the scripts — lives under
+`integration/` and is built only with `SVE_BUILD_INTEGRATION=ON`, which is **off** by
+default. `check.sh` configures the library with the integration switched off on every run,
+so the separation is checked rather than merely intended.
+
+`check.sh` drives the library directly, and the frame API through `roi-frame-push`; no step
+of it goes over a network. That is deliberate and worth keeping: a test that needs a server
+to answer is testing the server.
 
 §20 of the specification makes FFmpeg opt-in interop rather than the engine. Direct
 libx264 and libx265 backends exist for that reason; keep new encoder work on that side of
@@ -78,11 +101,13 @@ type.
 
 ## Docker images
 
-Two: `roi-deps` (the toolchain and the vcpkg tree, built from
-`docker/intel/Dockerfile.deps`) and `treealarm/roitrc:latest` on top of it
-(`docker/intel/Dockerfile`). `./docker/build.sh` builds both. That image name is ta_vms'
-existing convention for this service, not a new one -- its compose and `ta_install`'s both
-already name it, so keep it.
+One: `roi-deps`, a build environment rather than a product — the toolchain and the vcpkg
+tree, from `docker/intel/Dockerfile.deps`:
+
+    docker build -t roi-deps -f docker/intel/Dockerfile.deps docker/intel
+
+ta_vms builds its own service image on top of it. There is no service image here, and
+adding one would mean the service had come back.
 
 `roi-deps` is deliberately **not** ta_vms' `ta-deps`, and the split is load-bearing: this
 is the only consumer that needs qsv/vaapi (and the system `libdrm-dev` vcpkg's libva

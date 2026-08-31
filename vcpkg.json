@@ -58,14 +58,6 @@
       "dependencies": [
         "nlohmann-json"
       ]
-    },
-    "service": {
-      "description": "The gRPC service -- ta_vms integration, not part of the library",
-      "dependencies": [
-        "grpc",
-        "nlohmann-json",
-        "protobuf"
-      ]
     }
   }
 }

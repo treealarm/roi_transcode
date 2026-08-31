@@ -1,12 +1,15 @@
-# ta_vms integration: everything that is ours rather than the customer's.
+# Everything around the library that the specification does not describe.
 #
-# The gRPC service (roitrc), its JSON adapter, the CLI and the smoke tool. None of this
-# appears in TZ v2.0 §52, which describes the library alone -- keeping it in its own
-# directory is what lets the tree above match that document, and what would let the
-# library be extracted later by moving one directory rather than untangling two.
+# The CLI, its JSON adapter and the quality metrics: the example applications of §52 and
+# the harness the acceptance tests drive. Off by default, so a consumer embedding the
+# library never builds any of it.
 #
-# The dependency arrow points one way only: integration links sve, never the
-# reverse.
+# The gRPC service that used to live here left on 2026-08-31 for the ta_vms repository,
+# which is whose it was: Dapr, a job model and a path sandbox appear nowhere in this
+# specification, and keeping them here meant shipping grpc and protobuf beside a library
+# that needs neither. What stays is what the library's own checks use.
+#
+# The dependency arrow points one way only: integration links sve, never the reverse.
 
 find_package(nlohmann_json CONFIG REQUIRED)
 
@@ -52,92 +55,3 @@ if(SVE_BUILD_TESTS)
     target_compile_options(roi_json_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME roi_json COMMAND roi_json_test)
 endif()
-
-# ---------------------------------------------------------------------------
-# The gRPC service. The contract lives in this repository because the server does; ta_vms
-# keeps its own copy of the same file for its VmsFs client. Two copies is the price of the
-# split, and protobuf will not complain about a drift between them -- a field added on one
-# side is ignored on the other -- so they are changed together or not at all. Still
-# overridable, so a build driven from a ta_vms checkout can point at that copy instead.
-# ---------------------------------------------------------------------------
-find_package(Protobuf CONFIG REQUIRED)
-find_package(gRPC CONFIG REQUIRED)
-
-set(ROI_PROTO_DIR "${CMAKE_SOURCE_DIR}/proto" CACHE PATH
-    "Directory holding roi_transcode.proto and dapr/dapr_runtime.proto")
-cmake_path(SET ROI_PROTO_DIR NORMALIZE "${ROI_PROTO_DIR}")
-set(ROI_PROTO_FILE ${ROI_PROTO_DIR}/roi_transcode.proto)
-set(DAPR_PROTO_FILE ${ROI_PROTO_DIR}/dapr/dapr_runtime.proto)
-
-add_executable(roi-transcode-svc
-    svc/svc_main.cpp
-    svc/job/roi_job_manager.cpp
-    svc/grpc/proto_convert.cpp
-    svc/grpc/roi_file_service.cpp
-    svc/grpc/roi_stream_service.cpp
-    svc/grpc/dapr_publisher.cpp
-    svc/grpc/path_guard.cpp
-)
-protobuf_generate(
-    TARGET roi-transcode-svc
-    IMPORT_DIRS ${ROI_PROTO_DIR}
-    PROTOS ${ROI_PROTO_FILE} ${DAPR_PROTO_FILE}
-)
-protobuf_generate(
-    TARGET roi-transcode-svc
-    LANGUAGE grpc
-    IMPORT_DIRS ${ROI_PROTO_DIR}
-    PROTOS ${ROI_PROTO_FILE} ${DAPR_PROTO_FILE}
-    PLUGIN protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
-    GENERATE_EXTENSIONS .grpc.pb.cc .grpc.pb.h
-)
-target_include_directories(roi-transcode-svc PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/svc
-    ${CMAKE_SOURCE_DIR}/src/core
-    ${CMAKE_CURRENT_BINARY_DIR}
-)
-target_link_libraries(roi-transcode-svc PRIVATE
-    sve
-    protobuf::libprotobuf
-    gRPC::grpc
-    gRPC::grpc++
-)
-target_compile_definitions(roi-transcode-svc PRIVATE _CRT_SECURE_NO_WARNINGS)
-target_compile_options(roi-transcode-svc PRIVATE ${SVE_WARNINGS})
-
-if(SVE_BUILD_TESTS)
-    add_executable(path_guard_test
-        ${CMAKE_SOURCE_DIR}/tests/integration/path_guard_test.cpp
-        svc/grpc/path_guard.cpp)
-    target_include_directories(path_guard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/svc)
-    target_compile_options(path_guard_test PRIVATE ${SVE_WARNINGS})
-    add_test(NAME path_guard COMMAND path_guard_test)
-endif()
-
-add_executable(roi_grpc_smoke tools/roi_grpc_smoke.cpp)
-protobuf_generate(
-    TARGET roi_grpc_smoke
-    IMPORT_DIRS ${ROI_PROTO_DIR}
-    PROTOS ${ROI_PROTO_FILE}
-)
-protobuf_generate(
-    TARGET roi_grpc_smoke
-    LANGUAGE grpc
-    IMPORT_DIRS ${ROI_PROTO_DIR}
-    PROTOS ${ROI_PROTO_FILE}
-    PLUGIN protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
-    GENERATE_EXTENSIONS .grpc.pb.cc .grpc.pb.h
-)
-target_include_directories(roi_grpc_smoke PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-target_include_directories(roi_grpc_smoke SYSTEM PRIVATE ${FFMPEG_INCLUDE_DIRS})
-if(FFMPEG_LIBRARY_DIRS)
-    target_link_directories(roi_grpc_smoke PRIVATE ${FFMPEG_LIBRARY_DIRS})
-endif()
-target_link_libraries(roi_grpc_smoke PRIVATE
-    roi_json
-    ${FFMPEG_LIBRARIES}
-    protobuf::libprotobuf
-    gRPC::grpc
-    gRPC::grpc++
-)
-target_compile_options(roi_grpc_smoke PRIVATE ${SVE_WARNINGS})

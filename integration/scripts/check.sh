@@ -120,30 +120,13 @@ for t in object_normalizer_test object_geometry_test geometry_test public_api_te
         fail "$t not built"
     fi
 done
-for t in roi_json_test path_guard_test; do
+for t in roi_json_test; do
     if [[ -x "${BUILD}/${t}" ]]; then
         if "${BUILD}/${t}" >/dev/null 2>&1; then pass "$t"; else fail "$t"; fi
     else
         fail "$t not built"
     fi
 done
-
-step "startup refuses a broken configuration"
-if [[ -x "${BUILD}/roi-transcode-svc" ]]; then
-    for spec in "APP_ID" "ROI_ALLOWED_ROOTS" "relative-root"; do
-        case "$spec" in
-          APP_ID)            out=$(env -u APP_ID -u GRPC_ROI_BIND -u GRPC_ROI_PORT \
-                                   -u ROI_ALLOWED_ROOTS "${BUILD}/roi-transcode-svc" 2>&1); rc=$? ;;
-          ROI_ALLOWED_ROOTS) out=$(env -u ROI_ALLOWED_ROOTS APP_ID=t GRPC_ROI_BIND=127.0.0.1 \
-                                   GRPC_ROI_PORT=50099 "${BUILD}/roi-transcode-svc" 2>&1); rc=$? ;;
-          relative-root)     out=$(env APP_ID=t GRPC_ROI_BIND=127.0.0.1 GRPC_ROI_PORT=50099 \
-                                   ROI_ALLOWED_ROOTS=not/absolute "${BUILD}/roi-transcode-svc" 2>&1); rc=$? ;;
-        esac
-        if [[ $rc -ne 0 && -n "$out" ]]; then pass "refuses ${spec}"; else fail "refuses ${spec}"; fi
-    done
-else
-    fail "roi-transcode-svc not built"
-fi
 
 step "structural: the encoder produced a whole file"
 src_frames=$(count_packets "$SRC" 2>/dev/null || echo 0)
@@ -677,63 +660,6 @@ print(*o['bbox'])" "${crowd}/truth.json")
     fi
 else
     printf '  skip  crowded scene not generated (benchmarks/synthetic/make-scenes.py)\n'
-fi
-
-step "gRPC: both entry points, and the sandbox"
-if [[ -x "${BUILD}/roi-transcode-svc" && -x "${BUILD}/roi_grpc_smoke" ]]; then
-    port=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
-    APP_ID=check GRPC_ROI_BIND=127.0.0.1 GRPC_ROI_PORT="$port" \
-        ROI_ALLOWED_ROOTS="${ROOT}:${WORK}" "${BUILD}/roi-transcode-svc" \
-        >"${WORK}/svc.log" 2>&1 &
-    svc=$!
-    for _ in $(seq 40); do
-        grep -q 'listening on' "${WORK}/svc.log" 2>/dev/null && break
-        sleep 0.25
-    done
-
-    if "${BUILD}/roi_grpc_smoke" "127.0.0.1:${port}" "$SRC" "${WORK}/grpc_job.mp4" \
-        "${ROOT}/testdata/synth_roi.json" >"${WORK}/grpc_job.log" 2>&1; then
-        pass "file job completed"
-        # h264_qsv, not hevc_qsv: the smoke tool asks for H.264 with ENCODER_AUTO. Forcing a
-        # backend made it fail on any machine lacking that one, for a reason it does not test --
-        # and HEVC QSV in particular does not open on this hardware while H.264 QSV does.
-        assert_eq "job reports the backend it used" \
-            "$(grep -oE 'encoder=.+' "${WORK}/grpc_job.log" | head -1 | cut -d= -f2- | cut -d' ' -f1)" \
-            "h264_qsv"
-        if grep -Eq "roi_lag.measured=false roi_lag.samples=0" "${WORK}/grpc_job.log"; then
-            pass "file job exposes roi lag telemetry"
-        else
-            fail "file job roi lag telemetry missing"
-        fi
-    else
-        fail "file job over gRPC"; sed 's/^/      /' "${WORK}/grpc_job.log" >&2
-    fi
-
-    if "${BUILD}/roi_grpc_smoke" "127.0.0.1:${port}" "$SRC" "" --stream \
-        >"${WORK}/grpc_stream.log" 2>&1; then
-        streamed=$(grep -oE '[0-9]+ packets streamed back' "${WORK}/grpc_stream.log" | grep -oE '^[0-9]+')
-        assert_eq "stream returns a packet per frame" "${streamed:-0}" "$src_frames"
-        if grep -Eq "roi_lag.measured=true roi_lag.samples=[1-9][0-9]*" "${WORK}/grpc_stream.log"; then
-            pass "stream done exposes roi lag telemetry"
-        else
-            fail "stream done roi lag telemetry missing"
-        fi
-    else
-        fail "frame stream over gRPC"; sed 's/^/      /' "${WORK}/grpc_stream.log" >&2
-    fi
-
-    # A path outside ROI_ALLOWED_ROOTS must be refused, not written.
-    if "${BUILD}/roi_grpc_smoke" "127.0.0.1:${port}" "$SRC" "/etc/roi_escape.mp4" \
-        "${ROOT}/testdata/synth_roi.json" >"${WORK}/grpc_escape.log" 2>&1; then
-        fail "a path outside the sandbox was accepted"
-    else
-        pass "a path outside the sandbox is refused"
-    fi
-
-    kill "$svc" 2>/dev/null
-    wait "$svc" 2>/dev/null || true
-else
-    fail "service or smoke client not built"
 fi
 
 step "the library builds on its own"

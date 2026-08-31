@@ -29,23 +29,23 @@
     {
       "name": "linux-default",
       "inherits": "vcpkg-base",
-      "displayName": "Linux Debug (library + tools + gRPC service)",
+      "displayName": "Linux Debug (library + CLI)",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "SVE_BUILD_INTEGRATION": "ON",
-        "VCPKG_MANIFEST_FEATURES": "intel;tools;service"
+        "VCPKG_MANIFEST_FEATURES": "intel;tools"
       }
     },
     {
       "name": "linux-release",
       "inherits": "vcpkg-base",
-      "displayName": "Linux Release (library + tools + gRPC service)",
+      "displayName": "Linux Release (library + CLI)",
       "binaryDir": "${sourceDir}/build-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "SVE_BUILD_INTEGRATION": "ON",
-        "VCPKG_MANIFEST_FEATURES": "intel;tools;service"
+        "VCPKG_MANIFEST_FEATURES": "intel;tools"
       }
     },
     {
@@ -82,7 +82,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "SVE_BUILD_INTEGRATION": "ON",
-        "VCPKG_MANIFEST_FEATURES": "tools;service"
+        "VCPKG_MANIFEST_FEATURES": "tools"
       }
     }
   ]
