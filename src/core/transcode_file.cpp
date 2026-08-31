@@ -106,11 +106,11 @@ Report transcode_file(const std::string& input_path,
     // follow, and an encoder handed frames has nothing to answer SameAsSource from.
     cfg.settings.codec = resolve_codec(settings.codec, in_v->codecpar->codec_id);
 
-    auto made = SmartVideoEncoder::Create(cfg);
-    if (!made) {
-        fail(made.status().message());
-    }
-    SmartVideoEncoder& enc = *made.value();
+    // Left to propagate: EncoderError is a std::runtime_error, and this entry point
+    // already answers a whole file with one exception. Re-wrapping it in fail() would
+    // throw away the StatusCode a caller can branch on.
+    const std::unique_ptr<SmartVideoEncoder> made = CreateVideoEncoder(cfg);
+    SmartVideoEncoder& enc = *made;
 
     // §13. Built once from the whole timeline: grouping boxes into tracks per frame would be
     // the same work repeated for every frame of the clip.

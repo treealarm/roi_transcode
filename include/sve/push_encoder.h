@@ -56,13 +56,20 @@ struct EncoderEvent {
 
 using EncoderCallback = std::function<void(EncoderEvent)>;
 
+class PushVideoEncoder;
+
+/// The push facade's factory -- TZ v4.1 §8.12. Same shape and the same reasons as
+/// CreateVideoEncoder, and the two share one implementation of validation and selection.
+///
+/// Validates the configuration. The backend is not opened here: the input format may still
+/// arrive through SetInputFormat, and until it is known there is nothing to open. A backend
+/// that will not open is therefore reported from the first Process, as an Error event --
+/// not thrown, because by then the caller has a callback and events are how this facade
+/// speaks. Throws EncoderError only for what can be judged now, at creation.
+std::unique_ptr<PushVideoEncoder> CreatePushVideoEncoder(const SmartEncoderConfig& config);
+
 class PushVideoEncoder {
 public:
-    /// Validates the configuration. The backend is not opened here: the input format may
-    /// still arrive through SetInputFormat, and until it is known there is nothing to open.
-    /// A backend that will not open is reported from the first Process, as an Error event.
-    static Result<std::unique_ptr<PushVideoEncoder>> Create(const SmartEncoderConfig& config);
-
     ~PushVideoEncoder();
     PushVideoEncoder(const PushVideoEncoder&) = delete;
     PushVideoEncoder& operator=(const PushVideoEncoder&) = delete;
@@ -89,6 +96,8 @@ public:
     EncoderStatistics GetStatistics() const;
 
 private:
+    friend std::unique_ptr<PushVideoEncoder> CreatePushVideoEncoder(const SmartEncoderConfig&);
+
     struct Impl;
     explicit PushVideoEncoder(std::unique_ptr<Impl> impl);
     std::unique_ptr<Impl> m_impl;

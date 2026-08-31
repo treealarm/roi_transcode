@@ -71,9 +71,7 @@ TimedFrame frame_at(const std::shared_ptr<Pixels>& pixels, int64_t pts)
 
 std::unique_ptr<PushVideoEncoder> open_push(const SmartEncoderConfig& cfg)
 {
-    auto made = PushVideoEncoder::Create(cfg);
-    CHECK(made.ok());
-    return std::move(made.value());
+    return CreatePushVideoEncoder(cfg);
 }
 
 /// What the callback saw, in order.

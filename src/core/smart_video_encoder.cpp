@@ -274,14 +274,13 @@ struct SmartVideoEncoder::Impl : PacketSink {
 SmartVideoEncoder::SmartVideoEncoder(std::unique_ptr<Impl> impl) : m_impl(std::move(impl)) {}
 SmartVideoEncoder::~SmartVideoEncoder() = default;
 
-Result<std::unique_ptr<SmartVideoEncoder>> SmartVideoEncoder::Create(
-    const SmartEncoderConfig& config)
+std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const SmartEncoderConfig& config)
 {
     if (!config.input.valid()) {
-        return Status::InvalidArgument("input video format is not usable");
+        throw EncoderError(Status::InvalidArgument("input video format is not usable"));
     }
 
-    auto impl = std::make_unique<Impl>(config);
+    auto impl = std::make_unique<SmartVideoEncoder::Impl>(config);
     impl->log = Logger(config.log);
     impl->policy = config.settings.fallback;
 
@@ -303,18 +302,18 @@ Result<std::unique_ptr<SmartVideoEncoder>> SmartVideoEncoder::Create(
         const bool ten_bit = config.input.pixel_format == PixelFormat::P010;
         const CodecProfile profile = config.settings.profile;
         if (ten_bit && profile != CodecProfile::Auto && profile != CodecProfile::H265Main10) {
-            return Status::InvalidArgument(std::string("P010 input needs the h265-main10 "
-                "profile, not ") + codec_profile_name(profile));
+            throw EncoderError(Status::InvalidArgument(std::string("P010 input needs the h265-main10 "
+                "profile, not ") + codec_profile_name(profile)));
         }
         if (!ten_bit && profile == CodecProfile::H265Main10) {
-            return Status::InvalidArgument(
-                "the h265-main10 profile needs ten-bit input; this one is eight");
+            throw EncoderError(Status::InvalidArgument(
+                "the h265-main10 profile needs ten-bit input; this one is eight"));
         }
         if (ten_bit && ep.codec == Codec::H264) {
             // §15.3's ten-bit profile is HEVC. H.264 has a ten-bit profile of its own, but
             // nothing in this specification asks for it, and claiming it would be inventing
             // a contract.
-            return Status::InvalidArgument("ten-bit input is supported for H.265 only");
+            throw EncoderError(Status::InvalidArgument("ten-bit input is supported for H.265 only"));
         }
         ep.profile = profile;
     }
@@ -324,17 +323,17 @@ Result<std::unique_ptr<SmartVideoEncoder>> SmartVideoEncoder::Create(
     if (ep.kind == Encoder::Auto) {
         const std::vector<Encoder>& want = ep.backend_selection.preferred;
         if (want.empty()) {
-            return Status::InvalidArgument(
-                "Encoder::Auto needs a backend preference order; the list is empty");
+            throw EncoderError(Status::InvalidArgument(
+                "Encoder::Auto needs a backend preference order; the list is empty"));
         }
         for (auto it = want.begin(); it != want.end(); ++it) {
             if (*it == Encoder::Auto) {
-                return Status::InvalidArgument(
-                    "Encoder::Auto cannot appear inside its own preference order");
+                throw EncoderError(Status::InvalidArgument(
+                    "Encoder::Auto cannot appear inside its own preference order"));
             }
             if (std::find(want.begin(), it, *it) != it) {
-                return Status::InvalidArgument(
-                    "the backend preference order lists the same backend twice");
+                throw EncoderError(Status::InvalidArgument(
+                    "the backend preference order lists the same backend twice"));
             }
         }
     }
@@ -342,16 +341,16 @@ Result<std::unique_ptr<SmartVideoEncoder>> SmartVideoEncoder::Create(
     if (ep.codec == Codec::SameAsSource) {
         // No source to follow here: this entry point is handed frames, not a file. A caller
         // transcoding a clip resolves it against the input's own codec before Create.
-        return Status::InvalidArgument(
-            "Codec::SameAsSource needs a source; resolve it before creating an encoder");
+        throw EncoderError(Status::InvalidArgument(
+            "Codec::SameAsSource needs a source; resolve it before creating an encoder"));
     }
 
     // §8.4: named outright and unable to produce this codec -- X264 asked for HEVC, say --
     // is Unsupported. Under Auto the same backend is merely skipped, which is why this
     // check is here and not in the chain walk.
     if (ep.kind != Encoder::Auto && !encoder_supports(ep.kind, ep.codec)) {
-        return Status::Unsupported(std::format("the {} backend cannot encode {}",
-            encoder_name(ep.kind), ep.codec == Codec::H264 ? "H.264" : "HEVC"));
+        throw EncoderError(Status::Unsupported(std::format("the {} backend cannot encode {}",
+            encoder_name(ep.kind), ep.codec == Codec::H264 ? "H.264" : "HEVC")));
     }
 
     if (config.input.frame_rate.num > 0 && config.input.frame_rate.den > 0) {
@@ -361,8 +360,12 @@ Result<std::unique_ptr<SmartVideoEncoder>> SmartVideoEncoder::Create(
 
     try {
         impl->encoder.open(ep, *impl);
+    } catch (const EncoderError&) {
+        throw;
     } catch (const std::exception& e) {
-        return Status::DeviceUnavailable(e.what());
+        // RoiEncoder reports an exhausted chain by throwing, and its message already names
+        // every backend that declined and why.
+        throw EncoderError(Status::DeviceUnavailable(e.what()));
     }
 
     // See STATUS.md, decision Р5: the libx265 target-bitrate path is unstable, so it is
@@ -377,7 +380,7 @@ Result<std::unique_ptr<SmartVideoEncoder>> SmartVideoEncoder::Create(
     if (impl->encoder.kind() == Encoder::X265 && ep.codec == Codec::H265
         && ep.rate_control.target_bitrate > 0) {
         if (const Status s = guard_cpu_h265_target(true, impl->policy, impl->log); !s.ok()) {
-            return s;
+            throw EncoderError(s);
         }
         impl->stats.cpu_h265_target_guard = true;
         ++impl->stats.fallbacks_applied;

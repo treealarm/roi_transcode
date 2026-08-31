@@ -83,6 +83,34 @@ private:
     std::string m_message;
 };
 
+/// How the factory functions report a failure -- TZ v4.1 §8.12.
+///
+/// An exception rather than a returned Result, because §8.12 asks for one, and the reason
+/// it can ask is that creating an encoder is not the case Status exists for. Status is
+/// right at the backend boundary, where "this GPU is not here" is the ordinary answer and
+/// the caller's move is to try the next backend. By the time a factory returns, that walk
+/// is over: what is left is a request that cannot be served at all.
+///
+/// It carries the whole Status and not only its text, so a caller can branch on the code
+/// without parsing a message -- InvalidArgument means fix the configuration, Unsupported
+/// means this machine will never do it. Derived from std::runtime_error so that a caller
+/// who catches std::exception, as both of this library's own entry points do, still does.
+class EncoderError : public std::runtime_error {
+public:
+    explicit EncoderError(Status status)
+        : std::runtime_error(status.message().empty() ? "encoder could not be created"
+                                                      : status.message()),
+          m_status(std::move(status))
+    {
+    }
+
+    const Status& status() const noexcept { return m_status; }
+    StatusCode code() const noexcept { return m_status.code(); }
+
+private:
+    Status m_status;
+};
+
 /// A value, or the reason there is none. Deliberately not std::expected: that is C++23 and
 /// this header is part of what an embedder compiles.
 template <typename T>

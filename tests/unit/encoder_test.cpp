@@ -77,9 +77,19 @@ Frame make_frame(const std::shared_ptr<Pixels>& pixels, int64_t pts)
 
 std::unique_ptr<SmartVideoEncoder> open_encoder(const SmartEncoderConfig& cfg)
 {
-    auto made = SmartVideoEncoder::Create(cfg);
-    CHECK(made.ok());
-    return std::move(made.value());
+    return CreateVideoEncoder(cfg);
+}
+
+/// The code a factory refuses with, or Ok when it did not refuse. §8.12 made creation
+/// throw, so asserting on a refusal means catching one.
+StatusCode create_refusal(const SmartEncoderConfig& cfg)
+{
+    try {
+        const auto made = CreateVideoEncoder(cfg);
+        return StatusCode::Ok;
+    } catch (const EncoderError& e) {
+        return e.code();
+    }
 }
 
 void a_new_encoder_is_configured_and_knows_its_backend()
@@ -102,7 +112,7 @@ void an_input_format_that_cannot_exist_is_refused()
 {
     SmartEncoderConfig cfg = config_for();
     cfg.input.height = 0;
-    CHECK(SmartVideoEncoder::Create(cfg).status().code() == StatusCode::InvalidArgument);
+    CHECK(create_refusal(cfg) == StatusCode::InvalidArgument);
 }
 
 void same_as_source_needs_a_source()
@@ -110,7 +120,7 @@ void same_as_source_needs_a_source()
     // This entry point is handed frames, not a file, so there is nothing to mirror. Better
     // an InvalidArgument than an encoder that quietly picked one.
     SmartEncoderConfig cfg = config_for(Encoder::X264, Codec::SameAsSource);
-    CHECK(SmartVideoEncoder::Create(cfg).status().code() == StatusCode::InvalidArgument);
+    CHECK(create_refusal(cfg) == StatusCode::InvalidArgument);
 }
 
 void frames_go_in_and_packets_come_out()
@@ -304,9 +314,7 @@ void a_backend_that_cannot_encode_the_codec_is_left_out_with_its_reason()
     // for something this backend cannot do, and answering with a different one would be
     // the substitution the rule exists to prevent.
     SmartEncoderConfig cfg = config_for(Encoder::X264, Codec::H265);
-    const auto made = SmartVideoEncoder::Create(cfg);
-    CHECK(!made.ok());
-    CHECK(made.status().code() == StatusCode::Unsupported);
+    CHECK(create_refusal(cfg) == StatusCode::Unsupported);
 }
 
 void an_unusable_preference_order_is_refused_before_anything_opens()
@@ -315,25 +323,22 @@ void an_unusable_preference_order_is_refused_before_anything_opens()
     // which amounted to guessing at hardware it cannot see.
     SmartEncoderConfig empty = config_for(Encoder::Auto);
     empty.backend_selection.preferred.clear();
-    const auto no_order = SmartVideoEncoder::Create(empty);
-    CHECK(!no_order.ok());
-    CHECK(no_order.status().code() == StatusCode::InvalidArgument);
+    CHECK(create_refusal(empty) == StatusCode::InvalidArgument);
 
     // Auto cannot appear inside its own order, and no backend twice.
     SmartEncoderConfig recursive = config_for(Encoder::Auto);
     recursive.backend_selection.preferred = {Encoder::Auto, Encoder::X264};
-    CHECK(SmartVideoEncoder::Create(recursive).status().code()
-        == StatusCode::InvalidArgument);
+    CHECK(create_refusal(recursive) == StatusCode::InvalidArgument);
 
     SmartEncoderConfig twice = config_for(Encoder::Auto);
     twice.backend_selection.preferred = {Encoder::X264, Encoder::X264};
-    CHECK(SmartVideoEncoder::Create(twice).status().code() == StatusCode::InvalidArgument);
+    CHECK(create_refusal(twice) == StatusCode::InvalidArgument);
 
     // A well-formed order that no backend in this build can serve fails at open, which is
     // a different answer: the request was valid, the machine could not meet it.
     SmartEncoderConfig hardware_only = config_for(Encoder::Auto);
     hardware_only.backend_selection.preferred = {Encoder::Nvenc};
-    CHECK(!SmartVideoEncoder::Create(hardware_only).ok());
+    CHECK(create_refusal(hardware_only) != StatusCode::Ok);
 }
 
 void diagnostics_go_where_the_caller_says()
@@ -376,13 +381,11 @@ void strict_refuses_where_permissive_degrades()
     SmartEncoderConfig permissive = config_for(Encoder::X265, Codec::H265);
     permissive.settings.rate_control.target_bitrate = 800000;
     permissive.log = [](LogLevel, std::string_view) {};
-    CHECK(SmartVideoEncoder::Create(permissive).ok());
+    CHECK(create_refusal(permissive) == StatusCode::Ok);
 
     SmartEncoderConfig strict = permissive;
     strict.settings.fallback = FallbackPolicy::Strict;
-    const auto refused = SmartVideoEncoder::Create(strict);
-    CHECK(!refused.ok());
-    CHECK(refused.status().code() == StatusCode::Unsupported);
+    CHECK(create_refusal(strict) == StatusCode::Unsupported);
 }
 
 void strict_refuses_a_frame_whose_regions_do_not_fit()

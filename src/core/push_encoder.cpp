@@ -49,11 +49,15 @@ struct PushVideoEncoder::Impl {
         if (encoder) {
             return Status::Ok();
         }
-        auto made = SmartVideoEncoder::Create(config);
-        if (!made) {
-            return made.status();
+        try {
+            encoder = CreateVideoEncoder(config);
+        } catch (const EncoderError& e) {
+            // The one place the facade turns a thrown answer back into a returned one, and
+            // the reason is the caller's position: they are inside Process holding a frame,
+            // with a callback already subscribed, and events are how this facade speaks.
+            // The Status travels whole, so nothing about the failure is lost in the change.
+            return e.status();
         }
-        encoder = std::move(made.value());
         return Status::Ok();
     }
 
@@ -92,11 +96,10 @@ struct PushVideoEncoder::Impl {
 PushVideoEncoder::PushVideoEncoder(std::unique_ptr<Impl> impl) : m_impl(std::move(impl)) {}
 PushVideoEncoder::~PushVideoEncoder() = default;
 
-Result<std::unique_ptr<PushVideoEncoder>> PushVideoEncoder::Create(
-    const SmartEncoderConfig& config)
+std::unique_ptr<PushVideoEncoder> CreatePushVideoEncoder(const SmartEncoderConfig& config)
 {
     return std::unique_ptr<PushVideoEncoder>(
-        new PushVideoEncoder(std::make_unique<Impl>(config)));
+        new PushVideoEncoder(std::make_unique<PushVideoEncoder::Impl>(config)));
 }
 
 Status PushVideoEncoder::SetInputFormat(const InputVideoFormat& format)

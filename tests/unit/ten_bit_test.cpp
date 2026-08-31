@@ -81,19 +81,31 @@ Frame make_frame(const std::shared_ptr<TenBitPixels>& pixels, int64_t pts)
     return frame;
 }
 
+/// The code a factory refuses with, or Ok when it did not refuse.
+StatusCode create_refusal(const SmartEncoderConfig& cfg)
+{
+    try {
+        const auto made = CreateVideoEncoder(cfg);
+        return StatusCode::Ok;
+    } catch (const EncoderError& e) {
+        return e.code();
+    }
+}
+
 /// Runs AT-009 against one backend, or reports why it could not.
 void at_009(Encoder backend, const char* label)
 {
     SmartEncoderConfig cfg = config_for(backend);
 
-    auto made = SmartVideoEncoder::Create(cfg);
-    if (!made) {
+    std::unique_ptr<SmartVideoEncoder> enc;
+    try {
+        enc = CreateVideoEncoder(cfg);
+    } catch (const EncoderError& e) {
         // Either the device is absent or its encoder has no ten-bit path. Both are a SKIP,
-        // and the message the backend gave is the evidence.
-        std::printf("  skip  %s: %s\n", label, made.status().message().c_str());
+        // and the message the backend gave is the evidence AT-009 asks for.
+        std::printf("  skip  %s: %s\n", label, e.what());
         return;
     }
-    std::unique_ptr<SmartVideoEncoder> enc = std::move(made.value());
 
     const EncoderCapabilities caps = enc->GetCapabilities();
     if (!caps.main10) {
@@ -158,14 +170,14 @@ void eight_bit_input_cannot_ask_for_main10()
     SmartEncoderConfig cfg = config_for(Encoder::X265);
     cfg.input.pixel_format = PixelFormat::YUV420P;
     cfg.settings.profile = CodecProfile::H265Main10;
-    CHECK(SmartVideoEncoder::Create(cfg).status().code() == StatusCode::InvalidArgument);
+    CHECK(create_refusal(cfg) == StatusCode::InvalidArgument);
 }
 
 void ten_bit_input_cannot_ask_for_an_eight_bit_profile()
 {
     SmartEncoderConfig cfg = config_for(Encoder::X265);
     cfg.settings.profile = CodecProfile::H265Main;
-    CHECK(SmartVideoEncoder::Create(cfg).status().code() == StatusCode::InvalidArgument);
+    CHECK(create_refusal(cfg) == StatusCode::InvalidArgument);
 }
 
 void ten_bit_h264_is_refused_rather_than_invented()
@@ -175,7 +187,7 @@ void ten_bit_h264_is_refused_rather_than_invented()
     // so the refusal is about the bit depth and not about the backend's codec.
     SmartEncoderConfig cfg = config_for(Encoder::X264);
     cfg.settings.codec = Codec::H264;
-    CHECK(SmartVideoEncoder::Create(cfg).status().code() == StatusCode::InvalidArgument);
+    CHECK(create_refusal(cfg) == StatusCode::InvalidArgument);
 }
 
 } // namespace

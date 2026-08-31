@@ -142,13 +142,26 @@ struct SmartEncoderConfig {
     LogSink log;
 };
 
+class SmartVideoEncoder;
+
+/// Opens a backend and returns an encoder -- TZ v4.1 §8.12.
+///
+/// A free function, and the only public way to make one. §8.12 asks that the codec and the
+/// backend not be spelled into a factory's name, and a static Create on the class is that
+/// same mistake one level up: it makes the class the thing you name to get an encoder,
+/// which is what a second entry point would then have to be named against.
+///
+/// The chain is walked when settings.encoder is Encoder::Auto; a named backend is tried
+/// alone, so asking for QSV and silently getting libx264 is not something that can happen.
+///
+/// Throws EncoderError, carrying the StatusCode, when nothing can serve the request.
+/// Returning nullptr instead is forbidden by §8.12, and rightly: nullptr says only that
+/// something went wrong, while the caller's next move depends entirely on which thing --
+/// InvalidArgument is a configuration to fix, DeviceUnavailable is a machine to change.
+std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const SmartEncoderConfig& config);
+
 class SmartVideoEncoder {
 public:
-    /// Opens a backend and returns an encoder, or the reason none opened. The chain is
-    /// walked when settings.encoder is Encoder::Auto; a named backend is tried alone, so
-    /// asking for QSV and silently getting libx264 is not something that can happen.
-    static Result<std::unique_ptr<SmartVideoEncoder>> Create(const SmartEncoderConfig& config);
-
     ~SmartVideoEncoder();
     SmartVideoEncoder(const SmartVideoEncoder&) = delete;
     SmartVideoEncoder& operator=(const SmartVideoEncoder&) = delete;
@@ -196,6 +209,8 @@ public:
     Report ToReport() const;
 
 private:
+    friend std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const SmartEncoderConfig&);
+
     struct Impl;
     explicit SmartVideoEncoder(std::unique_ptr<Impl> impl);
     std::unique_ptr<Impl> m_impl;

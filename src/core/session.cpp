@@ -231,11 +231,9 @@ Session::Session(const SessionParams& params, PacketHandler* handler)
         ? params.settings.codec
         : (params.codec == InputCodec::H265 ? Codec::H265 : Codec::H264);
 
-    auto made = SmartVideoEncoder::Create(cfg);
-    if (!made) {
-        roiav::fail(made.status().message());
-    }
-    m_impl->encoder = std::move(made.value());
+    // Propagates for the same reason as transcode_file: a Session that cannot open is one
+    // exception to the caller, and EncoderError carries the code with it.
+    m_impl->encoder = CreateVideoEncoder(cfg);
 
     const EncoderStatistics stats = m_impl->encoder->GetStatistics();
     m_impl->report.encoder_used = stats.encoder_used;
