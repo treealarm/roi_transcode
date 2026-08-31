@@ -177,6 +177,13 @@ if(SVE_BUILD_TESTS)
     target_compile_options(ten_bit_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME ten_bit COMMAND ten_bit_test)
 
+    # AT-002/003/006/007 across every backend in the build (§48). Absent hardware is a
+    # skip inside the test, so this runs everywhere and reports how much of it ran.
+    add_executable(backend_conformance_test tests/unit/backend_conformance_test.cpp)
+    target_link_libraries(backend_conformance_test PRIVATE sve)
+    target_compile_options(backend_conformance_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME backend_conformance COMMAND backend_conformance_test)
+
     add_executable(public_api_test tests/unit/public_api_test.cpp)
     target_link_libraries(public_api_test PRIVATE sve)
     target_compile_options(public_api_test PRIVATE ${SVE_WARNINGS})
