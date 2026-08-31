@@ -10,16 +10,30 @@
 // libavcodec-backed HEVC path has been declaring 32x32 in its capabilities, which was a
 // guess about CTU merging and is not what libx265 actually reads.
 //
-// The lifetime is undocumented, and that is the finding rather than an oversight to work
-// around. x264 gives quant_offsets_free and sei_free; x265's x265_picture has a bare
-// `float *quantOffsets` and an x265_sei with no callback at all, so the header says
-// nothing about who owns either or for how long. Guessing "it copies during encode" is
-// exactly the guess that cost a crash on the x264 side, where the header did say
-// otherwise. So neither is freed early: both live in a per-session ring, and the ring is
-// sized from the encoder's own numbers -- lookaheadDepth, bframes and frameNumThreads read
-// back through x265_encoder_parameters after open, which is what x265 actually chose
-// rather than what was asked for. That is correct whether x265 copies or holds, bounded in
-// memory, and derived rather than picked.
+// The lifetime is undocumented for the arrays themselves, and that is the finding rather
+// than an oversight to work around. x264 gives quant_offsets_free and sei_free; x265's
+// x265_picture has a bare `float *quantOffsets` and an x265_sei with no callback at all,
+// so the header says nothing about who owns either or for how long. Guessing "it copies
+// during encode" is exactly the guess that cost a crash on the x264 side, where the header
+// did say otherwise. So neither is freed while x265 might still read it.
+//
+// What the header *does* document is the signal that says when that moment has passed:
+//
+//     void* userData;
+//     /* The value provided on input is returned with the same picture (POC) on output */
+//
+// A token goes in with the picture and comes back out with it, so the held data is keyed by
+// that token and dropped when its own picture emerges -- output being the terminal event
+// for a picture, after analysis has read the offsets and after the SEI has been written.
+// Nothing is guessed and nothing is sized: what is in flight is whatever x265 has not
+// handed back yet.
+//
+// This replaces a ring sized from lookaheadDepth + bframes + frameNumThreads, and that ring
+// was wrong. It assumed a frame recycled after that many submissions was further behind
+// than anything x265 could still be holding; measurement said otherwise. Thirty frames
+// passed and sixty aborted -- heap corruption that surfaced far from its cause, in the
+// demuxer reading the *input* file, because the freed offsets were reused by an unrelated
+// allocation. See STATUS.md, the finding recorded with slice G.
 //
 // The return convention differs too: x264_encoder_encode returns a byte count, x265's
 // returns 1 when a picture came out and 0 while the pipeline is filling. Reading it as a
@@ -31,9 +45,9 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
-#include <deque>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 extern "C" {
@@ -44,11 +58,11 @@ namespace sve {
 
 namespace {
 
-/// One frame's worth of the two things x265 is handed and never says it has finished with.
+/// One frame's worth of what has to outlive the submit call: the offsets x265 reads through
+/// a bare pointer, and the SEI bytes we write ourselves once the picture comes back out.
 struct HeldFrameData {
     std::vector<float> offsets;
     std::vector<uint8_t> sei;
-    x265_sei_payload payload{};
 };
 
 class X265Session final : public BackendSession {
@@ -68,10 +82,12 @@ public:
     /// size, which is a different number entirely.
     int offset_block = 16;
 
-    /// In-flight frame data, kept until the ring wraps. See the header comment: x265 never
-    /// says when it is done with these, so the only safe bound is one it cannot outlive.
-    std::deque<HeldFrameData> held;
-    std::size_t held_limit = 64;
+    /// In-flight frame data, keyed by the token x265 round-trips through x265_picture's
+    /// userData. An entry lives from submit until its own picture comes back out.
+    std::unordered_map<uint64_t, HeldFrameData> held;
+    /// Starts at zero and pre-increments, so a live token is never zero -- which is what
+    /// makes an unset userData on output distinguishable from a real one.
+    uint64_t last_token = 0;
 
     std::vector<uint8_t> payload;
     int64_t pts = 0;
@@ -169,9 +185,6 @@ public:
         x265_param effective{};
         x265_encoder_parameters(session->enc, &effective);
         session->offset_block = effective.rc.qgSize == 8 ? 8 : 16;
-        const int in_flight = effective.lookaheadDepth + effective.bframes
-            + effective.frameNumThreads;
-        session->held_limit = static_cast<std::size_t>(std::max(in_flight, 16)) + 8;
 
         return SessionPtr(session.release());
     }
@@ -206,19 +219,17 @@ public:
             pic_in.stride[i] = plane.stride;
         }
 
-        HeldFrameData& held = take_slot(s);
+        HeldFrameData* slot = nullptr;
+        const uint64_t token = claim_slot(s, &slot);
+        pic_in.userData = token_to_user_data(token);
+        HeldFrameData& held = *slot;
         if (!control.regions.empty()) {
             build_offsets(s, control.regions, held.offsets);
             pic_in.quantOffsets = held.offsets.data();
         }
-        if (!control.sei_unregistered.empty()) {
-            held.sei.assign(control.sei_unregistered.begin(), control.sei_unregistered.end());
-            held.payload.payload = held.sei.data();
-            held.payload.payloadSize = static_cast<int>(held.sei.size());
-            held.payload.payloadType = USER_DATA_UNREGISTERED;
-            pic_in.userSEI.numPayloads = 1;
-            pic_in.userSEI.payloads = &held.payload;
-        }
+        // Kept here and written by us on the way out -- see write_prefix_sei and the header
+        // comment. Not handed to x265: its own user-SEI path corrupts the heap.
+        held.sei.assign(control.sei_unregistered.begin(), control.sei_unregistered.end());
 
         return encode_one(s, &pic_in);
     }
@@ -289,15 +300,90 @@ public:
     }
 
 private:
-    /// The next slot in the ring, recycling the oldest once the ring is full. By then the
-    /// frame it belonged to is further behind than any lookahead x265 reported.
-    static HeldFrameData& take_slot(X265Session& s)
+    /// Our SEI as a HEVC prefix SEI NAL, in the Annex B form x265 emits around it.
+    ///
+    /// Written here rather than handed to x265_picture::userSEI, and that is not a
+    /// preference. x265 4.1's Encoder::copyUserSEIMessages allocates the per-frame payload
+    /// buffer once:
+    ///
+    ///     if (!frame->m_userSEI.payloads[i].payload)
+    ///         frame->m_userSEI.payloads[i].payload = new uint8_t[input.payloadSize];
+    ///     memcpy(frame->m_userSEI.payloads[i].payload, input.payload, input.payloadSize);
+    ///
+    /// -- no size check at all. Frames come from a pool, so the buffer is sized by the
+    /// first payload that frame object ever sees and every later payload is copied into it
+    /// whatever its length. Our payload grows and shrinks with the object count, so a frame
+    /// that first carried two objects and later carries six overruns the heap. 4.3 added a
+    /// grow check; we link 4.1. Confirmed by AddressSanitizer: a 52-byte write into a
+    /// 25-byte region, allocated by an earlier call to that same function.
+    ///
+    /// Making our payload a fixed size would work around it, but the fixed size would have
+    /// to be the worst case the object cap allows -- kilobytes on every frame where tens of
+    /// bytes are used. Writing the NAL is both cheaper and the thing a backend that owns
+    /// its bitstream should be doing anyway.
+    static void append_emulation_protected(std::vector<uint8_t>& out,
+        std::span<const uint8_t> rbsp)
     {
-        s.held.emplace_back();
-        while (s.held.size() > s.held_limit) {
-            s.held.pop_front();
+        int zeros = 0;
+        for (const uint8_t b : rbsp) {
+            // Any 00 00 0x with x <= 3 would read as a start code, so an escape byte goes
+            // in front of it. The escape itself resets the run.
+            if (zeros == 2 && b <= 0x03) {
+                out.push_back(0x03);
+                zeros = 0;
+            }
+            out.push_back(b);
+            zeros = b == 0x00 ? zeros + 1 : 0;
         }
-        return s.held.back();
+    }
+
+    static std::vector<uint8_t> prefix_sei_nal(std::span<const uint8_t> payload)
+    {
+        // payloadType 5, user_data_unregistered, and payloadSize in the ff-then-remainder
+        // form the standard uses for both.
+        std::vector<uint8_t> rbsp;
+        rbsp.reserve(payload.size() + 8);
+        rbsp.push_back(0x05);
+        std::size_t remaining = payload.size();
+        while (remaining >= 0xFF) {
+            rbsp.push_back(0xFF);
+            remaining -= 0xFF;
+        }
+        rbsp.push_back(static_cast<uint8_t>(remaining));
+        rbsp.insert(rbsp.end(), payload.begin(), payload.end());
+        // rbsp_trailing_bits: the stop bit and padding to a byte.
+        rbsp.push_back(0x80);
+
+        std::vector<uint8_t> nal;
+        nal.reserve(rbsp.size() + 8);
+        nal.insert(nal.end(), {0x00, 0x00, 0x00, 0x01});
+        // nal_unit_type 39 (PREFIX_SEI_NUT) in bits 1..6, nuh_layer_id 0,
+        // nuh_temporal_id_plus1 1.
+        nal.push_back(static_cast<uint8_t>(39 << 1));
+        nal.push_back(0x01);
+        append_emulation_protected(nal, rbsp);
+        return nal;
+    }
+
+    /// A slot for one submission, and the token that will retire it. The token rides in
+    /// x265_picture::userData and comes back with the same picture on output.
+    static uint64_t claim_slot(X265Session& s, HeldFrameData** out)
+    {
+        const uint64_t token = ++s.last_token;
+        *out = &s.held[token];
+        return token;
+    }
+
+    static void* token_to_user_data(uint64_t token)
+    {
+        return reinterpret_cast<void*>(static_cast<uintptr_t>(token));
+    }
+
+    /// Zero for a picture that carries no token of ours -- x265_picture_init clears
+    /// userData, and tokens start at one, so "absent" and "valid" cannot be confused.
+    static uint64_t token_from_user_data(const void* user_data)
+    {
+        return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(user_data));
     }
 
     /// Regions to one float per block, in QP units and with our own sign, which is x265's
@@ -342,6 +428,19 @@ private:
         if (got < 0) {
             return Status::BackendError("x265_encoder_encode failed");
         }
+        // The picture is out, so x265 is finished with what came in with it: analysis has
+        // read the offsets, and the SEI is ours to write into this very access unit. The
+        // slot is taken out of the map here -- including for a picture that emerged
+        // carrying no NALs, which is still a picture x265 has handed back -- and its SEI
+        // bytes are moved out to be written below.
+        std::vector<uint8_t> sei;
+        if (got > 0) {
+            const auto it = s.held.find(token_from_user_data(pic_out.userData));
+            if (it != s.held.end()) {
+                sei = std::move(it->second.sei);
+                s.held.erase(it);
+            }
+        }
         if (got == 0 || count == 0) {
             return Status::Ok();
         }
@@ -350,9 +449,25 @@ private:
         for (uint32_t i = 0; i < count; ++i) {
             total += nals[i].sizeBytes;
         }
-        // "the payloads of all output NALs are guaranteed to be sequential in memory", so
-        // one copy from the first payload covers all of them.
-        s.payload.assign(nals[0].payload, nals[0].payload + total);
+
+        // Copied NAL by NAL rather than in one go, because our SEI has to land in a
+        // specific place. An access unit carries its parameter sets first and its prefix
+        // SEI after them, before the first VCL unit -- putting SEI in front of the VPS
+        // would be a non-conforming stream. HEVC VCL types are 0..31, non-VCL 32..63, and
+        // x265 tells us the type of each NAL, so "before the first VCL" is exact rather
+        // than guessed.
+        s.payload.clear();
+        s.payload.reserve(total + sei.size() + 16);
+        bool sei_written = false;
+        for (uint32_t i = 0; i < count; ++i) {
+            if (!sei_written && !sei.empty() && nals[i].type < 32) {
+                const std::vector<uint8_t> nal = prefix_sei_nal(sei);
+                s.payload.insert(s.payload.end(), nal.begin(), nal.end());
+                sei_written = true;
+            }
+            s.payload.insert(s.payload.end(), nals[i].payload,
+                nals[i].payload + nals[i].sizeBytes);
+        }
         s.pts = pic_out.pts;
         s.dts = pic_out.dts;
         s.key = pic_out.sliceType == X265_TYPE_IDR || pic_out.sliceType == X265_TYPE_I;

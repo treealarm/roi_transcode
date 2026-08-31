@@ -22,6 +22,7 @@
 
 #include "sve/encoder.h"
 #include "sve/frame.h"
+#include "sve/metadata.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -186,6 +187,78 @@ int decode_count(Codec codec, const CodecParameters& params,
     return pictures;
 }
 
+/// Our object metadata, read back out of the bitstream the backend produced -- §19.2 and
+/// the synchronisation §19.4 asks for.
+///
+/// This exists because the conformance run used to submit the same single box on every
+/// frame, which made every SEI payload the same length, which is exactly the case that
+/// hides a decoder or encoder mishandling a payload whose size changes. x265 4.1 sizes its
+/// per-frame user-SEI buffer from the first payload a pooled frame ever sees and never
+/// resizes it, so a constant payload was the one input that could not catch it. The frames
+/// below now carry a varying number of objects, and this counts what survived.
+int count_our_sei(const std::vector<std::vector<uint8_t>>& payloads, Codec codec, int* bad)
+{
+    const std::span<const uint8_t, 16> uuid = sei_uuid();
+    // H.264 prefix SEI is nal_unit_type 6 in a one-byte header; HEVC is 39 in a two-byte
+    // one. Everything after the header is RBSP, escape bytes and all.
+    const int header_bytes = codec == Codec::H265 ? 2 : 1;
+    int found = 0;
+    for (const std::vector<uint8_t>& packet : payloads) {
+        for (std::size_t i = 0; i + 4 < packet.size(); ++i) {
+            if (packet[i] != 0 || packet[i + 1] != 0 || packet[i + 2] != 1) {
+                continue;
+            }
+            const std::size_t nal = i + 3;
+            const int type = codec == Codec::H265 ? ((packet[nal] >> 1) & 0x3F)
+                                                  : (packet[nal] & 0x1F);
+            if (type != (codec == Codec::H265 ? 39 : 6)) {
+                continue;
+            }
+            // Undo emulation prevention before reading anything: a 0x03 inside our own
+            // payload would otherwise shift every following byte.
+            std::vector<uint8_t> rbsp;
+            int zeros = 0;
+            for (std::size_t j = nal + header_bytes; j < packet.size(); ++j) {
+                if (zeros == 2 && packet[j] == 0x03) {
+                    zeros = 0;
+                    continue;
+                }
+                if (zeros == 2 && packet[j] <= 0x01) {
+                    break; // the next start code
+                }
+                rbsp.push_back(packet[j]);
+                zeros = packet[j] == 0 ? zeros + 1 : 0;
+            }
+            std::size_t p = 0;
+            while (p < rbsp.size() && rbsp[p] != 0x80) {
+                int payload_type = 0;
+                while (p < rbsp.size() && rbsp[p] == 0xFF) { payload_type += 255; ++p; }
+                if (p >= rbsp.size()) break;
+                payload_type += rbsp[p++];
+                std::size_t payload_size = 0;
+                while (p < rbsp.size() && rbsp[p] == 0xFF) { payload_size += 255; ++p; }
+                if (p >= rbsp.size()) break;
+                payload_size += rbsp[p++];
+                if (p + payload_size > rbsp.size()) break;
+                const std::span<const uint8_t> body(rbsp.data() + p, payload_size);
+                p += payload_size;
+                if (payload_type != 5 || body.size() < 16
+                    || !std::equal(uuid.begin(), uuid.end(), body.begin())) {
+                    continue;
+                }
+                ++found;
+                SeiFrame decoded;
+                // The CRC is checked inside, so this failing means the bytes we wrote are
+                // not the bytes a reader gets -- a NAL written wrong, or a payload cut.
+                if (!decode_sei_payload(body, decoded)) {
+                    ++*bad;
+                }
+            }
+        }
+    }
+    return found;
+}
+
 /// AT-002 / AT-003 / AT-006 for one backend and one codec, or the reason it could not run.
 void conformance(Backend backend, Codec codec, const char* label)
 {
@@ -230,20 +303,29 @@ void conformance(Backend backend, Codec codec, const char* label)
         }
     };
 
-    // A box that moves with the drawn square, so every frame carries regions: without one
+    // Boxes that move with the drawn square, so every frame carries regions: without them
     // the encoder submits an empty region list and the whole adaptive path -- the quant
     // offsets, the SEI, the thing this library is for -- goes untested.
-    std::vector<Box> boxes(1);
+    //
+    // How many of them changes from frame to frame, and that is not decoration. A fixed
+    // count makes every SEI payload the same length, and a payload that never changes
+    // length is the one input that cannot catch a buffer sized once and reused -- which is
+    // exactly what x265 4.1 does with user SEI. This ran green against that bug for as
+    // long as it submitted one box.
+    std::vector<Box> boxes;
     for (int i = 0; i < kFrames; ++i) {
         draw(*pixels, i);
-        boxes[0] = Box{};
-        boxes[0].kind = "plate";
-        boxes[0].x = static_cast<float>((i * 7) % (kWidth - 64) + 32) / kWidth;
-        boxes[0].y = static_cast<float>((i * 3) % (kHeight - 64) + 32) / kHeight;
-        boxes[0].width = 64.0f / kWidth;
-        boxes[0].height = 64.0f / kHeight;
-        boxes[0].confidence = 0.9f;
-        boxes[0].track_id = 1;
+        boxes.assign(static_cast<std::size_t>(1 + (i % 4)), Box{});
+        for (std::size_t b = 0; b < boxes.size(); ++b) {
+            const int nudge = static_cast<int>(b) * 24;
+            boxes[b].kind = "plate";
+            boxes[b].x = static_cast<float>((i * 7 + nudge) % (kWidth - 64) + 32) / kWidth;
+            boxes[b].y = static_cast<float>((i * 3 + nudge) % (kHeight - 64) + 32) / kHeight;
+            boxes[b].width = 64.0f / kWidth;
+            boxes[b].height = 64.0f / kHeight;
+            boxes[b].confidence = 0.9f;
+            boxes[b].track_id = static_cast<uint64_t>(b + 1);
+        }
 
         FrameMetadata meta;
         meta.timestamp = MediaTimestamp{i, Rational{1, kTimeBase}};
@@ -296,8 +378,26 @@ void conformance(Backend backend, Codec codec, const char* label)
         std::string(label) + ": decodes to " + std::to_string(kFrames) + " pictures (got "
             + std::to_string(decoded) + ")");
 
-    std::printf("  ok    %-18s %d frames in, %zu packets out, %d decoded, %s\n", label,
-        kFrames, payloads.size(), decoded, backend_name(stats.encoder_used));
+    // §19.2 and §19.4: the metadata a caller submitted has to come back out of the
+    // bitstream, once per frame, and parse. A backend that carries no SEI at all -- the
+    // Р5 guard turns it off for CPU H.265 -- says so here rather than being asserted
+    // against, because "off" and "broken" must not print the same line.
+    int undecodable = 0;
+    const int sei_found = count_our_sei(payloads, codec, &undecodable);
+    if (sei_found > 0) {
+        check(sei_found == kFrames,
+            std::string(label) + ": one metadata SEI per frame (got "
+                + std::to_string(sei_found) + " of " + std::to_string(kFrames) + ")");
+        check(undecodable == 0,
+            std::string(label) + ": every metadata SEI parses (" + std::to_string(undecodable)
+                + " did not)");
+    }
+    const std::string sei_note =
+        sei_found > 0 ? std::to_string(sei_found) + " sei" : std::string("no sei");
+
+    std::printf("  ok    %-18s %d frames in, %zu packets out, %d decoded, %s, %s\n", label,
+        kFrames, payloads.size(), decoded, sei_note.c_str(),
+        backend_name(stats.encoder_used));
 }
 
 /// AT-007: asking for something a backend cannot do is answered, never absorbed.
