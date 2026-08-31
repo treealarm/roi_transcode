@@ -48,6 +48,9 @@ enum class Backend {
     /// integration/scripts/backend-compare.sh is what says whether the direct path keeps
     /// the zone as well, and it cannot say that if only one of them exists.
     X264Direct,
+    /// libx265 through its own API -- TZ v4.1 §5.4. Alongside X265 for the same reason
+    /// X264Direct sits alongside X264: a comparison needs both sides.
+    X265Direct,
 };
 
 

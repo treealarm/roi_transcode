@@ -31,6 +31,8 @@ const char* RoiEncoder::label() const
         return "libx264 (CPU, via libavcodec)";
     case Backend::X264Direct:
         return "libx264 (CPU, direct API, per-macroblock quant_offsets)";
+    case Backend::X265Direct:
+        return "libx265 (CPU, direct API, per-block quantOffsets)";
     case Backend::X265:
         return "libx265 (CPU, per-block quantOffsets)";
     default:

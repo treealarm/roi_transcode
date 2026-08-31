@@ -193,6 +193,7 @@ const char* backend_name(Backend e)
     case Backend::X264:  return "x264";
     case Backend::X265:  return "x265";
     case Backend::X264Direct: return "x264direct";
+    case Backend::X265Direct: return "x265direct";
     }
     return "?";
 }
@@ -206,6 +207,7 @@ BackendChoice backend_choice_from_name(const char* name)
     if (s == "x264")  return {Backend::X264, {}};
     if (s == "x265")  return {Backend::X265, {}};
     if (s == "x264direct") return {Backend::X264Direct, {}};
+    if (s == "x265direct") return {Backend::X265Direct, {}};
     // "cpu" is Auto over exactly the two software backends. That is not a workaround for
     // the split but the thing itself: whichever of the two cannot produce the codec is
     // skipped with its reason logged, which is what the one combined backend used to do

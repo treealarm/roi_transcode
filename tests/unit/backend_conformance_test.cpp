@@ -325,6 +325,14 @@ void at_007_capability_fallback(Backend backend, Codec codec, const char* label)
             check(!lines.empty(),
                 std::string(label) + ": a fallback was applied and said so");
         }
+        // The case this test missed the first time. An encoder that opened while unable to
+        // honour what was asked has to have counted a fallback; otherwise the request was
+        // neither met nor refused, which is precisely AT-007's FAIL. A backend keyed guard
+        // let X265Direct through here, silently, and this line is what would have said so.
+        if (!enc->GetCapabilities().native_bitrate) {
+            check(stats.fallbacks_applied > 0,
+                std::string(label) + ": a bitrate target it cannot honour was answered");
+        }
         std::printf("  ok    %-18s honoured the request (%lld fallbacks, %zu log lines)\n",
             label, static_cast<long long>(stats.fallbacks_applied), lines.size());
     } catch (const EncoderError& e) {
@@ -354,6 +362,7 @@ int main()
         {Backend::X264, "x264"},
         {Backend::X264Direct, "x264direct"},
         {Backend::X265, "x265"},
+        {Backend::X265Direct, "x265direct"},
         {Backend::IntelOneVpl, "onevpl"},
         {Backend::Vaapi, "vaapi"},
         {Backend::NvidiaNvenc, "nvenc"},

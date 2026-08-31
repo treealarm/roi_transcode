@@ -374,7 +374,12 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const EncoderConfig& confi
     // always could: Auto on a machine with no Quick Sync walks down to the software
     // encoder, and the guard for the path that is known to be unstable would not have
     // fired. Reading it off the opened backend is what makes it hold for every route in.
-    if (impl->encoder.kind() == Backend::X265 && ep.codec == Codec::H265
+    // Keyed on the capability, not on which backend it is. It named Backend::X265 until a
+    // second HEVC software backend existed, and X265Direct -- which has no native bitrate
+    // mode either -- walked straight past it and accepted a target it does not honour.
+    // That is the silent degradation §50 forbids, produced by a guard asking "who are you"
+    // where it meant "what can you do".
+    if (!impl->encoder.capabilities().native_bitrate && ep.codec == Codec::H265
         && ep.rate_control.target_bitrate > 0) {
         if (const Status s = guard_cpu_h265_target(true, impl->policy, impl->log); !s.ok()) {
             throw EncoderError(s);
@@ -569,7 +574,7 @@ Status SmartVideoEncoder::Reconfigure(const RuntimeEncoderSettings& settings)
     if (settings.target_bitrate) {
         RateControlPolicy rc = s.config.settings.rate_control;
         rc.target_bitrate = *settings.target_bitrate;
-        if (s.encoder.kind() == Backend::X265 && s.out_codec == Codec::H265
+        if (!s.encoder.capabilities().native_bitrate && s.out_codec == Codec::H265
             && rc.target_bitrate > 0) {
             // Same guard as at Create, and it answers rather than quietly ignores: the
             // caller is asking now, so Permissive would still be misleading here.

@@ -30,6 +30,7 @@ const IEncoderBackend& nvenc_backend();
 const IEncoderBackend& x264_backend();
 const IEncoderBackend& x265_backend();
 const IEncoderBackend& x264_direct_backend();
+const IEncoderBackend& x265_direct_backend();
 
 namespace {
 
@@ -42,6 +43,7 @@ const IEncoderBackend* backend_for(Backend kind)
     case Backend::X264:  return &x264_backend();
     case Backend::X265:  return &x265_backend();
     case Backend::X264Direct: return &x264_direct_backend();
+    case Backend::X265Direct: return &x265_direct_backend();
     case Backend::Auto:  break;
     }
     return nullptr;
@@ -52,7 +54,7 @@ const IEncoderBackend* backend_for(Backend kind)
 /// which 4.1 removed on purpose.
 constexpr Backend kAllBackends[] = {
     Backend::IntelOneVpl, Backend::Vaapi, Backend::NvidiaNvenc, Backend::X264,
-    Backend::X265, Backend::X264Direct};
+    Backend::X265, Backend::X264Direct, Backend::X265Direct};
 
 } // namespace
 
