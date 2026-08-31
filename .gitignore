@@ -1,7 +1,9 @@
-/build/
-/build-svc/
-/build-cli/
-/build-release/
+# Every build directory, not a list of the ones that existed when this was written.
+# CMakePresets alone defines build, build-cli, build-release and build-software, and
+# build-software was missing here; a dependency-scan or sanitizer tree (build-asan,
+# build-prof-*) is not in any preset and would have been missed too. One pattern cannot
+# fall behind the way an enumeration does.
+/build*/
 /out/
 /.cache/
 *.mp4
