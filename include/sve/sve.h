@@ -13,7 +13,7 @@
 //
 // One header is deliberately not pulled in from here, because it names an AVFrame:
 //
-//   #include "sve/frame.h"          // AVFrame interop and raw-plane views (§8.5, §8.10)
+//   #include "sve/frame.h"          // AVFrame interop (§8.5)
 //
 // It used to be two. push_encoder.h was the second, and only because the frame it took
 // was a wrapper around an AVFrame; 4.1 made Frame a handle to an IFrameBuffer, so the
@@ -60,6 +60,7 @@
 #include "sve/packet.h"
 #include "sve/packet_handler.h"
 #include "sve/push_encoder.h"
+#include "sve/raw_frame.h"
 #include "sve/report.h"
 #include "sve/session.h"
 #include "sve/timed_frame.h"

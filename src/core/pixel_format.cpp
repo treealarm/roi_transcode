@@ -1,15 +1,9 @@
-// PixelFormat to AVPixelFormat and back.
-//
-// The mapping lives here and nowhere else. That is the whole point of the library having
-// its own enum: FFmpeg numbers its formats positionally in a list it appends to, so a
-// public header that borrowed those numbers would be promising something another project's
-// release notes get to break. Here it can only be wrong in one place.
+// The spelling of a PixelFormat. Core, and free of FFmpeg on purpose: this is public API
+// (declared in sve/frame_buffer.h), and a name is not a mapping. The AVPixelFormat
+// conversion that used to share this file moved to backend/common/av_pixel_format.cpp
+// when §5.5 drew the line between the core and anything that links FFmpeg.
 
 #include "sve/frame_buffer.h"
-
-extern "C" {
-#include <libavutil/pixfmt.h>
-}
 
 namespace sve {
 
@@ -26,38 +20,6 @@ const char* pixel_format_name(PixelFormat f)
     case PixelFormat::Unknown:         break;
     }
     return "Unknown";
-}
-
-int to_av_pix_fmt(PixelFormat f)
-{
-    switch (f) {
-    case PixelFormat::YUV420P: return AV_PIX_FMT_YUV420P;
-    case PixelFormat::NV12:    return AV_PIX_FMT_NV12;
-    case PixelFormat::YUV422P: return AV_PIX_FMT_YUV422P;
-    case PixelFormat::YUV444P: return AV_PIX_FMT_YUV444P;
-    case PixelFormat::GRAY8:   return AV_PIX_FMT_GRAY8;
-    case PixelFormat::P010:    return AV_PIX_FMT_P010;
-    default:                   return AV_PIX_FMT_NONE;
-    }
-}
-
-PixelFormat from_av_pix_fmt(int f)
-{
-    switch (f) {
-    case AV_PIX_FMT_YUV420P: return PixelFormat::YUV420P;
-    case AV_PIX_FMT_NV12:    return PixelFormat::NV12;
-    case AV_PIX_FMT_YUV422P: return PixelFormat::YUV422P;
-    case AV_PIX_FMT_YUV444P: return PixelFormat::YUV444P;
-    case AV_PIX_FMT_GRAY8:   return PixelFormat::GRAY8;
-    case AV_PIX_FMT_P010:    return PixelFormat::P010;
-    // A frame the CPU cannot address: QSV, VAAPI, CUDA and the rest. They share one
-    // answer here because what a caller can do with them is the same -- nothing directly.
-    case AV_PIX_FMT_QSV:
-    case AV_PIX_FMT_VAAPI:
-    case AV_PIX_FMT_CUDA:
-    case AV_PIX_FMT_DRM_PRIME: return PixelFormat::HardwareSurface;
-    default:                   return PixelFormat::Unknown;
-    }
 }
 
 } // namespace sve

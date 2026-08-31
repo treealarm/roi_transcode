@@ -1,9 +1,7 @@
 #include "sve/encoder.h"
 
-#include "av_raii.h"
 #include "bitrate_budget.h"
 #include "box_smoother.h"
-#include "codec_id.h"
 #include "encoder_runtime_warnings.h"
 #include "frame_roi_pipeline.h"
 #include "importance_map.h"

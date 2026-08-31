@@ -2,7 +2,7 @@
 
 #include "av_raii.h"
 #include "codec_id.h"
-#include "packet_sink.h"
+#include "file_mux_sink.h"
 #include "temporal_roi.h"
 #include "sve/encoder.h"
 #include "sve/frame.h"

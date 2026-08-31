@@ -1,8 +1,9 @@
 #include "backend/common/backend_common.h"
 
 #include "backend/common/av_frame_buffer.h"
+#include "backend/common/av_pixel_format.h"
 #include "codec_id.h"
-#include "pixel_format.h"
+#include "owned_plane_buffer.h"
 
 #include <algorithm>
 #include <cstring>
@@ -204,6 +205,38 @@ AVFrame* as_avframe(LibavSession& s, IFrameBuffer& buffer)
         const PlaneView view = buffer.plane(i);
         f->data[i] = view.bytes.empty() ? nullptr : view.bytes.data();
         f->linesize[i] = view.stride;
+    }
+    // A frame whose buf[] is empty is not reference-counted, and av_frame_ref on one of
+    // those -- which is what avcodec_send_frame does with every frame it is given -- falls
+    // back to av_frame_get_buffer plus av_frame_copy. That is a full copy of the picture
+    // per frame, several megabytes at 1080p, and it is invisible from here: the call
+    // succeeds either way.
+    //
+    // So when the pixels come with an owner, hand the owner over too. buf[0] is a
+    // zero-length buffer that carries nothing but that handle, which is enough to make the
+    // frame reference-counted: av_frame_ref then copies pointers and takes a reference,
+    // and the caller's pixels stay alive for exactly as long as libavcodec holds them.
+    // WrapRawFrame's promise of "without copying pixels" is this line.
+    //
+    // A buffer without an owner -- PlaneBuffer, or an IFrameBuffer the caller implemented
+    // -- deliberately does not get this. It is a borrowed view with no lifetime past the
+    // submit call, so the copy is what makes it safe.
+    if (auto* owned = dynamic_cast<OwnedPlaneBuffer*>(&buffer)) {
+        // The raw new/delete pair is the one place in this library that has them, and it
+        // is not an oversight: av_buffer_create takes a void* opaque and a C function
+        // pointer, so there is nothing for a smart pointer to be handed across. Both ends
+        // are visible here, and av_buffer_create failing is the only path between them.
+        auto* held = new std::shared_ptr<const void>(owned->owner());
+        AVBufferRef* keepalive = av_buffer_create(nullptr, 0,
+            [](void* opaque, uint8_t*) {
+                delete static_cast<std::shared_ptr<const void>*>(opaque);
+            },
+            held, AV_BUFFER_FLAG_READONLY);
+        if (keepalive == nullptr) {
+            delete held;
+            return nullptr;
+        }
+        f->buf[0] = keepalive;
     }
     return f;
 }

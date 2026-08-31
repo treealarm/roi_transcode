@@ -31,9 +31,6 @@ target_compile_definitions(roi-transcode PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_compile_options(roi-transcode PRIVATE ${SVE_WARNINGS})
 
 add_executable(roi-frame-push cli/frame_push.cpp)
-# Reaches into the library's src/core for FileMuxSink: this is part of the same build,
-# not a consumer, and reimplementing a muxer here would prove nothing.
-target_include_directories(roi-frame-push PRIVATE ${CMAKE_SOURCE_DIR}/src/core)
 target_link_libraries(roi-frame-push PRIVATE sve roi_json)
 target_compile_definitions(roi-frame-push PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_compile_options(roi-frame-push PRIVATE ${SVE_WARNINGS})

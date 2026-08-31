@@ -1,6 +1,6 @@
 #pragma once
 
-// FFmpeg interop -- TZ v4.1 §8.5 and §8.10.
+// FFmpeg interop -- TZ v4.1 §8.5.
 //
 // This is the one public header that names an FFmpeg type, and it is deliberately not
 // included by sve.h. Everything else in include/ compiles with nothing but include/ on the
@@ -13,7 +13,9 @@
 //
 // What lives here is only what needs an AVFrame to be spelled. Frame and TimedFrame moved
 // to sve/timed_frame.h in 4.1 and are in the umbrella now: the frame a caller submits is
-// an IFrameBuffer, and this header's job is turning an AVFrame into one.
+// an IFrameBuffer, and this header's job is turning an AVFrame into one. The raw-plane API
+// of §8.10 moved out for the same reason and now lives in sve/raw_frame.h, which this
+// header includes so that callers who had both from here still do.
 //
 // tests/unit/public_headers_isolated.cpp compiles the rest without FFmpeg, so a stray
 // include of this header from a sibling stops the build rather than an embedder's.
@@ -21,6 +23,7 @@
 #include "sve/encoder.h"
 #include "sve/frame_metadata.h"
 #include "sve/input_format.h"
+#include "sve/raw_frame.h"
 #include "sve/status.h"
 #include "sve/timed_frame.h"
 #include "sve/timestamp.h"
@@ -65,36 +68,5 @@ public:
 /// B-frames -- it is holding its own reference, not the caller's.
 Status SubmitAvFrame(SmartVideoEncoder& encoder, const AVFrame* frame,
     const FrameMetadata& metadata);
-
-/// One plane of pixels the caller owns, with the length that bounds it. A pointer alone
-/// carries no length, and a stride passed separately from the pointer it belongs to is the
-/// oldest bug in video code.
-struct RawFramePlane {
-    const uint8_t* data = nullptr;
-    int32_t stride = 0;
-    std::size_t size = 0;
-};
-
-/// Pixels the caller has somewhere else, described well enough to wrap without copying.
-///
-/// `owner` is the part that makes this safe and the part a caller most wants to skip. It
-/// keeps the pixels alive for as long as the resulting Frame exists -- WrapRawFrame holds
-/// it inside the frame, so this is enforced rather than merely asked for. A view whose
-/// owner is empty is refused rather than wrapped: the alternative is a Frame pointing into
-/// a buffer that was freed while the encoder still held it. A caller who cannot make that
-/// promise passes a copy instead.
-struct RawFrameView {
-    InputVideoFormat format;
-    std::array<RawFramePlane, 4> planes{};
-    std::size_t plane_count = 0;
-    MediaTimestamp timestamp;
-    std::shared_ptr<const void> owner;
-};
-
-/// Wraps `view` into `output` without copying pixels. Validates the format, the plane
-/// count for that format, and that every plane holds the rows its stride and the frame
-/// height claim -- so a short buffer is an InvalidArgument here rather than a read past
-/// the end inside an encoder.
-Status WrapRawFrame(const RawFrameView& view, Frame* output);
 
 } // namespace sve

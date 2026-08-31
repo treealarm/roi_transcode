@@ -8,7 +8,7 @@
 // frame as well as borrow it.
 
 #include "av_raii.h"
-#include "pixel_format.h"
+#include "backend/common/av_pixel_format.h"
 #include "sve/frame_buffer.h"
 
 #include <cstddef>

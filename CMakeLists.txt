@@ -75,6 +75,7 @@ add_library(sve STATIC
     src/core/logging.cpp
     src/core/memory_type.cpp
     src/core/pixel_format.cpp
+    src/backend/common/av_pixel_format.cpp
     src/core/preset.cpp
     src/core/transcode_file.cpp
     src/core/frame_roi_pipeline.cpp
@@ -82,7 +83,8 @@ add_library(sve STATIC
     src/core/roi_encoder.cpp
     src/core/smart_video_encoder.cpp
     src/core/file_mux_sink.cpp
-    src/core/frame.cpp
+    src/core/av_frame_adapter.cpp
+    src/core/raw_frame.cpp
     src/core/frame_input.cpp
     src/core/session.cpp
 )
@@ -153,8 +155,10 @@ if(SVE_BUILD_TESTS)
 
     # Compiles against the public headers only -- no src/ on the include path. That is the
     # point of it: it stops compiling the moment an internal type leaks into the surface.
-    # frame_test links sve: Frame and WrapRawFrame are the FFmpeg interop, so unlike the
-    # tests above there is a libavutil behind this one.
+    # frame_test links sve because it covers AvFrameAdapter, which is the §8.5 interop, so
+    # unlike the tests above there is a libavutil behind this one. WrapRawFrame is in the
+    # same test and no longer needs it: §8.10 moved to sve/raw_frame.h and is proved
+    # FFmpeg-free by public_headers_isolated below.
     add_executable(frame_test tests/unit/frame_test.cpp)
     target_link_libraries(frame_test PRIVATE sve)
     target_compile_options(frame_test PRIVATE ${SVE_WARNINGS})

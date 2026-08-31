@@ -127,6 +127,28 @@ private:
     (void)plain.plane(0).row(999).size();
     (void)sve::pixel_format_name(sve::PixelFormat::NV12);
 
+    // §8.10, and the reason it moved out of sve/frame.h: wrapping planes the caller owns
+    // is an operation on plain memory, and it now compiles in a translation unit that has
+    // never seen libavutil. Before this, reaching WrapRawFrame meant including the one
+    // public header that names an AVFrame -- so the FFmpeg-free API had an FFmpeg-only
+    // door in it.
+    //
+    // Nothing below runs: this target is an OBJECT library that is never linked, and
+    // building it is passing it. What it proves is exactly one thing -- that §8.10 can be
+    // spelled without FFmpeg on the include path. The owner contract and the no-copy
+    // guarantee are behaviour, and frame_test is what checks them.
+    auto owner = std::make_shared<std::vector<uint8_t>>(16 * 16, 0);
+    sve::RawFrameView view;
+    view.format.width = 16;
+    view.format.height = 16;
+    view.format.pixel_format = sve::PixelFormat::GRAY8;
+    view.planes[0] = sve::RawFramePlane{owner->data(), 16, owner->size()};
+    view.plane_count = 1;
+    view.owner = owner;
+    sve::Frame wrapped;
+    const sve::Status wrap_status = sve::WrapRawFrame(view, &wrapped);
+    (void)wrap_status; (void)wrapped;
+
     (void)settings; (void)params; (void)report; (void)info; (void)packet;
     (void)rect; (void)box; (void)mask; (void)rational; (void)config;
     (void)input_format; (void)timestamp; (void)payload;
