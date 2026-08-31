@@ -133,7 +133,7 @@ Status PushVideoEncoder::Process(TimedFrame frame)
     }
     s.started = true;
 
-    const Status submitted = s.encoder->SubmitFrame(frame.frame.get(), frame.metadata);
+    const Status submitted = s.encoder->SubmitFrame(std::move(frame));
     if (!submitted.ok() && submitted.code() != StatusCode::Again) {
         s.emit_error(submitted);
         return submitted;

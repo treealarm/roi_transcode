@@ -4,6 +4,7 @@
 #include "frame_input.h"
 #include "packet_sink.h"
 #include "sve/encoder.h"
+#include "sve/frame.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -177,7 +178,7 @@ struct Session::Impl {
 
     void encode(AVFrame* frame, const Regions& regions, int64_t pts)
     {
-        const Status s = encoder->SubmitFrame(frame, metadata_for(regions, pts));
+        const Status s = SubmitAvFrame(*encoder, frame, metadata_for(regions, pts));
         if (!s.ok()) {
             roiav::fail(s.message());
         }

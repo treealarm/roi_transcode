@@ -1,5 +1,6 @@
 #include "sve/frame.h"
 
+#include "backend/common/av_frame_buffer.h"
 #include "pixel_format.h"
 
 #include <cstdint>
@@ -9,12 +10,21 @@
 
 namespace sve {
 
-void Frame::Deleter::operator()(AVFrame* frame) const noexcept
+namespace {
+
+/// An owned AVFrame behind the backend-neutral interface. AvFrameBuffer already knows how
+/// to own one -- CreateFrame relies on it -- so the adapter is a construction, not a new
+/// implementation.
+std::shared_ptr<IFrameBuffer> own_av_frame(AVFrame* frame)
 {
-    av_frame_free(&frame);
+    auto buffer = std::make_shared<AvFrameBuffer>(nullptr);
+    buffer->adopt(frame, nullptr, MemoryType::AVFRAME);
+    return buffer;
 }
 
-Frame Frame::Ref(const AVFrame* frame)
+} // namespace
+
+Frame AvFrameAdapter::Ref(const AVFrame* frame)
 {
     if (frame == nullptr) {
         return {};
@@ -27,12 +37,28 @@ Frame Frame::Ref(const AVFrame* frame)
         av_frame_free(&copy);
         return {};
     }
-    return Frame(copy);
+    return Frame(own_av_frame(copy));
 }
 
-Frame Frame::Adopt(AVFrame* frame)
+Frame AvFrameAdapter::Adopt(AVFrame* frame)
 {
-    return Frame(frame);
+    if (frame == nullptr) {
+        return {};
+    }
+    return Frame(own_av_frame(frame));
+}
+
+Status SubmitAvFrame(SmartVideoEncoder& encoder, const AVFrame* frame,
+    const FrameMetadata& metadata)
+{
+    if (frame == nullptr) {
+        return Status::InvalidArgument("SubmitAvFrame needs a frame");
+    }
+    Frame held = AvFrameAdapter::Ref(frame);
+    if (!held) {
+        return Status::OutOfMemory("could not reference the frame");
+    }
+    return encoder.SubmitFrame(TimedFrame{std::move(held), metadata});
 }
 
 namespace {
@@ -162,7 +188,7 @@ Status WrapRawFrame(const RawFrameView& view, Frame* output)
         frame->linesize[i] = view.planes[i].stride;
     }
 
-    *output = Frame::Adopt(frame);
+    *output = AvFrameAdapter::Adopt(frame);
     return Status::Ok();
 }
 

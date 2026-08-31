@@ -146,7 +146,7 @@ void at_009(Encoder backend, const char* label)
         FrameMetadata meta;
         meta.timestamp = MediaTimestamp{i, Rational{1, 25}};
         const Frame frame = make_frame(pixels, i);
-        CHECK(enc->SubmitFrame(frame.get(), meta).ok());
+        CHECK(enc->SubmitFrame(TimedFrame{frame, meta}).ok());
         drain(false);
     }
 

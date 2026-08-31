@@ -5,6 +5,7 @@
 // reaches the caller as an event too. The picture is the pull API's business and is tested
 // there; this file is about who gets told what, and when.
 
+#include "sve/frame.h"
 #include "sve/push_encoder.h"
 
 #include <cstdio>

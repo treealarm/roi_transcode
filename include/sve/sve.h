@@ -11,15 +11,19 @@
 // thing was called roi_transcode, and smartvideo.h after that; a consumer should not have
 // to know that history to find the door.
 //
-// Two headers are deliberately not pulled in from here, because both name an AVFrame:
+// One header is deliberately not pulled in from here, because it names an AVFrame:
 //
-//   #include "sve/frame.h"          // owning frames and raw-plane views (§8.5, §8.10)
-//   #include "sve/push_encoder.h"   // the callback API (§8.8), which takes one
+//   #include "sve/frame.h"          // AVFrame interop and raw-plane views (§8.5, §8.10)
+//
+// It used to be two. push_encoder.h was the second, and only because the frame it took
+// was a wrapper around an AVFrame; 4.1 made Frame a handle to an IFrameBuffer, so the
+// callback API (§8.8) now compiles with include/ and nothing else, and belongs in the
+// umbrella with everything else.
 //
 // Everything reachable from this header compiles with include/ and nothing else on the
-// path, which is what lets an embedder write a PacketHandler without libavutil. A caller
-// who submits frames has FFmpeg already -- §55 makes AVFrame the input interface -- so for
-// them the extra include costs nothing, and for everyone else it saves a dependency.
+// path, which is what lets an embedder write a PacketHandler -- or submit frames -- without
+// libavutil. §20 makes FFmpeg an opt-in interop adapter rather than the input interface, so
+// a caller who has AVFrames adds one include and everyone else saves a dependency.
 //
 // Every other header here is self-contained and can be included on its own -- a caller who
 // only writes a PacketHandler needs packet_handler.h and nothing else. The
@@ -55,8 +59,10 @@
 #include "sve/object_priority.h"
 #include "sve/packet.h"
 #include "sve/packet_handler.h"
+#include "sve/push_encoder.h"
 #include "sve/report.h"
 #include "sve/session.h"
+#include "sve/timed_frame.h"
 #include "sve/timestamp.h"
 #include "sve/types.h"
 

@@ -74,6 +74,22 @@ private:
     (void)timestamp.valid();
     (void)payload.empty();
 
+    // §8.5 and §8.8, and this is the claim 4.1 added. Submitting a frame and receiving
+    // packets through a callback used to need frame.h, because Frame was a wrapper around
+    // an AVFrame -- so the two entry points a caller actually uses were exactly the two
+    // that dragged FFmpeg in. Frame is a handle to an IFrameBuffer now, which an embedder
+    // implements with include/ and nothing else, and this compiles to prove it.
+    auto owned = std::make_shared<CallerOwnedBuffer>();
+    sve::Frame frame(owned);
+    sve::TimedFrame timed{frame, sve::FrameMetadata{}};
+    (void)static_cast<bool>(frame);
+    (void)frame.buffer().width();
+    (void)timed.metadata.force_key_frame;
+
+    const sve::EncoderCallback on_event = [](sve::EncoderEvent) {};
+    (void)on_event;
+    (void)sve::EncoderEventType::EndOfStream;
+
     // §7: the backend contract, opaque session and all.
     sve::EncoderConfig config;
     sve::BackendFrameControl control;

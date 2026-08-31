@@ -1,4 +1,8 @@
-// Frame ownership and raw-plane wrapping -- TZ v3.4 §8.5 and §8.10.
+// Frame ownership and raw-plane wrapping -- TZ v4.1 §8.5 and §8.10.
+//
+// Asserted through IFrameBuffer rather than through the AVFrame behind it. Since 4.1
+// that is the interface a caller actually holds, and a test reaching past it would be
+// checking an implementation detail this header exists to hide.
 //
 // What is worth testing here is not that a wrap succeeds; it is every way it must refuse.
 // A view that lies about its plane lengths is the failure this function exists to catch,
@@ -58,12 +62,13 @@ void a_described_frame_wraps_without_copying()
     const Status s = WrapRawFrame(view_of(pixels), &frame);
     CHECK(s.ok());
     CHECK(static_cast<bool>(frame));
-    CHECK(frame.get()->width == kWidth);
-    CHECK(frame.get()->height == kHeight);
-    CHECK(frame.get()->pts == 1000);
-    // No copy: the frame points at the caller's own bytes.
-    CHECK(frame.get()->data[0] == pixels->y.data());
-    CHECK(frame.get()->linesize[0] == kWidth);
+    CHECK(frame.buffer().width() == kWidth);
+    CHECK(frame.buffer().height() == kHeight);
+    CHECK(frame.buffer().format() == PixelFormat::YUV420P);
+    // No copy: the buffer points at the caller's own bytes.
+    const PlaneView luma = frame.mutable_buffer().plane(0);
+    CHECK(luma.bytes.data() == pixels->y.data());
+    CHECK(luma.stride == kWidth);
 }
 
 void the_owner_outlives_the_caller_dropping_it()
@@ -77,8 +82,9 @@ void the_owner_outlives_the_caller_dropping_it()
     pixels.reset();
     // The frame holds the last reference, so the pixels it points at are still there.
     // Without that, this read is the use-after-free the owner field exists to prevent.
-    CHECK(frame.get()->data[0] == borrowed);
-    CHECK(frame.get()->data[0][0] == 42);
+    const PlaneView luma = frame.mutable_buffer().plane(0);
+    CHECK(luma.bytes.data() == borrowed);
+    CHECK(luma.bytes[0] == 42);
 }
 
 void a_view_without_an_owner_is_refused()
@@ -135,24 +141,44 @@ void an_invalid_format_is_refused()
 
 void ref_leaves_the_caller_their_own_frame()
 {
-    auto pixels = std::make_shared<Pixels>();
-    Frame wrapped;
-    CHECK(WrapRawFrame(view_of(pixels), &wrapped).ok());
+    // The interop adapter, on a frame the caller allocated and still owns afterwards.
+    AVFrame* theirs = av_frame_alloc();
+    CHECK(theirs != nullptr);
+    theirs->format = AV_PIX_FMT_YUV420P;
+    theirs->width = kWidth;
+    theirs->height = kHeight;
+    CHECK(av_frame_get_buffer(theirs, 0) == 0);
+    theirs->data[0][0] = 77;
 
-    Frame second = Frame::Ref(wrapped.get());
-    CHECK(static_cast<bool>(second));
-    CHECK(second.get() != wrapped.get());
-    // Same pixels behind both, and destroying either leaves the other usable.
-    CHECK(second.get()->data[0] == wrapped.get()->data[0]);
-    CHECK(second.get()->width == kWidth);
+    Frame held = AvFrameAdapter::Ref(theirs);
+    CHECK(static_cast<bool>(held));
+    CHECK(held.buffer().width() == kWidth);
+    // Same pixels behind both: a reference, not a copy.
+    CHECK(held.mutable_buffer().plane(0).bytes.data() == theirs->data[0]);
+
+    // The caller unrefs theirs and the Frame still reads the picture, which is what Ref
+    // promises and what Adopt would not have allowed them to do at all.
+    av_frame_free(&theirs);
+    CHECK(held.mutable_buffer().plane(0).bytes[0] == 77);
+}
+
+void copies_of_a_frame_share_one_buffer()
+{
+    // §8.5 makes Frame copyable and shared, because an encoder with lookahead holds a
+    // frame past the call that submitted it.
+    auto pixels = std::make_shared<Pixels>();
+    Frame first;
+    CHECK(WrapRawFrame(view_of(pixels), &first).ok());
+    Frame second = first;
+    CHECK(&first.buffer() == &second.buffer());
 }
 
 void an_empty_frame_is_a_normal_state()
 {
     Frame empty;
     CHECK(!empty);
-    CHECK(empty.get() == nullptr);
-    CHECK(!Frame::Ref(nullptr));
+    CHECK(!AvFrameAdapter::Ref(nullptr));
+    CHECK(!AvFrameAdapter::Adopt(nullptr));
 }
 
 } // namespace
@@ -167,6 +193,7 @@ int main()
     a_format_with_no_pixels_is_refused();
     an_invalid_format_is_refused();
     ref_leaves_the_caller_their_own_frame();
+    copies_of_a_frame_share_one_buffer();
     an_empty_frame_is_a_normal_state();
     std::printf("ok\n");
     return 0;

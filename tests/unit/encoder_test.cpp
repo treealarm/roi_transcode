@@ -133,7 +133,7 @@ void frames_go_in_and_packets_come_out()
         const Frame frame = make_frame(pixels, i);
         FrameMetadata meta;
         meta.timestamp = MediaTimestamp{i, Rational{1, 25}};
-        CHECK(enc->SubmitFrame(frame.get(), meta).ok());
+        CHECK(enc->SubmitFrame(TimedFrame{frame, meta}).ok());
         CHECK(enc->State() == EncoderState::Running);
 
         for (;;) {
@@ -176,14 +176,14 @@ void submitting_after_flush_is_refused_rather_than_ignored()
     auto enc = open_encoder(config_for());
     const Frame frame = make_frame(pixels, 0);
     FrameMetadata meta;
-    CHECK(enc->SubmitFrame(frame.get(), meta).ok());
+    CHECK(enc->SubmitFrame(TimedFrame{frame, meta}).ok());
     CHECK(enc->Flush().ok());
 
     // §8.13: Draining, EndOfStream, Stopped and Failed all refuse a frame. Accepting one
     // and dropping it is the failure mode this replaces.
-    CHECK(enc->SubmitFrame(frame.get(), meta).code() == StatusCode::InvalidArgument);
+    CHECK(enc->SubmitFrame(TimedFrame{frame, meta}).code() == StatusCode::InvalidArgument);
     CHECK(enc->Stop().ok());
-    CHECK(enc->SubmitFrame(frame.get(), meta).code() == StatusCode::InvalidArgument);
+    CHECK(enc->SubmitFrame(TimedFrame{frame, meta}).code() == StatusCode::InvalidArgument);
 }
 
 void stop_is_idempotent()
@@ -195,12 +195,16 @@ void stop_is_idempotent()
     CHECK(enc->State() == EncoderState::Stopped);
 }
 
-void a_null_frame_and_a_null_packet_are_arguments_not_crashes()
+void an_empty_frame_and_a_null_packet_are_arguments_not_crashes()
 {
     auto enc = open_encoder(config_for());
     FrameMetadata meta;
-    CHECK(enc->SubmitFrame(nullptr, meta).code() == StatusCode::InvalidArgument);
+    // An empty Frame is what a default-constructed TimedFrame carries, and it is the
+    // shape a null AVFrame pointer used to take before §8.5 made the frame a handle.
+    CHECK(enc->SubmitFrame(TimedFrame{}).code() == StatusCode::InvalidArgument);
     CHECK(enc->ReceivePacket(nullptr).code() == StatusCode::InvalidArgument);
+    // And the interop adapter still refuses the pointer form.
+    CHECK(SubmitAvFrame(*enc, nullptr, meta).code() == StatusCode::InvalidArgument);
 }
 
 void a_keyframe_request_is_counted_even_though_it_is_best_effort()
@@ -211,13 +215,13 @@ void a_keyframe_request_is_counted_even_though_it_is_best_effort()
 
     const Frame frame = make_frame(pixels, 0);
     FrameMetadata meta;
-    CHECK(enc->SubmitFrame(frame.get(), meta).ok());
+    CHECK(enc->SubmitFrame(TimedFrame{frame, meta}).ok());
     CHECK(enc->GetStatistics().keyframes_requested == 1);
 
     // The same asked for at submit time rather than before it.
     FrameMetadata forced;
     forced.force_key_frame = true;
-    CHECK(enc->SubmitFrame(frame.get(), forced).ok());
+    CHECK(enc->SubmitFrame(TimedFrame{frame, forced}).ok());
     CHECK(enc->GetStatistics().keyframes_requested == 2);
 }
 
@@ -400,7 +404,7 @@ void strict_refuses_a_frame_whose_regions_do_not_fit()
 
     const Frame frame = make_frame(pixels, 0);
     FrameMetadata meta;
-    CHECK(enc->SubmitFrame(frame.get(), meta).ok());
+    CHECK(enc->SubmitFrame(TimedFrame{frame, meta}).ok());
     CHECK(enc->GetStatistics().fallbacks_applied == 0);
 }
 
@@ -414,7 +418,7 @@ int main()
     frames_go_in_and_packets_come_out();
     submitting_after_flush_is_refused_rather_than_ignored();
     stop_is_idempotent();
-    a_null_frame_and_a_null_packet_are_arguments_not_crashes();
+    an_empty_frame_and_a_null_packet_are_arguments_not_crashes();
     a_keyframe_request_is_counted_even_though_it_is_best_effort();
     reconfigure_takes_what_8_2_allows_and_refuses_the_rest();
     cpu_h265_refuses_a_target_bitrate_out_loud();

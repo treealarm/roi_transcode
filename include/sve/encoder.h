@@ -29,14 +29,13 @@
 #include "sve/packet.h"
 #include "sve/report.h"
 #include "sve/status.h"
+#include "sve/timed_frame.h"
 #include "sve/types.h"
 
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
-
-struct AVFrame;
 
 namespace sve {
 
@@ -166,16 +165,27 @@ public:
     SmartVideoEncoder(const SmartVideoEncoder&) = delete;
     SmartVideoEncoder& operator=(const SmartVideoEncoder&) = delete;
 
-    /// Hands one frame over. Non-blocking: `Again` means the input queue is full and the
-    /// caller should drain before submitting again. A frame is never accepted in part.
+    /// Hands one frame over -- TZ v4.1 §8.1. Non-blocking: `Again` means the input queue
+    /// is full and the caller should drain before submitting again. A frame is never
+    /// accepted in part.
     ///
-    /// The frame is borrowed for the length of the call; the implementation takes its own
-    /// reference if it keeps it. `metadata` is borrowed too, spans and all.
-    Status SubmitFrame(const AVFrame* frame, const FrameMetadata& metadata);
+    /// Takes the frame by value, and the Frame inside is a shared handle, so the encoder
+    /// keeping it for lookahead or B-frames costs the caller nothing to allow. An empty
+    /// Frame is InvalidArgument.
+    ///
+    /// There is no AVFrame overload here, deliberately: §8.1 puts it in `sve/frame.h` as
+    /// SubmitAvFrame, so that an embedder with their own pixels never sees an FFmpeg type
+    /// in the interface they compile against.
+    Status SubmitFrame(TimedFrame frame);
 
-    /// The same, for pixels the caller holds as an IFrameBuffer. This is the zero-copy
-    /// path: a buffer the backend handed out through CreateFrame is already in the
-    /// encoder's own memory, and an AVFrame cannot say that.
+    /// The same, for pixels the caller holds and will outlive the call. Borrowed rather
+    /// than shared: a buffer the backend handed out through CreateFrame lives in the
+    /// encoder's own memory and is reused frame after frame, so wrapping it in a shared
+    /// handle every time would count references nobody is racing for.
+    ///
+    /// A departure from §8.1, which spells one SubmitFrame. Kept because the difference is
+    /// real -- one owns, one does not -- and collapsing them would make the zero-copy path
+    /// pay for ownership it does not need.
     Status SubmitFrame(IFrameBuffer& pixels, const FrameMetadata& metadata);
 
     /// Takes one packet if there is one. `Again` means feed more frames; `EndOfStream`

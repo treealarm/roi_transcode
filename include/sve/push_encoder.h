@@ -25,7 +25,7 @@
 // frame in flight; report failures by returning, and read them from the Error event.
 
 #include "sve/encoder.h"
-#include "sve/frame.h"
+#include "sve/timed_frame.h"
 #include "sve/input_format.h"
 #include "sve/status.h"
 

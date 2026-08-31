@@ -404,17 +404,18 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const SmartEncoderConfig& 
     return std::unique_ptr<SmartVideoEncoder>(new SmartVideoEncoder(std::move(impl)));
 }
 
-Status SmartVideoEncoder::SubmitFrame(const AVFrame* frame, const FrameMetadata& metadata)
+Status SmartVideoEncoder::SubmitFrame(TimedFrame frame)
 {
-    if (frame == nullptr) {
+    if (!frame.frame) {
         return Status::InvalidArgument("SubmitFrame needs a frame");
     }
-    return m_impl->submit(metadata, [&](const std::vector<Rect>& rects, int64_t pts,
-                                        std::span<const uint8_t> sei) {
-        // const_cast: the encoder only reads these pixels. The signature is const because
-        // §8.1 promises the caller's frame is not modified, and libavcodec's send takes a
-        // non-const pointer it likewise only reads.
-        m_impl->encoder.encode(const_cast<AVFrame*>(frame), rects, pts, sei);
+    // The handle is copied into the lambda, not referenced from it: what makes shared
+    // ownership worth having is that the pixels survive this call, and a lambda capturing
+    // the caller's TimedFrame by reference would give that back on the first line.
+    Frame held = frame.frame;
+    return m_impl->submit(frame.metadata, [&](const std::vector<Rect>& rects, int64_t pts,
+                                              std::span<const uint8_t> sei) {
+        m_impl->encoder.encode_buffer(held.mutable_buffer(), rects, pts, sei);
     });
 }
 

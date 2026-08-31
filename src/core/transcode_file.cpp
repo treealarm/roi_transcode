@@ -5,6 +5,7 @@
 #include "packet_sink.h"
 #include "temporal_roi.h"
 #include "sve/encoder.h"
+#include "sve/frame.h"
 
 #include <cstdio>
 #include <vector>
@@ -167,7 +168,7 @@ Report transcode_file(const std::string& input_path,
             params.time_base};
         meta.regions.boxes = live;
 
-        const Status s = enc.SubmitFrame(dec_frame.p, meta);
+        const Status s = SubmitAvFrame(enc, dec_frame.p, meta);
         if (!s.ok()) {
             fail(s.message());
         }
