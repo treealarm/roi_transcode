@@ -28,28 +28,34 @@ namespace sve {
 // The practical consequence is in selection. Naming X264 and asking for H.265 is not a
 // request the library can quietly satisfy: under Auto that backend is skipped with the
 // reason logged, and named outright it fails with Unsupported (§8.4).
-enum class Encoder {
+enum class Backend {
     // Tries whatever `BackendSelection::preferred` lists, in that order. Which one opened
     // is reported back, because on this hardware the difference is worth knowing.
     Auto,
-    Qsv,
+    /// Named after the SDK rather than after Intel's marketing word for it, following
+    /// §8.2. Quick Sync is what the hardware is called; oneVPL is what we talk to.
+    IntelOneVpl,
+    /// Not in §8.2's enumeration at all. Kept as this library's own: it reaches the same
+    /// integrated GPU when the oneVPL dispatcher finds no runtime, and it is what proved
+    /// the four-region limit on Intel H.264 (see the measurements in STATUS.md). Whether
+    /// it survives is question 10 to the customer, not something to decide by deleting it.
     Vaapi,
-    Nvenc,
+    NvidiaNvenc,
     X264,
     X265,
 };
 
 
 /// The backend's name for a log line, a report or a command line.
-const char* encoder_name(Encoder e);
+const char* backend_name(Backend e);
 
 struct BackendSelection {
-    /// Tried strictly in this order, and empty by default: under Encoder::Auto an empty
+    /// Tried strictly in this order, and empty by default: under Backend::Auto an empty
     /// list is InvalidArgument rather than a silent choice made on the caller's behalf.
     ///
     /// A backend that cannot produce the requested codec is skipped here with its reason
     /// logged -- X264 in a list used to encode H.265 costs nothing and hides nothing.
-    std::vector<Encoder> preferred;
+    std::vector<Backend> preferred;
 
     /// Whether a backend absent from `preferred` may be used. False by default: a list
     /// that can be silently departed from is not a list.
@@ -62,14 +68,14 @@ struct BackendSelection {
 /// It exists because two spellings do not name a single backend. "auto" needs an order,
 /// and since 4.1 the library supplies none. "cpu" named one backend until 4.1 split it in
 /// two, and every existing script and config still says it.
-struct EncoderChoice {
-    Encoder kind = Encoder::Auto;
+struct BackendChoice {
+    Backend kind = Backend::Auto;
     BackendSelection selection;
 };
 
 /// "auto", "qsv", "vaapi", "nvenc", "x264", "x265", or "cpu" for the two software encoders
 /// together. Unknown text throws std::invalid_argument rather than defaulting: a misspelled
 /// backend quietly becoming a different one is the substitution §8.4 exists to prevent.
-EncoderChoice encoder_choice_from_name(const char* name);
+BackendChoice backend_choice_from_name(const char* name);
 
 } // namespace sve

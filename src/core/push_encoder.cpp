@@ -19,9 +19,9 @@ const char* encoder_event_type_name(EncoderEventType type)
 /// the facade to carry no encoder logic of its own, and the moment it grows some, the two
 /// ways in stop meaning the same thing.
 struct PushVideoEncoder::Impl {
-    explicit Impl(const SmartEncoderConfig& cfg) : config(cfg) {}
+    explicit Impl(const EncoderConfig& cfg) : config(cfg) {}
 
-    SmartEncoderConfig config;
+    EncoderConfig config;
     EncoderCallback callback;
     std::unique_ptr<SmartVideoEncoder> encoder;
     bool started = false;
@@ -96,7 +96,7 @@ struct PushVideoEncoder::Impl {
 PushVideoEncoder::PushVideoEncoder(std::unique_ptr<Impl> impl) : m_impl(std::move(impl)) {}
 PushVideoEncoder::~PushVideoEncoder() = default;
 
-std::unique_ptr<PushVideoEncoder> CreatePushVideoEncoder(const SmartEncoderConfig& config)
+std::unique_ptr<PushVideoEncoder> CreatePushVideoEncoder(const EncoderConfig& config)
 {
     return std::unique_ptr<PushVideoEncoder>(
         new PushVideoEncoder(std::make_unique<PushVideoEncoder::Impl>(config)));

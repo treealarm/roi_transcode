@@ -35,10 +35,10 @@ LibavSession& libav(BackendSession& session)
 
 namespace backend_common {
 
-TenBitSupport query_ten_bit(const char* encoder_name)
+TenBitSupport query_ten_bit(const char* backend_name)
 {
     TenBitSupport out;
-    const AVCodec* codec = avcodec_find_encoder_by_name(encoder_name);
+    const AVCodec* codec = avcodec_find_encoder_by_name(backend_name);
     if (codec == nullptr) {
         return out;
     }
@@ -90,7 +90,7 @@ int av_profile_of(CodecProfile profile)
     return AV_PROFILE_UNKNOWN;
 }
 
-void apply_shared(AVCodecContext* enc, const EncoderConfig& p)
+void apply_shared(AVCodecContext* enc, const BackendConfig& p)
 {
     if (const int profile = av_profile_of(p.profile); profile != AV_PROFILE_UNKNOWN) {
         enc->profile = profile;
@@ -255,11 +255,11 @@ bool is_hw_frame(const AVFrame* f)
 
 } // namespace
 
-Result<SessionPtr> LibavBackend::Configure(const EncoderConfig& config) const
+Result<SessionPtr> LibavBackend::Configure(const BackendConfig& config) const
 {
     const char* name = codec_name(config.codec);
     const AVCodec* codec = avcodec_find_encoder_by_name(name);
-    if (!codec && (kind() == Encoder::X264 || kind() == Encoder::X265)) {
+    if (!codec && (kind() == Backend::X264 || kind() == Backend::X265)) {
         // A build without libx264/libx265 may still have some other encoder for the codec;
         // better that than refusing to run at all.
         codec = avcodec_find_encoder(av_id_from_codec(config.codec));
@@ -300,7 +300,7 @@ Result<FrameBufferPtr> LibavBackend::CreateFrame(
     // surfaces is a different request from asking it for its own, even though both reach
     // the same silicon.
     const MemoryType native =
-        s.kind == Encoder::Qsv ? MemoryType::ONEVPL : MemoryType::VAAPI;
+        s.kind == Backend::IntelOneVpl ? MemoryType::ONEVPL : MemoryType::VAAPI;
 
     auto buffer = std::make_unique<AvFrameBuffer>(nullptr);
 

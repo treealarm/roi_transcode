@@ -24,14 +24,14 @@ class RoiEncoder {
 public:
     // Opens a backend, falling back down the chain when kind is Auto, then
     // calls sink.begin(). Throws if nothing opens.
-    void open(const EncoderConfig& config, PacketSink& sink);
+    void open(const BackendConfig& config, PacketSink& sink);
 
     // The same in two steps, for a caller that must know which backend opened
     // before the sink is told about it.
-    void open_deferred(const EncoderConfig& config);
+    void open_deferred(const BackendConfig& config);
     void attach(PacketSink& sink);
 
-    Encoder kind() const { return m_kind; }
+    Backend kind() const { return m_kind; }
     /// Backends that were tried and declined before one opened. Normal on a machine
     /// without the hardware; §22 wants the choice observable rather than inferred.
     long backends_declined() const { return m_backends_declined; }
@@ -85,7 +85,7 @@ private:
     // not something to pretend is already done.
     LibavSession& session() const { return libav(*m_session.get()); }
 
-    Encoder m_kind = Encoder::X264;
+    Backend m_kind = Backend::X264;
     long m_backends_declined = 0;
     std::vector<std::string> m_backends_skipped;
     Codec m_codec = Codec::H265;

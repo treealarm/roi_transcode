@@ -36,14 +36,14 @@ struct Pixels {
     std::vector<uint8_t> v = std::vector<uint8_t>(kWidth * kHeight / 4, 128);
 };
 
-SmartEncoderConfig config_for()
+EncoderConfig config_for()
 {
-    SmartEncoderConfig cfg;
+    EncoderConfig cfg;
     cfg.input.width = kWidth;
     cfg.input.height = kHeight;
     cfg.input.frame_rate = Rational{25, 1};
     cfg.input.pixel_format = PixelFormat::YUV420P;
-    cfg.settings.encoder = Encoder::X264;
+    cfg.settings.encoder = Backend::X264;
     cfg.settings.codec = Codec::H264;
     cfg.settings.crf = 32;
     cfg.settings.metadata.bitstream_sei = false;
@@ -70,7 +70,7 @@ TimedFrame frame_at(const std::shared_ptr<Pixels>& pixels, int64_t pts)
     return timed;
 }
 
-std::unique_ptr<PushVideoEncoder> open_push(const SmartEncoderConfig& cfg)
+std::unique_ptr<PushVideoEncoder> open_push(const EncoderConfig& cfg)
 {
     return CreatePushVideoEncoder(cfg);
 }
@@ -140,7 +140,7 @@ void the_input_format_is_fixed_once_frames_have_started()
     auto pixels = std::make_shared<Pixels>();
     Recorder seen;
 
-    SmartEncoderConfig cfg = config_for();
+    EncoderConfig cfg = config_for();
     cfg.input = InputVideoFormat{};   // deliberately empty: it arrives separately
     auto push = open_push(cfg);
     CHECK(push->Subscribe(seen.sink()).ok());
@@ -171,11 +171,11 @@ void a_format_that_cannot_exist_is_refused_before_anything_opens()
 void a_backend_that_will_not_open_arrives_as_an_error_event()
 {
     Recorder seen;
-    SmartEncoderConfig cfg = config_for();
-    cfg.settings.encoder = Encoder::Auto;
+    EncoderConfig cfg = config_for();
+    cfg.settings.encoder = Backend::Auto;
     // Nothing else in the order, so the chain is exhausted rather than falling to
     // software -- which since 4.1 is said by leaving software off the list.
-    cfg.backend_selection.preferred = {Encoder::Nvenc};
+    cfg.backend_selection.preferred = {Backend::NvidiaNvenc};
 
     auto pixels = std::make_shared<Pixels>();
     auto push = open_push(cfg);

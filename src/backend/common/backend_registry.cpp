@@ -1,6 +1,6 @@
 // Which backends to try, and in what order -- TZ v4.1 §8.4.
 //
-// One rule, not two. A named Encoder is the short way to say "only this one", and it is
+// One rule, not two. A named Backend is the short way to say "only this one", and it is
 // expressed as a selection of one rather than as a separate code path -- otherwise the
 // ordering lives in two places and they drift.
 //
@@ -32,15 +32,15 @@ const IEncoderBackend& x265_backend();
 
 namespace {
 
-const IEncoderBackend* backend_for(Encoder kind)
+const IEncoderBackend* backend_for(Backend kind)
 {
     switch (kind) {
-    case Encoder::Qsv:   return &onevpl_backend();
-    case Encoder::Vaapi: return &vaapi_backend();
-    case Encoder::Nvenc: return &nvenc_backend();
-    case Encoder::X264:  return &x264_backend();
-    case Encoder::X265:  return &x265_backend();
-    case Encoder::Auto:  break;
+    case Backend::IntelOneVpl:   return &onevpl_backend();
+    case Backend::Vaapi: return &vaapi_backend();
+    case Backend::NvidiaNvenc: return &nvenc_backend();
+    case Backend::X264:  return &x264_backend();
+    case Backend::X265:  return &x265_backend();
+    case Backend::Auto:  break;
     }
     return nullptr;
 }
@@ -48,12 +48,12 @@ const IEncoderBackend* backend_for(Encoder kind)
 /// Every backend this build has, in the order Auto would consider them if nothing was
 /// excluded. Used only to honour allow_unlisted -- it is not a default preference order,
 /// which 4.1 removed on purpose.
-constexpr Encoder kAllBackends[] = {
-    Encoder::Qsv, Encoder::Vaapi, Encoder::Nvenc, Encoder::X264, Encoder::X265};
+constexpr Backend kAllBackends[] = {
+    Backend::IntelOneVpl, Backend::Vaapi, Backend::NvidiaNvenc, Backend::X264, Backend::X265};
 
 } // namespace
 
-bool encoder_supports(Encoder kind, Codec codec)
+bool backend_supports(Backend kind, Codec codec)
 {
     const IEncoderBackend* backend = backend_for(kind);
     if (backend == nullptr) {
@@ -63,7 +63,7 @@ bool encoder_supports(Encoder kind, Codec codec)
     return codec == Codec::H264 ? caps.h264 : caps.h265;
 }
 
-std::vector<BackendRef> resolve_backends(Encoder requested, const BackendSelection& selection,
+std::vector<BackendRef> resolve_backends(Backend requested, const BackendSelection& selection,
     Codec codec, std::vector<std::string>* skipped)
 {
     std::vector<BackendRef> out;
@@ -71,24 +71,24 @@ std::vector<BackendRef> resolve_backends(Encoder requested, const BackendSelecti
     // Reported once per backend. allow_unlisted walks the full list after the caller's
     // own, so without this a backend named in `preferred` and skipped there would be
     // reported again on the second pass.
-    std::vector<Encoder> noted;
-    const auto note_skip = [&](Encoder kind) {
+    std::vector<Backend> noted;
+    const auto note_skip = [&](Backend kind) {
         if (skipped == nullptr || std::ranges::find(noted, kind) != noted.end()) {
             return;
         }
         noted.push_back(kind);
-        skipped->push_back(std::format("{} cannot encode {}", encoder_name(kind),
+        skipped->push_back(std::format("{} cannot encode {}", backend_name(kind),
             codec == Codec::H264 ? "H.264" : "HEVC"));
     };
 
-    if (requested != Encoder::Auto) {
+    if (requested != Backend::Auto) {
         const IEncoderBackend* one = backend_for(requested);
         if (one == nullptr) {
             return out;
         }
         // Named outright and unable to serve the codec: §8.4 wants Unsupported, so the
         // chain comes back empty and the reason travels with it.
-        if (!encoder_supports(requested, codec)) {
+        if (!backend_supports(requested, codec)) {
             note_skip(requested);
             return out;
         }
@@ -96,7 +96,7 @@ std::vector<BackendRef> resolve_backends(Encoder requested, const BackendSelecti
         return out;
     }
 
-    const auto append = [&](Encoder kind) {
+    const auto append = [&](Backend kind) {
         const IEncoderBackend* backend = backend_for(kind);
         if (backend == nullptr) {
             return;
@@ -107,20 +107,20 @@ std::vector<BackendRef> resolve_backends(Encoder requested, const BackendSelecti
         if (already) {
             return;
         }
-        if (!encoder_supports(kind, codec)) {
+        if (!backend_supports(kind, codec)) {
             note_skip(kind);
             return;
         }
         out.emplace_back(*backend);
     };
 
-    for (const Encoder kind : selection.preferred) {
+    for (const Backend kind : selection.preferred) {
         append(kind);
     }
     if (selection.allow_unlisted) {
         // The listed ones first, then whatever else this build has -- "unlisted allowed"
         // is a permission to keep going, not a licence to reorder.
-        for (const Encoder kind : kAllBackends) {
+        for (const Backend kind : kAllBackends) {
             append(kind);
         }
     }

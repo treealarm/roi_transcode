@@ -16,7 +16,7 @@ namespace sve {
 
 class LibavSession final : public BackendSession {
 public:
-    Encoder kind = Encoder::X264;
+    Backend kind = Backend::X264;
     roiav::CodecCtx enc;
     roiav::Buffer hw_device;
     roiav::Buffer hw_frames;

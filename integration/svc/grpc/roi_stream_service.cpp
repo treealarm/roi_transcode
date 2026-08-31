@@ -31,7 +31,7 @@ public:
         roi::transcode::EncodeStreamResponse msg;
         auto* opened = msg.mutable_opened();
         opened->set_encoder_used(to_proto(info.encoder_used));
-        opened->set_encoder_name(info.encoder_name);
+        opened->set_encoder_name(info.backend_name);
         if (!info.extradata.empty()) {
             opened->set_extradata(info.extradata.data(), info.extradata.size());
         }

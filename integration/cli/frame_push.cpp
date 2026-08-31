@@ -104,7 +104,7 @@ struct Args {
     bool have_roi = false;
     bool bitstream = false;
     bool use_mask = false;
-    sve::Encoder encoder = sve::Encoder::Auto;
+    sve::Backend encoder = sve::Backend::Auto;
     sve::BackendSelection backend_selection;
     sve::Codec codec = sve::Codec::H265;
     int crf = 28;
@@ -151,7 +151,7 @@ int run(const Args& args)
     // Same as the transcode CLI: --encoder left unsaid means this application's own order,
     // because the library no longer has one to fall back on (§8.4).
     sp.settings.backend_selection = args.backend_selection.preferred.empty()
-        ? sve::encoder_choice_from_name("auto").selection
+        ? sve::backend_choice_from_name("auto").selection
         : args.backend_selection;
     sp.settings.codec = args.codec;
     sp.settings.crf = args.crf;
@@ -295,7 +295,7 @@ int run(const Args& args)
     std::fprintf(stderr,
         "pushed %lld frames -> %lld packets, %lld bytes, %s%s\n",
         static_cast<long long>(rep.frames), static_cast<long long>(rep.packets),
-        static_cast<long long>(rep.bytes), rep.encoder_name.c_str(),
+        static_cast<long long>(rep.bytes), rep.backend_name.c_str(),
         args.use_mask ? " (mask)" : " (boxes)");
     if (rep.regions_dropped > 0) {
         std::fprintf(stderr, "warning: %lld regions over the budget were dropped\n",
@@ -355,8 +355,8 @@ int main(int argc, char** argv)
             } else if (std::strcmp(a, "--mask") == 0) {
                 args.use_mask = true;
             } else if (std::strcmp(a, "--encoder") == 0) {
-                const sve::EncoderChoice choice =
-                    sve::encoder_choice_from_name(need("--encoder"));
+                const sve::BackendChoice choice =
+                    sve::backend_choice_from_name(need("--encoder"));
                 args.encoder = choice.kind;
                 args.backend_selection = choice.selection;
             } else if (std::strcmp(a, "--codec") == 0) {

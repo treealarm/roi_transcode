@@ -92,7 +92,7 @@ Report transcode_file(const std::string& input_path,
             in.p->streams[aindex]->codecpar, in.p->streams[aindex]->time_base);
     }
 
-    SmartEncoderConfig cfg;
+    EncoderConfig cfg;
     cfg.input.width = dec.p->width;
     cfg.input.height = dec.p->height;
     cfg.input.frame_rate = Rational{fps.num, fps.den};
@@ -221,7 +221,7 @@ Report transcode_file(const std::string& input_path,
 
     const Report report = enc.ToReport();
     std::fprintf(stderr, "encoded with %s crf=%d preset=%s converted=%ld uploaded=%ld\n",
-        report.encoder_name.c_str(), settings.crf, preset_name(settings.preset),
+        report.backend_name.c_str(), settings.crf, preset_name(settings.preset),
         static_cast<long>(report.frames_converted),
         static_cast<long>(report.frames_uploaded));
     if (report.roi_lag_measured) {

@@ -183,33 +183,33 @@ void dilate_mask(uint8_t* mask, int32_t width, int32_t height, int32_t radius)
     }
 }
 
-const char* encoder_name(Encoder e)
+const char* backend_name(Backend e)
 {
     switch (e) {
-    case Encoder::Auto:  return "auto";
-    case Encoder::Qsv:   return "qsv";
-    case Encoder::Vaapi: return "vaapi";
-    case Encoder::Nvenc: return "nvenc";
-    case Encoder::X264:  return "x264";
-    case Encoder::X265:  return "x265";
+    case Backend::Auto:  return "auto";
+    case Backend::IntelOneVpl:   return "qsv";
+    case Backend::Vaapi: return "vaapi";
+    case Backend::NvidiaNvenc: return "nvenc";
+    case Backend::X264:  return "x264";
+    case Backend::X265:  return "x265";
     }
     return "?";
 }
 
-EncoderChoice encoder_choice_from_name(const char* name)
+BackendChoice backend_choice_from_name(const char* name)
 {
     const std::string_view s = name != nullptr ? name : "";
-    if (s == "qsv")   return {Encoder::Qsv, {}};
-    if (s == "vaapi") return {Encoder::Vaapi, {}};
-    if (s == "nvenc") return {Encoder::Nvenc, {}};
-    if (s == "x264")  return {Encoder::X264, {}};
-    if (s == "x265")  return {Encoder::X265, {}};
+    if (s == "qsv")   return {Backend::IntelOneVpl, {}};
+    if (s == "vaapi") return {Backend::Vaapi, {}};
+    if (s == "nvenc") return {Backend::NvidiaNvenc, {}};
+    if (s == "x264")  return {Backend::X264, {}};
+    if (s == "x265")  return {Backend::X265, {}};
     // "cpu" is Auto over exactly the two software backends. That is not a workaround for
     // the split but the thing itself: whichever of the two cannot produce the codec is
     // skipped with its reason logged, which is what the one combined backend used to do
     // silently inside itself.
     if (s == "cpu") {
-        return {Encoder::Auto, BackendSelection{{Encoder::X264, Encoder::X265}, false}};
+        return {Backend::Auto, BackendSelection{{Backend::X264, Backend::X265}, false}};
     }
     // The library ships no default order any more (§8.4), so the application supplies one.
     // This is the order measured on the hardware this project runs on: Quick Sync first
@@ -219,8 +219,8 @@ EncoderChoice encoder_choice_from_name(const char* name)
     // it does not read region-of-interest side data, so a stream chosen automatically
     // would quietly carry no adaptive quality at all.
     if (s == "auto") {
-        return {Encoder::Auto, BackendSelection{
-            {Encoder::Qsv, Encoder::Vaapi, Encoder::X264, Encoder::X265}, false}};
+        return {Backend::Auto, BackendSelection{
+            {Backend::IntelOneVpl, Backend::Vaapi, Backend::X264, Backend::X265}, false}};
     }
     throw std::invalid_argument(
         "unknown encoder '" + std::string(s) + "' (auto|qsv|vaapi|nvenc|x264|x265|cpu)");

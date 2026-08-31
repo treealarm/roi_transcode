@@ -27,7 +27,7 @@ namespace {
 
 class NvencBackend final : public LibavBackend {
 public:
-    Encoder kind() const override { return Encoder::Nvenc; }
+    Backend kind() const override { return Backend::NvidiaNvenc; }
 
     EncoderCapabilities GetCapabilities(Codec) const override
     {
@@ -47,7 +47,7 @@ public:
         return codec == Codec::H264 ? "h264_nvenc" : "hevc_nvenc";
     }
 
-    Status configure_context(LibavSession& out, const EncoderConfig& p) const override
+    Status configure_context(LibavSession& out, const BackendConfig& p) const override
     {
         // CUDA is optional here: nvenc also takes system-memory frames, and refusing to
         // open without a CUDA context would rule out machines where it is simply absent.

@@ -30,12 +30,12 @@ namespace {
 
 class SoftwareBackend final : public LibavBackend {
 public:
-    SoftwareBackend(Encoder kind, Codec codec, const char* encoder_name)
-        : m_kind(kind), m_codec(codec), m_name(encoder_name)
+    SoftwareBackend(Backend kind, Codec codec, const char* backend_name)
+        : m_kind(kind), m_codec(codec), m_name(backend_name)
     {
     }
 
-    Encoder kind() const override { return m_kind; }
+    Backend kind() const override { return m_kind; }
 
     EncoderCapabilities GetCapabilities(Codec codec) const override
     {
@@ -80,7 +80,7 @@ public:
 
     const char* codec_name(Codec) const override { return m_name; }
 
-    Status configure_context(LibavSession& out, const EncoderConfig& p) const override
+    Status configure_context(LibavSession& out, const BackendConfig& p) const override
     {
         if (p.input.pixel_format == PixelFormat::P010) {
             const auto ten = backend_common::query_ten_bit(m_name);
@@ -125,7 +125,7 @@ public:
     }
 
 private:
-    Encoder m_kind;
+    Backend m_kind;
     Codec m_codec;
     const char* m_name;
 };
@@ -134,13 +134,13 @@ private:
 
 const IEncoderBackend& x264_backend()
 {
-    static const SoftwareBackend instance(Encoder::X264, Codec::H264, "libx264");
+    static const SoftwareBackend instance(Backend::X264, Codec::H264, "libx264");
     return instance;
 }
 
 const IEncoderBackend& x265_backend()
 {
-    static const SoftwareBackend instance(Encoder::X265, Codec::H265, "libx265");
+    static const SoftwareBackend instance(Backend::X265, Codec::H265, "libx265");
     return instance;
 }
 

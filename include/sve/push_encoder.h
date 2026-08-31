@@ -66,7 +66,7 @@ class PushVideoEncoder;
 /// that will not open is therefore reported from the first Process, as an Error event --
 /// not thrown, because by then the caller has a callback and events are how this facade
 /// speaks. Throws EncoderError only for what can be judged now, at creation.
-std::unique_ptr<PushVideoEncoder> CreatePushVideoEncoder(const SmartEncoderConfig& config);
+std::unique_ptr<PushVideoEncoder> CreatePushVideoEncoder(const EncoderConfig& config);
 
 class PushVideoEncoder {
 public:
@@ -96,7 +96,7 @@ public:
     EncoderStatistics GetStatistics() const;
 
 private:
-    friend std::unique_ptr<PushVideoEncoder> CreatePushVideoEncoder(const SmartEncoderConfig&);
+    friend std::unique_ptr<PushVideoEncoder> CreatePushVideoEncoder(const EncoderConfig&);
 
     struct Impl;
     explicit PushVideoEncoder(std::unique_ptr<Impl> impl);

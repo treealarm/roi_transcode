@@ -91,13 +91,13 @@ private:
     (void)sve::EncoderEventType::EndOfStream;
 
     // §7: the backend contract, opaque session and all.
-    sve::EncoderConfig config;
+    sve::BackendConfig config;
     sve::BackendFrameControl control;
     sve::EncoderCapabilities caps;
     const sve::Status status = sve::Status::Ok();
     const sve::BackendSelection selection;
     const std::vector<sve::BackendRef> backend =
-        sve::resolve_backends(sve::Encoder::X264, selection, sve::Codec::H264);
+        sve::resolve_backends(sve::Backend::X264, selection, sve::Codec::H264);
 
     // §22 and §29: the policy and the log sink are part of the public vocabulary, and
     // neither drags FFmpeg in with it.

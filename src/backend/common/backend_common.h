@@ -31,11 +31,11 @@ struct TenBitSupport {
     int encode_format = -1;   ///< AV_PIX_FMT_NONE when main10 is false
 };
 
-TenBitSupport query_ten_bit(const char* encoder_name);
+TenBitSupport query_ten_bit(const char* backend_name);
 
 
 /// Fills the parts of an AVCodecContext that are the same whoever encodes.
-void apply_shared(AVCodecContext* enc, const EncoderConfig& p);
+void apply_shared(AVCodecContext* enc, const BackendConfig& p);
 
 /// Opens a hardware device, returning false rather than throwing when it is absent --
 /// an absent GPU is the normal case on some machines, not an error.
@@ -63,7 +63,7 @@ void attach_sei_unregistered(AVFrame* frame, std::span<const uint8_t> uuid_and_p
 /// what to set on the context once it exists.
 class LibavBackend : public IEncoderBackend {
 public:
-    Result<SessionPtr> Configure(const EncoderConfig& config) const override;
+    Result<SessionPtr> Configure(const BackendConfig& config) const override;
     Result<FrameBufferPtr> CreateFrame(
         BackendSession& session, MemoryType memory) const override;
     Status SubmitFrame(BackendSession& session, IFrameBuffer& frame,
@@ -80,7 +80,7 @@ protected:
     /// avcodec_open2 -- which is the only window in which most of these options are
     /// settable at all.
     virtual Status configure_context(
-        LibavSession& session, const EncoderConfig& config) const = 0;
+        LibavSession& session, const BackendConfig& config) const = 0;
 };
 
 } // namespace sve

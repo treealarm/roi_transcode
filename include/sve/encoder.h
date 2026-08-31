@@ -108,9 +108,9 @@ struct EncoderStatistics {
     /// carry, a rate-control mode refused. Each is counted once, not per frame.
     int64_t fallbacks_applied = 0;
 
-    /// Which backend actually opened. With Encoder::Auto this is the only way to find out.
-    Encoder encoder_used = Encoder::X264;
-    std::string encoder_name;
+    /// Which backend actually opened. With Backend::Auto this is the only way to find out.
+    Backend encoder_used = Backend::X264;
+    std::string backend_name;
 
     /// §14 ROI lag, when the boxes carried track ids to measure it from.
     bool roi_lag_measured = false;
@@ -128,11 +128,11 @@ struct EncoderStatistics {
 /// `settings` is the adaptive half (TZ calls it AdaptiveConfig; Appendix C leaves it open):
 /// which codec and backend, the constant quantizer, and the whole Quality model. `backend`
 /// is the geometry and timing the backends take.
-struct SmartEncoderConfig {
+struct EncoderConfig {
     InputVideoFormat input;
     Settings settings;
 
-    /// Which backends Encoder::Auto may consider, and in what order (§8.4). Ignored when
+    /// Which backends Backend::Auto may consider, and in what order (§8.4). Ignored when
     /// settings.encoder names one.
     BackendSelection backend_selection;
 
@@ -150,14 +150,14 @@ class SmartVideoEncoder;
 /// same mistake one level up: it makes the class the thing you name to get an encoder,
 /// which is what a second entry point would then have to be named against.
 ///
-/// The chain is walked when settings.encoder is Encoder::Auto; a named backend is tried
+/// The chain is walked when settings.encoder is Backend::Auto; a named backend is tried
 /// alone, so asking for QSV and silently getting libx264 is not something that can happen.
 ///
 /// Throws EncoderError, carrying the StatusCode, when nothing can serve the request.
 /// Returning nullptr instead is forbidden by §8.12, and rightly: nullptr says only that
 /// something went wrong, while the caller's next move depends entirely on which thing --
 /// InvalidArgument is a configuration to fix, DeviceUnavailable is a machine to change.
-std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const SmartEncoderConfig& config);
+std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const EncoderConfig& config);
 
 class SmartVideoEncoder {
 public:
@@ -219,7 +219,7 @@ public:
     Report ToReport() const;
 
 private:
-    friend std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const SmartEncoderConfig&);
+    friend std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const EncoderConfig&);
 
     struct Impl;
     explicit SmartVideoEncoder(std::unique_ptr<Impl> impl);

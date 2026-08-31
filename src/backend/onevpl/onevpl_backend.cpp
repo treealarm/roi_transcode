@@ -21,7 +21,7 @@ namespace {
 
 class OneVplBackend final : public LibavBackend {
 public:
-    Encoder kind() const override { return Encoder::Qsv; }
+    Backend kind() const override { return Backend::IntelOneVpl; }
 
     EncoderCapabilities GetCapabilities(Codec codec) const override
     {
@@ -49,7 +49,7 @@ public:
         return codec == Codec::H264 ? "h264_qsv" : "hevc_qsv";
     }
 
-    Status configure_context(LibavSession& out, const EncoderConfig& p) const override
+    Status configure_context(LibavSession& out, const BackendConfig& p) const override
     {
         AVDictionary* opts = nullptr;
         av_dict_set(&opts, "child_device_type", "vaapi", 0);

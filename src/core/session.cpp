@@ -127,7 +127,7 @@ struct Session::Impl {
             info.height = codec_params.height;
             info.extradata = codec_params.extradata.bytes();
             info.encoder_used = report.encoder_used;
-            info.encoder_name = report.encoder_name;
+            info.backend_name = report.backend_name;
             handler->on_open(info);
         }
     }
@@ -218,7 +218,7 @@ Session::Session(const SessionParams& params, PacketHandler* handler)
         params.extradata.empty() ? nullptr : params.extradata.data(),
         static_cast<int>(params.extradata.size()));
 
-    SmartEncoderConfig cfg;
+    EncoderConfig cfg;
     cfg.input.width = params.width;
     cfg.input.height = params.height;
     cfg.input.frame_rate = Rational{params.fps_num, std::max(params.fps_den, 1)};
@@ -238,7 +238,7 @@ Session::Session(const SessionParams& params, PacketHandler* handler)
 
     const EncoderStatistics stats = m_impl->encoder->GetStatistics();
     m_impl->report.encoder_used = stats.encoder_used;
-    m_impl->report.encoder_name = stats.encoder_name;
+    m_impl->report.backend_name = stats.backend_name;
     if (const Status s = m_impl->encoder->GetCodecParameters(&m_impl->codec_params);
         !s.ok()) {
         roiav::fail(s.message());
@@ -247,14 +247,14 @@ Session::Session(const SessionParams& params, PacketHandler* handler)
 
 Session::~Session() = default;
 
-Encoder Session::encoder_used() const
+Backend Session::encoder_used() const
 {
     return m_impl->report.encoder_used;
 }
 
-std::string Session::encoder_name() const
+std::string Session::backend_name() const
 {
-    return m_impl->report.encoder_name;
+    return m_impl->report.backend_name;
 }
 
 void Session::submit(IFrameBuffer& pixels, const Regions& regions, int64_t pts)

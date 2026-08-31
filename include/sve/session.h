@@ -65,9 +65,9 @@ public:
     void submit(std::span<const uint8_t> access_unit, const Regions& regions, int64_t pts);
 
     // Which backend opened. Known as soon as the session exists, and with
-    // Encoder::Auto that is the only way to find out.
-    Encoder encoder_used() const;
-    std::string encoder_name() const;
+    // Backend::Auto that is the only way to find out.
+    Backend encoder_used() const;
+    std::string backend_name() const;
 
     // Drains decoder and encoder, ends the sink, and reports what happened.
     Report finish();

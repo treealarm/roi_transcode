@@ -49,7 +49,7 @@ int main(int argc, char** argv)
     // The library ships no default backend order since 4.1 (§8.4), so this application
     // states its own -- the same one it used when the default lived in the library.
     {
-        const sve::EncoderChoice choice = sve::encoder_choice_from_name("auto");
+        const sve::BackendChoice choice = sve::backend_choice_from_name("auto");
         settings.encoder = choice.kind;
         settings.backend_selection = choice.selection;
     }
@@ -72,8 +72,8 @@ int main(int argc, char** argv)
                 roi_doc = load_roi_json(need("--roi"));
                 have_roi = true;
             } else if (std::strcmp(a, "--encoder") == 0) {
-                const sve::EncoderChoice choice =
-                    sve::encoder_choice_from_name(need("--encoder"));
+                const sve::BackendChoice choice =
+                    sve::backend_choice_from_name(need("--encoder"));
                 settings.encoder = choice.kind;
                 settings.backend_selection = choice.selection;
             } else if (std::strcmp(a, "--codec") == 0) {

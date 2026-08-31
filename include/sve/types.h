@@ -27,7 +27,7 @@ struct Rational {
 // differently and the lists do not line up -- libx264 has ten from "ultrafast" to
 // "placebo", QSV has seven and no "ultrafast" at all, NVENC calls them p1 to p7. A string
 // passed straight through meant the caller had to know which backend would open before
-// they could name a preset, which is exactly what Encoder::Auto makes unknowable.
+// they could name a preset, which is exactly what Backend::Auto makes unknowable.
 //
 // So the caller says how much effort they are buying, and each backend spends it in its
 // own vocabulary.
@@ -82,7 +82,7 @@ enum class CodecProfile {
 /// that could never serve the requested codec has to be skipped before it is asked for a
 /// device it may not have. The hardware backends answer yes to both; the two software ones
 /// answer for their own library only.
-bool encoder_supports(Encoder kind, Codec codec);
+bool backend_supports(Backend kind, Codec codec);
 
 
 
@@ -236,11 +236,11 @@ struct Quality {
 };
 
 struct Settings {
-    Encoder encoder = Encoder::Auto;
-    /// Which backends Encoder::Auto may try, and in what order. Empty is InvalidArgument
+    Backend encoder = Backend::Auto;
+    /// Which backends Backend::Auto may try, and in what order. Empty is InvalidArgument
     /// under Auto: since 4.1 the library ships no default order, because the only honest
     /// default is the one whoever deploys the system chooses for their own hardware
-    /// (§8.4). `encoder_choice_from_name` fills both fields together from a name.
+    /// (§8.4). `backend_choice_from_name` fills both fields together from a name.
     BackendSelection backend_selection;
     /// H.264 by default: it is the codec every player and every browser handles, and a caller
     /// that has an opinion says so. `SameAsSource` is the one to reach for when transcoding.

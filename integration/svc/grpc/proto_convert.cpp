@@ -95,44 +95,44 @@ void fill_job(const RoiJobStatus& st, roi::transcode::Job* out)
         st.roi_lag_p99_ms, st.roi_lag_acceptance, out->mutable_roi_lag());
 }
 
-sve::EncoderChoice from_proto(roi::transcode::Encoder e)
+sve::BackendChoice from_proto(roi::transcode::Encoder e)
 {
     switch (e) {
     case roi::transcode::ENCODER_QSV:
-        return sve::encoder_choice_from_name("qsv");
+        return sve::backend_choice_from_name("qsv");
     case roi::transcode::ENCODER_VAAPI:
-        return sve::encoder_choice_from_name("vaapi");
+        return sve::backend_choice_from_name("vaapi");
     case roi::transcode::ENCODER_NVENC:
-        return sve::encoder_choice_from_name("nvenc");
+        return sve::backend_choice_from_name("nvenc");
     case roi::transcode::ENCODER_CPU:
         // Still one value on the wire, and it stays one: 4.1 split the software backend in
         // two inside the library, which is not a reason to break every client that already
         // sends this. It resolves to Auto over x264 and x265, so whichever of the two
         // cannot produce the requested codec is skipped with its reason logged.
-        return sve::encoder_choice_from_name("cpu");
+        return sve::backend_choice_from_name("cpu");
     default:
-        return sve::encoder_choice_from_name("auto");
+        return sve::backend_choice_from_name("auto");
     }
 }
 
-roi::transcode::Encoder to_proto(sve::Encoder k)
+roi::transcode::Encoder to_proto(sve::Backend k)
 {
     switch (k) {
-    case sve::Encoder::Qsv:
+    case sve::Backend::IntelOneVpl:
         return roi::transcode::ENCODER_QSV;
-    case sve::Encoder::Vaapi:
+    case sve::Backend::Vaapi:
         return roi::transcode::ENCODER_VAAPI;
-    case sve::Encoder::Nvenc:
+    case sve::Backend::NvidiaNvenc:
         return roi::transcode::ENCODER_NVENC;
-    case sve::Encoder::X264:
-    case sve::Encoder::X265:
+    case sve::Backend::X264:
+    case sve::Backend::X265:
         return roi::transcode::ENCODER_CPU;
     default:
         return roi::transcode::ENCODER_AUTO;
     }
 }
 
-// Encoder knobs are shared by both entry points, so unpacking them is too.
+// Backend knobs are shared by both entry points, so unpacking them is too.
 // One Settings serves both entry points, so unpacking it is written once.
 // FileSettings and StreamSettings are distinct types with identical fields, so
 // one template serves both and they cannot drift apart by accident.

@@ -18,18 +18,18 @@ const char* RoiEncoder::label() const
 {
     const bool h264 = m_codec == Codec::H264;
     switch (m_kind) {
-    case Encoder::Qsv:
+    case Backend::IntelOneVpl:
         return h264 ? "h264_qsv (Intel VPL mfxExtEncoderROI)"
                     : "hevc_qsv (Intel VPL mfxExtEncoderROI)";
-    case Encoder::Vaapi:
+    case Backend::Vaapi:
         return h264 ? "h264_vaapi (Intel iHD VAEncROI)"
                     : "hevc_vaapi (Intel iHD VAEncROI)";
-    case Encoder::Nvenc:
+    case Backend::NvidiaNvenc:
         return h264 ? "h264_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)"
                     : "hevc_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)";
-    case Encoder::X264:
+    case Backend::X264:
         return "libx264 (CPU, per-macroblock quantOffsets)";
-    case Encoder::X265:
+    case Backend::X265:
         return "libx265 (CPU, per-block quantOffsets)";
     default:
         return h264 ? "libx264 (CPU)" : "libx265 (CPU)";
@@ -37,18 +37,6 @@ const char* RoiEncoder::label() const
 }
 
 namespace {
-
-const char* backend_name(Encoder kind)
-{
-    switch (kind) {
-    case Encoder::Qsv:   return "qsv";
-    case Encoder::Vaapi: return "vaapi";
-    case Encoder::Nvenc: return "nvenc";
-    case Encoder::X264:  return "x264";
-    case Encoder::X265:  return "x265";
-    default:             return "auto";
-    }
-}
 
 // A throwaway encode of a single frame, for backends that ask for it. Ubuntu's older iHD
 // opens the QSV encoder happily and then returns empty packets, and only an actual encode
@@ -91,7 +79,7 @@ bool probe_one_frame(const IEncoderBackend& backend, BackendSession& session)
 
 } // namespace
 
-void RoiEncoder::open(const EncoderConfig& config, PacketSink& sink)
+void RoiEncoder::open(const BackendConfig& config, PacketSink& sink)
 {
     open_deferred(config);
     attach(sink);
@@ -116,7 +104,7 @@ Result<FrameBufferPtr> RoiEncoder::create_frame(MemoryType memory)
     return m_backend->CreateFrame(*m_session.get(), memory);
 }
 
-void RoiEncoder::open_deferred(const EncoderConfig& config)
+void RoiEncoder::open_deferred(const BackendConfig& config)
 {
     if (config.policy != QualityPolicy::OBJECT_FIRST) {
         // Refused rather than approximated. BALANCED and BITRATE_FIRST both need the

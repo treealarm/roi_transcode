@@ -18,7 +18,7 @@ namespace {
 
 class VaapiBackend final : public LibavBackend {
 public:
-    Encoder kind() const override { return Encoder::Vaapi; }
+    Backend kind() const override { return Backend::Vaapi; }
 
     EncoderCapabilities GetCapabilities(Codec codec) const override
     {
@@ -36,7 +36,7 @@ public:
         return codec == Codec::H264 ? "h264_vaapi" : "hevc_vaapi";
     }
 
-    Status configure_context(LibavSession& out, const EncoderConfig& p) const override
+    Status configure_context(LibavSession& out, const BackendConfig& p) const override
     {
         if (!backend_common::open_hw_device(
                 out.hw_device, AV_HWDEVICE_TYPE_VAAPI, "/dev/dri/renderD128")

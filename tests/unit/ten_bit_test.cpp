@@ -44,9 +44,9 @@ struct TenBitPixels {
     std::vector<uint16_t> uv = std::vector<uint16_t>(kWidth * kHeight / 2, 512u << 6);
 };
 
-SmartEncoderConfig config_for(Encoder backend)
+EncoderConfig config_for(Backend backend)
 {
-    SmartEncoderConfig cfg;
+    EncoderConfig cfg;
     cfg.input.width = kWidth;
     cfg.input.height = kHeight;
     cfg.input.frame_rate = Rational{25, 1};
@@ -82,7 +82,7 @@ Frame make_frame(const std::shared_ptr<TenBitPixels>& pixels, int64_t pts)
 }
 
 /// The code a factory refuses with, or Ok when it did not refuse.
-StatusCode create_refusal(const SmartEncoderConfig& cfg)
+StatusCode create_refusal(const EncoderConfig& cfg)
 {
     try {
         const auto made = CreateVideoEncoder(cfg);
@@ -93,9 +93,9 @@ StatusCode create_refusal(const SmartEncoderConfig& cfg)
 }
 
 /// Runs AT-009 against one backend, or reports why it could not.
-void at_009(Encoder backend, const char* label)
+void at_009(Backend backend, const char* label)
 {
-    SmartEncoderConfig cfg = config_for(backend);
+    EncoderConfig cfg = config_for(backend);
 
     std::unique_ptr<SmartVideoEncoder> enc;
     try {
@@ -167,7 +167,7 @@ void at_009(Encoder backend, const char* label)
 void eight_bit_input_cannot_ask_for_main10()
 {
     // §8.2: a pixel format and a profile that cannot go together are refused at Create.
-    SmartEncoderConfig cfg = config_for(Encoder::X265);
+    EncoderConfig cfg = config_for(Backend::X265);
     cfg.input.pixel_format = PixelFormat::YUV420P;
     cfg.settings.profile = CodecProfile::H265Main10;
     CHECK(create_refusal(cfg) == StatusCode::InvalidArgument);
@@ -175,7 +175,7 @@ void eight_bit_input_cannot_ask_for_main10()
 
 void ten_bit_input_cannot_ask_for_an_eight_bit_profile()
 {
-    SmartEncoderConfig cfg = config_for(Encoder::X265);
+    EncoderConfig cfg = config_for(Backend::X265);
     cfg.settings.profile = CodecProfile::H265Main;
     CHECK(create_refusal(cfg) == StatusCode::InvalidArgument);
 }
@@ -185,7 +185,7 @@ void ten_bit_h264_is_refused_rather_than_invented()
     // H.264 has a ten-bit profile, but nothing in this specification asks for one, and
     // claiming it would be inventing a contract nobody wrote. Asked of the H.264 backend,
     // so the refusal is about the bit depth and not about the backend's codec.
-    SmartEncoderConfig cfg = config_for(Encoder::X264);
+    EncoderConfig cfg = config_for(Backend::X264);
     cfg.settings.codec = Codec::H264;
     CHECK(create_refusal(cfg) == StatusCode::InvalidArgument);
 }
@@ -199,8 +199,8 @@ int main()
     ten_bit_h264_is_refused_rather_than_invented();
 
     std::printf("AT-009 (10-bit P010/Main10, 300 frames):\n");
-    at_009(Encoder::X265, "x265/libx265");
-    at_009(Encoder::Qsv, "qsv/hevc_qsv");
+    at_009(Backend::X265, "x265/libx265");
+    at_009(Backend::IntelOneVpl, "qsv/hevc_qsv");
 
     std::printf("ok\n");
     return 0;

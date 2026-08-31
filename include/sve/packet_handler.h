@@ -27,10 +27,10 @@ struct StreamInfo {
     // what follows.
     // Borrowed for the length of the on_open call, and carrying its own length.
     std::span<const uint8_t> extradata;
-    // Which backend actually opened; with Encoder::Auto this is the only way
+    // Which backend actually opened; with Backend::Auto this is the only way
     // to find out.
-    Encoder encoder_used = Encoder::X264;
-    std::string encoder_name;
+    Backend encoder_used = Backend::X264;
+    std::string backend_name;
 };
 
 class PacketHandler {

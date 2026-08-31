@@ -54,10 +54,10 @@ const char* encoder_state_name(EncoderState s)
 /// and the second copy is where the two drifted: only one of them fed the bitrate budget
 /// from its own output. Here there is one.
 struct SmartVideoEncoder::Impl : PacketSink {
-    explicit Impl(const SmartEncoderConfig& cfg) : config(cfg) {}
+    explicit Impl(const EncoderConfig& cfg) : config(cfg) {}
 
-    SmartEncoderConfig config;
-    EncoderConfig backend_config;
+    EncoderConfig config;
+    BackendConfig backend_config;
 
     RoiEncoder encoder;
     BitrateBudget bitrate;
@@ -274,7 +274,7 @@ struct SmartVideoEncoder::Impl : PacketSink {
 SmartVideoEncoder::SmartVideoEncoder(std::unique_ptr<Impl> impl) : m_impl(std::move(impl)) {}
 SmartVideoEncoder::~SmartVideoEncoder() = default;
 
-std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const SmartEncoderConfig& config)
+std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const EncoderConfig& config)
 {
     if (!config.input.valid()) {
         throw EncoderError(Status::InvalidArgument("input video format is not usable"));
@@ -284,7 +284,7 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const SmartEncoderConfig& 
     impl->log = Logger(config.log);
     impl->policy = config.settings.fallback;
 
-    EncoderConfig& ep = impl->backend_config;
+    BackendConfig& ep = impl->backend_config;
     ep.input = config.input;
     ep.backend_selection = config.backend_selection;
     ep.kind = config.settings.encoder;
@@ -320,16 +320,16 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const SmartEncoderConfig& 
 
     // §8.4: the preference list is the caller's to give, and an unusable one is refused
     // here rather than turned into a choice nobody asked for.
-    if (ep.kind == Encoder::Auto) {
-        const std::vector<Encoder>& want = ep.backend_selection.preferred;
+    if (ep.kind == Backend::Auto) {
+        const std::vector<Backend>& want = ep.backend_selection.preferred;
         if (want.empty()) {
             throw EncoderError(Status::InvalidArgument(
-                "Encoder::Auto needs a backend preference order; the list is empty"));
+                "Backend::Auto needs a backend preference order; the list is empty"));
         }
         for (auto it = want.begin(); it != want.end(); ++it) {
-            if (*it == Encoder::Auto) {
+            if (*it == Backend::Auto) {
                 throw EncoderError(Status::InvalidArgument(
-                    "Encoder::Auto cannot appear inside its own preference order"));
+                    "Backend::Auto cannot appear inside its own preference order"));
             }
             if (std::find(want.begin(), it, *it) != it) {
                 throw EncoderError(Status::InvalidArgument(
@@ -348,9 +348,9 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const SmartEncoderConfig& 
     // §8.4: named outright and unable to produce this codec -- X264 asked for HEVC, say --
     // is Unsupported. Under Auto the same backend is merely skipped, which is why this
     // check is here and not in the chain walk.
-    if (ep.kind != Encoder::Auto && !encoder_supports(ep.kind, ep.codec)) {
+    if (ep.kind != Backend::Auto && !backend_supports(ep.kind, ep.codec)) {
         throw EncoderError(Status::Unsupported(std::format("the {} backend cannot encode {}",
-            encoder_name(ep.kind), ep.codec == Codec::H264 ? "H.264" : "HEVC")));
+            backend_name(ep.kind), ep.codec == Codec::H264 ? "H.264" : "HEVC")));
     }
 
     if (config.input.frame_rate.num > 0 && config.input.frame_rate.den > 0) {
@@ -377,7 +377,7 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const SmartEncoderConfig& 
     // always could: Auto on a machine with no Quick Sync walks down to the software
     // encoder, and the guard for the path that is known to be unstable would not have
     // fired. Reading it off the opened backend is what makes it hold for every route in.
-    if (impl->encoder.kind() == Encoder::X265 && ep.codec == Codec::H265
+    if (impl->encoder.kind() == Backend::X265 && ep.codec == Codec::H265
         && ep.rate_control.target_bitrate > 0) {
         if (const Status s = guard_cpu_h265_target(true, impl->policy, impl->log); !s.ok()) {
             throw EncoderError(s);
@@ -393,7 +393,7 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const SmartEncoderConfig& 
     impl->bitrate = BitrateBudget(ep.rate_control);
 
     impl->stats.encoder_used = impl->encoder.kind();
-    impl->stats.encoder_name = impl->encoder.label();
+    impl->stats.backend_name = impl->encoder.label();
     impl->stats.backends_declined = impl->encoder.backends_declined();
     for (const std::string& reason : impl->encoder.backends_skipped()) {
         impl->log.warn("backend skipped: " + reason);
@@ -442,7 +442,7 @@ Status SmartVideoEncoder::Impl::submit(const FrameMetadata& metadata, const Hand
         if (const Status made = s.rects_for(metadata, &rects); !made.ok()) {
             return made;
         }
-        if (!s.warned_roi && s.encoder.kind() == Encoder::Nvenc) {
+        if (!s.warned_roi && s.encoder.kind() == Backend::NvidiaNvenc) {
             s.log.warn("warning: stock FFmpeg hevc_nvenc ignores ROI; "
                        "qpDeltaMap is built but not submitted to NVENC SDK");
             s.warned_roi = true;
@@ -567,7 +567,7 @@ Status SmartVideoEncoder::Reconfigure(const RuntimeEncoderSettings& settings)
     if (settings.target_bitrate) {
         RateControlPolicy rc = s.config.settings.rate_control;
         rc.target_bitrate = *settings.target_bitrate;
-        if (s.encoder.kind() == Encoder::X265 && s.out_codec == Codec::H265
+        if (s.encoder.kind() == Backend::X265 && s.out_codec == Codec::H265
             && rc.target_bitrate > 0) {
             // Same guard as at Create, and it answers rather than quietly ignores: the
             // caller is asking now, so Permissive would still be misleading here.
@@ -629,7 +629,7 @@ Report SmartVideoEncoder::ToReport() const
     const EncoderStatistics s = GetStatistics();
     Report r;
     r.encoder_used = s.encoder_used;
-    r.encoder_name = s.encoder_name;
+    r.backend_name = s.backend_name;
     r.frames = s.frames_submitted;
     r.packets = s.packets_received;
     r.bytes = s.bytes_encoded;

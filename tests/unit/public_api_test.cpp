@@ -20,7 +20,7 @@ namespace {
 sve::Settings make_settings()
 {
     sve::Settings s;
-    s.encoder = sve::Encoder::Auto;
+    s.encoder = sve::Backend::Auto;
     s.crf = 28;
     s.gop = 1;
     s.preset = sve::Preset::Balanced;
@@ -55,7 +55,7 @@ public:
     void on_open(const sve::StreamInfo& info) override
     {
         width = info.width;
-        name = info.encoder_name;
+        name = info.backend_name;
     }
     void on_packet(const sve::EncodedPacket& p) override
     {
@@ -78,14 +78,14 @@ public:
 [[maybe_unused]] void names_the_backend_interface()
 {
     for (const sve::BackendRef& ref :
-        sve::resolve_backends(sve::Encoder::X264, {}, sve::Codec::H264)) {
+        sve::resolve_backends(sve::Backend::X264, {}, sve::Codec::H264)) {
         const sve::IEncoderBackend& b = ref.get();
         const sve::EncoderCapabilities named = b.GetCapabilities(
             sve::Codec::H264);
         (void)named.h264;
     }
     const sve::EncoderCapabilities caps =
-        sve::resolve_backends(sve::Encoder::X264, {}, sve::Codec::H264)[0]
+        sve::resolve_backends(sve::Backend::X264, {}, sve::Codec::H264)[0]
             .get().GetCapabilities(sve::Codec::H264);
     (void)caps.h264;
     (void)caps.qp_map;
@@ -113,7 +113,7 @@ public:
         std::exit(1);
     }
     const sve::EncoderCapabilities hevc =
-        sve::resolve_backends(sve::Encoder::X265, {}, sve::Codec::H265)[0]
+        sve::resolve_backends(sve::Backend::X265, {}, sve::Codec::H265)[0]
             .get().GetCapabilities(sve::Codec::H265);
     if (!hevc.qp_map || hevc.qp_map_block_width != 32) {
         std::fprintf(stderr, "fail: x265 must advertise qp_map 32x32\n");
@@ -132,7 +132,7 @@ public:
         std::exit(1);
     }
 
-    sve::EncoderConfig config;
+    sve::BackendConfig config;
     config.input.width = 1280;
     config.input.height = 720;
     config.input.frame_rate = sve::Rational{25, 1};
@@ -160,7 +160,7 @@ public:
     const sve::Report r = sve::transcode_file(
         "in.mp4", "out.mp4", make_boxes(), make_settings(), &cancel);
     (void)r.encoder_used;
-    (void)r.encoder_name;
+    (void)r.backend_name;
     (void)r.frames;
     (void)r.regions_dropped;
     (void)r.cpu_h265_target_guard;

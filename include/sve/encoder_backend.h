@@ -34,7 +34,7 @@
 //   * CreateFrame is an addition. §7 has no frame factory; without one, a caller cannot
 //     write into the encoder's own memory and every submitted frame costs a copy.
 //
-//   * kind() is an addition, for reporting which backend opened under Encoder::Auto.
+//   * kind() is an addition, for reporting which backend opened under Backend::Auto.
 
 #include "sve/backend_selection.h"
 #include "sve/capabilities.h"
@@ -55,9 +55,17 @@
 
 namespace sve {
 
-/// What the encoder is being asked to produce. Named EncoderConfig after §7; the geometry
-/// and timing here do not depend on which backend answers.
-struct EncoderConfig {
+/// What a backend is being asked to open with. The geometry and timing here do not depend
+/// on which backend answers.
+///
+/// A named departure from §21, which calls this argument `EncoderConfig` -- the same name
+/// §8.2 gives the public configuration, because in the specification they are one type.
+/// Here they are two: the public EncoderConfig carries the caller's whole request, log sink
+/// and all, while this carries only what a backend needs to open a codec. Putting §8.2's
+/// name on the type §8.2 means, and a name that says what it is on this one, is the reading
+/// that leaves nobody guessing. Merging them is a design change, not a rename, and is not
+/// one to make while the backend layer is being replaced.
+struct BackendConfig {
     /// Geometry, pixel layout, frame rate and time base -- TZ v3.4 §8.3. Held as one
     /// structure rather than as loose fields so that "what is coming in" cannot be edited
     /// while meaning to change "what should come out": those were neighbours here, and a
@@ -67,7 +75,7 @@ struct EncoderConfig {
     /// wants; a pushed source usually has its own units instead.
     InputVideoFormat input;
 
-    Encoder kind = Encoder::Auto;
+    Backend kind = Backend::Auto;
     Codec codec = Codec::H265;
     int32_t crf = 28;
     int32_t gop = 0;
@@ -80,7 +88,7 @@ struct EncoderConfig {
     TemporalROIConfig temporal;
     RateControlPolicy rate_control;
 
-    /// Which backends Encoder::Auto may consider, and in what order (§8.4).
+    /// Which backends Backend::Auto may consider, and in what order (§8.4).
     BackendSelection backend_selection;
 };
 
@@ -143,8 +151,8 @@ public:
     virtual ~IEncoderBackend() = default;
 
     /// Which backend this is. Not in §7, but the caller needs it to report what opened:
-    /// with Encoder::Auto that is the only way to find out.
-    virtual Encoder kind() const = 0;
+    /// with Backend::Auto that is the only way to find out.
+    virtual Backend kind() const = 0;
 
     /// What this backend can do for a given output codec.
     ///
@@ -163,7 +171,7 @@ public:
     /// only filled in the middle. That split was three libavcodec calls sitting in code
     /// that is supposed to know nothing about libavcodec, and a backend talking to an SDK
     /// directly could not have used any of them.
-    virtual Result<SessionPtr> Configure(const EncoderConfig& config) const = 0;
+    virtual Result<SessionPtr> Configure(const BackendConfig& config) const = 0;
 
     /// A frame allocated where the encoder can read it without a copy. The caller fills
     /// plane(), calls commit(), and submits it.
@@ -204,7 +212,7 @@ using BackendRef = std::reference_wrapper<const IEncoderBackend>;
 
 /// The backends to try, in order -- TZ v4.1 §8.4.
 ///
-/// Encoder::Auto walks `selection`; a named kind gives just that one and ignores the
+/// Backend::Auto walks `selection`; a named kind gives just that one and ignores the
 /// selection's permissions, because the caller has already been explicit and asking for
 /// QSV while getting libx264 is exactly what must not happen silently.
 ///
@@ -219,7 +227,7 @@ using BackendRef = std::reference_wrapper<const IEncoderBackend>;
 ///
 /// Returns a vector rather than a span over static storage: the order is now the caller's
 /// to choose, so there is no fixed list to point at.
-std::vector<BackendRef> resolve_backends(Encoder requested, const BackendSelection& selection,
+std::vector<BackendRef> resolve_backends(Backend requested, const BackendSelection& selection,
     Codec codec, std::vector<std::string>* skipped = nullptr);
 
 } // namespace sve
