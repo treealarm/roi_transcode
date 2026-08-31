@@ -1,6 +1,6 @@
 # Техническое задание. Smart Video Encoder (`smart-video-encoder`)
 
-**Версия:** 4.1
+**Версия:** 4.2  
 **Статус:** Draft / для утверждения  
 **Дата:** 2026-08-31  
 **Целевая ОС P0:** Ubuntu 24.04, Linux x86_64  
@@ -12,6 +12,7 @@
 
 | Версия | Изменения |
 |---|---|
+| 4.2 | Каждый backend определён как независимый build component и поддерживает static registration и dynamic plugin packaging из одной реализации и через единый descriptor contract; способ поставки выбирается deployment profile (`STATIC`, `DYNAMIC`, `BOTH`); добавлены явная статическая регистрация без global constructors, запрет duplicate registration и static/dynamic parity tests. |
 | 4.1 | Удалён FFmpeg encoder backend; software encoding реализуется независимыми direct backend-модулями `X264Backend` и `X265Backend` поверх libx264/libx265; FFmpeg оставлен только как опциональный `AVFrame` interop-компонент; software fallback полностью определяется пользовательским `BackendSelection::preferred`; добавлены codec-native quant-offset map, отдельные capability/CI/benchmark/license gates для x264 и x265. |
 | 4.0 | FFmpeg преобразован из обязательного нижнего слоя в независимый software peer backend; NVIDIA NVENC, Intel oneVPL и Rockchip MPP реализуются как независимые native backend modules без зависимости от FFmpeg/libavcodec; backend'ы поставляются как опциональные runtime-модули со стабильной C ABI регистрации; сохранены публичный API без FFmpeg (кроме opt-in `sve/frame.h`), пользовательский `BackendSelection::preferred`, единые factory-функции и session-based backend interface для конкурентного кодирования нескольких потоков. |
 | 3.4 | Рефакторинг публичного API (8.3–8.13): входной формат выделен в `InputVideoFormat`; добавлен управляемый порядок выбора backend через `BackendSelection`; введены владеющие `Frame`/`TimedFrame` и `RawFrameView` с явным owner; `EncodedPacket` переведён на shared immutable `PacketBuffer`; добавлен `MediaTimestamp` с явным `time_base`; введён push facade `PushVideoEncoder` и типизированные события packet/EOS/error без использования `nullptr`; добавлен `CodecParameters` с extradata; добавлены единые factory-функции; определена lifecycle-модель `EncoderState` и семантика `Stop`/`Flush`. |
@@ -1545,7 +1546,11 @@ option(SVE_BUILD_BACKEND_X265 "Build direct libx265 backend module" ON)
 option(SVE_BUILD_FFMPEG_INTEROP "Build opt-in AVFrame interop component" ON)
 option(SVE_BUILD_BACKEND_NVENC "Build native NVIDIA NVENC backend module" ON)
 option(SVE_BUILD_BACKEND_ONEVPL "Build native Intel oneVPL backend module" ON)
-option(SVE_BUILD_BACKEND_ROCKCHIP "Build native Rockchip MPP backend module" OFF)
+option(SVE_BUILD_BACKEND_ROCKCHIP "Build native Rockchip MPP backend component" OFF)
+
+set(SVE_BACKEND_PACKAGING "DYNAMIC" CACHE STRING
+    "Backend packaging: STATIC, DYNAMIC or BOTH")
+set_property(CACHE SVE_BACKEND_PACKAGING PROPERTY STRINGS STATIC DYNAMIC BOTH)
 
 option(SVE_BUILD_TESTS "Build tests" ON)
 option(SVE_BUILD_BENCHMARKS "Build benchmarks" ON)
@@ -1564,59 +1569,55 @@ Backend dependency должна быть optional, чтобы CI x86 без hard
 - публичный C++ API версионируется по semver: major — breaking changes, minor — обратно совместимые дополнения, patch — исправления;
 - C++ и Python версии происходят из единого version source (см. 58.7).
 
-## 26.4 Модульная сборка и runtime plugin ABI
+## 26.4 Backend components, static registration и dynamic plugin ABI
 
-Каждый backend собирается как независимый optional shared module:
+Каждый backend реализуется как независимый optional build component со своими зависимостями.
+Одна и та же implementation target должна поддерживать два способа поставки:
 
-```text
-libsve.so.<major>
-libsve_backend_x264.so
-libsve_backend_x265.so
-libsve_backend_nvenc.so
-libsve_backend_onevpl.so
-libsve_backend_rockchip.so
+1. **static registration** — backend линкуется с deployment target и явно регистрируется в
+   общем `BackendRegistry`;
+2. **dynamic plugin packaging** — backend поставляется отдельным shared module и регистрируется
+   через стабильную C ABI entry point.
+
+Способ поставки выбирается deployment profile через `SVE_BACKEND_PACKAGING`: `STATIC`,
+`DYNAMIC` или `BOTH`. Packaging не меняет публичный encoder API, backend identifier,
+capability semantics или backend selection. Static и dynamic варианты одного backend используют
+одну реализацию и один `SveBackendPluginDescriptorV1`.
+
+Static registration выполняется явно и не должна зависеть только от global constructors или
+linker-specific `--whole-archive`:
+
+```cpp
+Status RegisterX264Backend(BackendRegistry& registry) noexcept;
+Status RegisterX265Backend(BackendRegistry& registry) noexcept;
 ```
 
-При отключённой CMake option соответствующий module не собирается, его SDK не требуется, а
-registry не объявляет backend доступным. Удаление optional module из установленной системы не
-должно приводить к падению core: backend получает состояние `DeviceUnavailable`/unavailable и
-может участвовать в telemetry выбора.
+Deployment profile может предоставить сгенерированный агрегатор
+`RegisterDeploymentBackends(BackendRegistry&)`. Повторная регистрация одного backend identifier,
+включая конфликт static и dynamic вариантов, возвращает `InvalidArgument`; молчаливое
+переопределение запрещено.
 
-Каждый module экспортирует ровно одну обязательную C ABI entry point:
+Dynamic plugins поставляются как `libsve_backend_*.so` и экспортируют одну C ABI entry point:
 
 ```cpp
 extern "C" SVE_BACKEND_EXPORT
 const SveBackendPluginDescriptorV1* sve_backend_plugin_v1() noexcept;
 ```
 
-`SveBackendPluginDescriptorV1` содержит как минимум:
+Исключения не пересекают C ABI boundary. Core проверяет `abi_version`, `descriptor_size` и
+backend identifier. Plugin не выгружается, пока жив созданный им backend или `BackendSession`.
+Порядок поиска plugins детерминирован: explicit application path, install-relative directory,
+затем system-configured directory; current working directory по умолчанию не используется.
 
-- `abi_version` и `descriptor_size`;
-- стабильный backend identifier и module version;
-- factory/destroy callbacks;
-- capability query callback;
-- allocator/deallocator callbacks либо правило, что объект освобождается в создавшем module;
-- optional diagnostic callback.
+Публичный core target остаётся `sve::sve`. Static components экспортируются как явно
+подключаемые targets `sve::backend_x264_static`, `sve::backend_x265_static` и аналогичные и не
+становятся транзитивными зависимостями core. Имена dynamic plugin `.so` являются packaging
+detail. Основной `sve.pc` не объявляет FFmpeg, x264, x265 или vendor SDK зависимостями.
+Component metadata объявляет только собственные зависимости соответствующего backend.
 
-Исключения не должны пересекать C ABI boundary; module преобразует их в `Status`. Core до
-вызова callbacks проверяет ABI version и размер descriptor. Несовместимый, повреждённый или
-дублирующий module не загружается и фиксируется в telemetry. Module не выгружается, пока жив
-хотя бы один созданный им backend или `BackendSession`.
-
-Порядок поиска modules детерминирован: explicit application path, install-relative directory,
-затем system-configured directory. Поиск в current working directory по умолчанию запрещён.
-Разрешены только canonical paths; production profile может требовать allowlist/hash/signature.
-
-Публичный CMake target остаётся `sve::sve`; имена backend `.so` являются packaging detail.
-Core и основной `sve.pc` не объявляют FFmpeg, x264 или x265 обязательными/private dependency.
-Requirements публикуются только component metadata соответствующего module/interop target.
-
-Шаблон основного `sve.pc` обязан иметь пустое `Requires.private` относительно FFmpeg, x264 и
-x265. Отдельные component metadata для `X264Backend` и `X265Backend` могут объявлять только
-соответственно libx264 и libx265. FFmpeg interop component может объявлять `libavutil`, но не
-`libavcodec`/`libavformat`, если они не требуются реализацией adapter. CI проверяет
-сгенерированный `sve.pc`, чтобы codec и FFmpeg dependencies не стали транзитивными
-зависимостями core.
+CI проверяет профили `STATIC`, `DYNAMIC`, `BOTH`, явную static registration без global
+constructors, duplicate registration и parity capability/selection/functional результатов
+static и dynamic вариантов при одинаковых версиях зависимостей и build options.
 
 ## 26.5 Rockchip MPP и vcpkg
 
@@ -2367,14 +2368,18 @@ Matrix:
 
 Build matrix дополнительно проверяет независимые профили:
 
-- core без backend modules и без FFmpeg;
+- core без backend components и без FFmpeg;
 - core + `X264Backend` без FFmpeg и vendor hardware SDK;
 - core + `X265Backend` без FFmpeg и vendor hardware SDK;
 - core + FFmpeg interop без encoder backend modules;
 - core + `NvencBackend` без FFmpeg;
 - core + `OneVplBackend` без FFmpeg;
 - core + `RockchipMppBackend` без FFmpeg;
-- удаление optional module после установки без падения core.
+- static, dynamic и `BOTH` packaging profiles;
+- удаление optional dynamic plugin после установки без падения core;
+- явную static registration без global constructors и без `--whole-archive`;
+- отказ duplicate registration, включая конфликт static/dynamic одного backend identifier;
+- parity capability reports, selection semantics и functional output static/dynamic вариантов.
 
 Для encoder modules выполняется dependency scan (`readelf`/`ldd`): зависимости от
 `libavcodec`, `libavformat` и других FFmpeg libraries запрещены. `X264Backend` может зависеть
@@ -2872,7 +2877,8 @@ benchmarks/
 - реализованы независимые direct `X264Backend`, `X265Backend`, native NVIDIA NVENC, native
   Intel oneVPL и Rockchip MPP backend modules согласно capability matrix;
 - encoder backend modules не имеют зависимости от FFmpeg и проходят обязательный dependency scan;
-- runtime plugin ABI, version check и безопасное отсутствие optional modules работают;
+- static registration и dynamic plugin packaging используют одну реализацию и единый descriptor contract;
+- deployment profiles `STATIC`, `DYNAMIC`, `BOTH`, plugin ABI/version check, duplicate detection и безопасное отсутствие optional dynamic plugins работают;
 - software fallback через libx264/libx265 задаётся явно в `BackendSelection::preferred`;
 - версии, commits, build/API numbers, bit depth и license mode libx264/libx265 зафиксированы в build manifest, а license review пройден до включения modules в release artifacts;
 - backend-neutral `Frame` является основным входным интерфейсом, а `AVFrame` поддерживается

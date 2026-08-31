@@ -18,7 +18,7 @@ next session trusts it and re-derives from a wrong starting point.
 ## What this repository is
 
 `smart-video-encoder` — the adaptive ROI encoder built to the customer's specification
-(`docs/smart-video-encoder_41.md`, the version in force). It left the `ta_vms` monorepo on
+(`docs/smart-video-encoder_42.md`, the version in force). It left the `ta_vms` monorepo on
 2026-08-31, at commit `c4bc9b8` of that repository, because it had become a deliverable of
 its own with its own specification, its own acceptance tests and its own dependency
 profile. The whole history came with it — `git log` here goes back to the first commit.
