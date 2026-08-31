@@ -4,8 +4,9 @@
 // pipeline. Header-only: these are a handful of lines each and every one of
 // them exists only to make a libav* pointer release itself.
 
+#include "fail.h"
+
 #include <format>
-#include <stdexcept>
 #include <string>
 
 extern "C" {
@@ -139,11 +140,6 @@ struct Buffer {
     }
     ~Buffer() { av_buffer_unref(&p); }
 };
-
-[[noreturn]] inline void fail(const std::string& msg)
-{
-    throw std::runtime_error(msg);
-}
 
 inline void check(int err, const char* what)
 {

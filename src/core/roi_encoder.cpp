@@ -1,7 +1,6 @@
 #include "roi_encoder.h"
 
-#include "backend/common/av_frame_buffer.h"
-#include "backend/common/backend_common.h"
+#include "fail.h"
 #include "packet_sink.h"
 
 #include <algorithm>
@@ -11,7 +10,6 @@
 namespace sve {
 
 
-using roiav::check;
 using roiav::fail;
 
 const char* RoiEncoder::label() const
@@ -183,9 +181,21 @@ void RoiEncoder::open_deferred(const BackendConfig& config)
     // nothing following it the final sample is silently dropped -- one frame
     // short, and the file a frame shorter than the source. MPEG-TS does not
     // care, which is why this only ever showed up in mp4.
-    const AVRational fps{config.input.frame_rate.num, std::max(config.input.frame_rate.den, 1)};
-    const AVRational tb{m_params.time_base.num, std::max(m_params.time_base.den, 1)};
-    m_frame_duration = av_rescale_q(1, av_inv_q(fps), tb);
+    //
+    // One frame lasts frame_rate.den/frame_rate.num seconds, expressed in the output time
+    // base -- which is av_rescale_q(1, 1/fps, time_base) written out. It is written out
+    // because this is the last thing in the core that needed libavutil, and a division
+    // with a rounding rule is a poor reason to keep the dependency. AV_ROUND_NEAR_INF is
+    // what av_rescale_q applies, and it is (b + c/2) / c for the positive values these
+    // always are; the 64-bit intermediate is what keeps a 90 kHz time base exact.
+    const int64_t seconds_per_frame_num =
+        static_cast<int64_t>(std::max(config.input.frame_rate.den, 1))
+        * std::max(m_params.time_base.den, 1);
+    const int64_t seconds_per_frame_den =
+        static_cast<int64_t>(m_params.time_base.num) * config.input.frame_rate.num;
+    m_frame_duration = seconds_per_frame_den > 0
+        ? (seconds_per_frame_num + seconds_per_frame_den / 2) / seconds_per_frame_den
+        : 0;
     if (m_frame_duration <= 0) {
         m_frame_duration = 1;
     }
@@ -215,16 +225,6 @@ void RoiEncoder::drain()
         }
         m_sink->on_packet(out);
     }
-}
-
-void RoiEncoder::encode(
-    AVFrame* frame, const std::vector<Rect>& rects, int64_t pts,
-    std::span<const uint8_t> sei_unregistered)
-{
-    // The decoder's frame goes in through the same door an embedder uses. Borrowed, not
-    // owned: the decoder reuses it for the next frame.
-    AvFrameBuffer buffer(frame);
-    encode_buffer(buffer, rects, pts, sei_unregistered);
 }
 
 void RoiEncoder::encode_buffer(

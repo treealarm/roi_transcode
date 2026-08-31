@@ -8,7 +8,6 @@
 // reporting which one opened. The frames themselves go through IEncoderBackend (§7) --
 // this class no longer touches libavcodec's send/receive pair itself.
 
-#include "backend/common/backend_session.h"
 #include "sve/encoder_backend.h"
 #include "sve/types.h"
 
@@ -68,9 +67,6 @@ public:
     void encode_buffer(IFrameBuffer& pixels, const std::vector<Rect>& rects, int64_t pts,
         std::span<const uint8_t> sei_unregistered = {});
 
-    // The same for a frame the library decoded itself.
-    void encode(AVFrame* frame, const std::vector<Rect>& rects, int64_t pts,
-        std::span<const uint8_t> sei_unregistered = {});
     // Drains the encoder. Does not end the sink.
     void flush();
 

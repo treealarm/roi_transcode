@@ -193,6 +193,47 @@ CODEC=h265 mechanism_checks cpu_h265 no
 step "the ROI mechanism does what it claims (CPU, CRF, H.264)"
 CODEC=h264 mechanism_checks cpu_h264 no
 
+# The direct backends of §5.4, which until 2026-08-31 this script did not name once.
+# That was the gap the x265direct crash walked through: it lived on a committed HEAD,
+# through a green check.sh, because nothing here ever ran it. §5.4 is the headline of
+# slices E and F and it deserves the same standard as the libavcodec paths.
+#
+# `no` for cqp: both run CRF, where rate control couples the regions, exactly as the
+# libavcodec x265 path does.
+step "the ROI mechanism does what it claims (x264 direct API, CRF, H.264)"
+ENC=x264direct CODEC=h264 mechanism_checks x264direct no
+
+step "the ROI mechanism does what it claims (x265 direct API, CRF, HEVC)"
+ENC=x265direct CODEC=h265 mechanism_checks x265direct no
+
+# Metadata whose size changes from frame to frame, which is a different test from the one
+# above and the reason this step exists separately.
+#
+# testdata/roi.json holds its object for 0.25 s of a 12 s clip, so most frames carry no
+# object and a few carry one: the SEI payload alternates between two lengths. The synth_*
+# fixtures hold theirs for 20 s, so their payload never changes length -- and a payload
+# that never changes length is precisely the input under which x265 4.1's user-SEI buffer
+# reuse cannot fail. Verified against the pre-fix binary: it survives every synth_*
+# fixture and segfaults on this one.
+#
+# So the assertion is not about quality here. It is that the run completes and every frame
+# arrives, on a fixture where the metadata channel is not a constant.
+step "direct backends survive metadata that changes size"
+for _spec in "x264direct h264" "x265direct h265"; do
+    set -- $_spec
+    _enc="$1"; _codec="$2"
+    if "${BUILD}/roi-transcode" --in "$SRC" --roi "${ROOT}/testdata/roi.json" \
+        --out "${WORK}/varmeta_${_enc}.mp4" --encoder "$_enc" --codec "$_codec" \
+        --crf 28 --gop 15 >"${WORK}/varmeta_${_enc}.log" 2>&1; then
+        pass "[${_enc}] encodes varying metadata without dying"
+        assert_eq "[${_enc}] frame count kept" \
+            "$(count_packets "${WORK}/varmeta_${_enc}.mp4")" "$src_frames"
+    else
+        fail "[${_enc}] encode with varying metadata (rc=$?)"
+        sed 's/^/      /' "${WORK}/varmeta_${_enc}.log" >&2
+    fi
+done
+
 step "cpu h265 guards are explicit and stable"
 CODEC=h265
 encode "guard_h265" synth_roi.json cpu --target-bitrate 400000 || true
