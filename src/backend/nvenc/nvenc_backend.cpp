@@ -17,6 +17,7 @@
 #include "preset.h"
 
 extern "C" {
+#include <libavcodec/avcodec.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/opt.h>
 }
@@ -29,11 +30,23 @@ class NvencBackend final : public LibavBackend {
 public:
     Backend kind() const override { return Backend::NvidiaNvenc; }
 
-    EncoderCapabilities GetCapabilities(Codec) const override
+    EncoderCapabilities GetCapabilities(Codec codec) const override
     {
         EncoderCapabilities c;
-        c.h264 = true;
-        c.h265 = true;
+        // Asked of the build, not declared. This backend said it could produce both codecs
+        // whatever FFmpeg had been compiled with, and on a build without the nvcodec
+        // feature -- which is this one -- that made the capability report say yes and
+        // Configure then say "h264_nvenc: not in this FFmpeg build". Selection was walking
+        // to a backend that could never open, and the report was telling a caller they
+        // had NVENC when nothing of the sort was linked.
+        //
+        // The same rule as ten-bit in §48's AT-009: a capability is something to find out,
+        // not something to write down. What this cannot answer is whether a card is
+        // present -- that is a property of the machine, discovered at Configure, and
+        // DeviceUnavailable is the right answer there.
+        const bool built = avcodec_find_encoder_by_name(codec_name(codec)) != nullptr;
+        c.h264 = built && codec == Codec::H264;
+        c.h265 = built && codec == Codec::H265;
         // False until the QP map is actually submitted. The hardware supports it; this
         // code does not.
         c.roi_rectangles = false;
