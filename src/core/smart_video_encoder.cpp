@@ -319,6 +319,26 @@ Result<std::unique_ptr<SmartVideoEncoder>> SmartVideoEncoder::Create(
         ep.profile = profile;
     }
 
+    // §8.4: the preference list is the caller's to give, and an unusable one is refused
+    // here rather than turned into a choice nobody asked for.
+    if (ep.kind == Encoder::Auto) {
+        const std::vector<Encoder>& want = ep.backend_selection.preferred;
+        if (want.empty()) {
+            return Status::InvalidArgument(
+                "Encoder::Auto needs a backend preference order; the list is empty");
+        }
+        for (auto it = want.begin(); it != want.end(); ++it) {
+            if (*it == Encoder::Auto) {
+                return Status::InvalidArgument(
+                    "Encoder::Auto cannot appear inside its own preference order");
+            }
+            if (std::find(want.begin(), it, *it) != it) {
+                return Status::InvalidArgument(
+                    "the backend preference order lists the same backend twice");
+            }
+        }
+    }
+
     if (ep.codec == Codec::SameAsSource) {
         // No source to follow here: this entry point is handed frames, not a file. A caller
         // transcoding a clip resolves it against the input's own codec before Create.
@@ -326,19 +346,14 @@ Result<std::unique_ptr<SmartVideoEncoder>> SmartVideoEncoder::Create(
             "Codec::SameAsSource needs a source; resolve it before creating an encoder");
     }
 
-    // See STATUS.md, decision Р5: the CPU HEVC target-bitrate path is unstable, so it is
-    // refused rather than half-honoured, and the refusal is both logged and counted.
-    if (ep.kind == Encoder::Cpu && ep.codec == Codec::H265
-        && ep.rate_control.target_bitrate > 0) {
-        if (const Status s = guard_cpu_h265_target(true, impl->policy, impl->log); !s.ok()) {
-            return s;
-        }
-        impl->stats.cpu_h265_target_guard = true;
-        ++impl->stats.fallbacks_applied;
-        ep.rate_control.target_bitrate = 0;
+    // §8.4: named outright and unable to produce this codec -- X264 asked for HEVC, say --
+    // is Unsupported. Under Auto the same backend is merely skipped, which is why this
+    // check is here and not in the chain walk.
+    if (ep.kind != Encoder::Auto && !encoder_supports(ep.kind, ep.codec)) {
+        return Status::Unsupported(std::format("the {} backend cannot encode {}",
+            encoder_name(ep.kind), ep.codec == Codec::H264 ? "H.264" : "HEVC"));
     }
 
-    impl->bitrate = BitrateBudget(ep.rate_control);
     if (config.input.frame_rate.num > 0 && config.input.frame_rate.den > 0) {
         impl->frame_sec = static_cast<double>(config.input.frame_rate.den)
             / static_cast<double>(config.input.frame_rate.num);
@@ -350,9 +365,36 @@ Result<std::unique_ptr<SmartVideoEncoder>> SmartVideoEncoder::Create(
         return Status::DeviceUnavailable(e.what());
     }
 
+    // See STATUS.md, decision Р5: the libx265 target-bitrate path is unstable, so it is
+    // refused rather than half-honoured, and the refusal is both logged and counted.
+    //
+    // Asked of the backend that opened, not of the one that was requested. Those were the
+    // same question while there was a single Cpu backend named outright, and they stopped
+    // being the same the moment selection could arrive at libx265 on its own -- which it
+    // always could: Auto on a machine with no Quick Sync walks down to the software
+    // encoder, and the guard for the path that is known to be unstable would not have
+    // fired. Reading it off the opened backend is what makes it hold for every route in.
+    if (impl->encoder.kind() == Encoder::X265 && ep.codec == Codec::H265
+        && ep.rate_control.target_bitrate > 0) {
+        if (const Status s = guard_cpu_h265_target(true, impl->policy, impl->log); !s.ok()) {
+            return s;
+        }
+        impl->stats.cpu_h265_target_guard = true;
+        ++impl->stats.fallbacks_applied;
+        ep.rate_control.target_bitrate = 0;
+    }
+
+    // After the guard, so a target it disallowed does not reach the budget loop. The
+    // backend has already been configured, and ignores the target for HEVC anyway: for
+    // libx265 the rate is CRF plus this outer loop, never the encoder's own bitrate mode.
+    impl->bitrate = BitrateBudget(ep.rate_control);
+
     impl->stats.encoder_used = impl->encoder.kind();
     impl->stats.encoder_name = impl->encoder.label();
     impl->stats.backends_declined = impl->encoder.backends_declined();
+    for (const std::string& reason : impl->encoder.backends_skipped()) {
+        impl->log.warn("backend skipped: " + reason);
+    }
     impl->log.info(std::format("backend: {} opened; {} declined before it",
         impl->encoder.label(), impl->stats.backends_declined));
     impl->state = EncoderState::Configured;
@@ -521,7 +563,7 @@ Status SmartVideoEncoder::Reconfigure(const RuntimeEncoderSettings& settings)
     if (settings.target_bitrate) {
         RateControlPolicy rc = s.config.settings.rate_control;
         rc.target_bitrate = *settings.target_bitrate;
-        if (s.encoder.kind() == Encoder::Cpu && s.out_codec == Codec::H265
+        if (s.encoder.kind() == Encoder::X265 && s.out_codec == Codec::H265
             && rc.target_bitrate > 0) {
             // Same guard as at Create, and it answers rather than quietly ignores: the
             // caller is asking now, so Permissive would still be misleading here.

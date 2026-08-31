@@ -12,7 +12,7 @@
 namespace sve {
 
 struct Report {
-    Encoder encoder_used = Encoder::Cpu;
+    Encoder encoder_used = Encoder::X264;
     std::string encoder_name;
     int64_t frames = 0;
     int64_t packets = 0;

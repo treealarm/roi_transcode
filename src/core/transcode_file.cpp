@@ -101,6 +101,7 @@ Report transcode_file(const std::string& input_path,
     // 90 kHz moves every PTS and with it the rate control's answers.
     cfg.input.time_base = Rational{fps.den, fps.num};
     cfg.settings = settings;
+    cfg.backend_selection = cfg.settings.backend_selection;
     // Resolved here rather than inside the encoder: only this entry point has a source to
     // follow, and an encoder handed frames has nothing to answer SameAsSource from.
     cfg.settings.codec = resolve_codec(settings.codec, in_v->codecpar->codec_id);

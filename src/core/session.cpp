@@ -224,6 +224,7 @@ Session::Session(const SessionParams& params, PacketHandler* handler)
     cfg.input.time_base =
         Rational{params.time_base_num, std::max(params.time_base_den, 1)};
     cfg.settings = params.settings;
+    cfg.backend_selection = cfg.settings.backend_selection;
     // SameAsSource, answered from what the caller said it is submitting. Raw frames have no
     // source codec to mirror, so they take the same H.264 fallback an unrecognised one does.
     cfg.settings.codec = params.settings.codec != Codec::SameAsSource

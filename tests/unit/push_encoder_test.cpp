@@ -42,7 +42,7 @@ SmartEncoderConfig config_for()
     cfg.input.height = kHeight;
     cfg.input.frame_rate = Rational{25, 1};
     cfg.input.pixel_format = PixelFormat::YUV420P;
-    cfg.settings.encoder = Encoder::Cpu;
+    cfg.settings.encoder = Encoder::X264;
     cfg.settings.codec = Codec::H264;
     cfg.settings.crf = 32;
     cfg.settings.metadata.bitstream_sei = false;
@@ -174,8 +174,9 @@ void a_backend_that_will_not_open_arrives_as_an_error_event()
     Recorder seen;
     SmartEncoderConfig cfg = config_for();
     cfg.settings.encoder = Encoder::Auto;
-    cfg.backend_selection.preferred.clear();
-    cfg.backend_selection.allow_software_fallback = false;
+    // Nothing else in the order, so the chain is exhausted rather than falling to
+    // software -- which since 4.1 is said by leaving software off the list.
+    cfg.backend_selection.preferred = {Encoder::Nvenc};
 
     auto pixels = std::make_shared<Pixels>();
     auto push = open_push(cfg);

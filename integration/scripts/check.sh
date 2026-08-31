@@ -369,9 +369,14 @@ PY
     # A moving box is the case a static fixture cannot cover: the ROI has to
     # follow it, and a stale rectangle would leave the plate in crushed
     # background while protecting empty space.
+    #
+    # x264, said plainly. This line read "--encoder x265" until 2026-08-31 and encoded
+    # H.264 the whole time: the flag was an alias for the single CPU backend, and --codec
+    # was left at its H.264 default. Now that x264 and x265 are separate backends the name
+    # has to match what runs, which is what makes this the same test it always was.
     if "${BUILD}/roi-transcode" --in "${SCENES}/moving/source.mp4" \
         --roi "${SCENES}/moving/roi.json" --out "${WORK}/moving.mp4" \
-        --encoder x265 --crf 28 --gop 1 >/dev/null 2>&1; then
+        --encoder x264 --crf 28 --gop 1 >/dev/null 2>&1; then
         moving_ok=1
         for probe in "1.0 128 288" "6.0 550 288" "11.0 972 288"; do
             set -- $probe

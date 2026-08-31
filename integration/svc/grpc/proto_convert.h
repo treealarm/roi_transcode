@@ -27,7 +27,7 @@ namespace roisvc {
 
 sve::PixelFormat to_library_format(AVPixelFormat f);
 sve::Preset to_library_preset(roi::transcode::Preset p);
-sve::Encoder from_proto(roi::transcode::Encoder e);
+sve::EncoderChoice from_proto(roi::transcode::Encoder e);
 roi::transcode::Encoder to_proto(sve::Encoder k);
 roi::transcode::JobState to_proto(RoiJobState s);
 sve::ObjectPriority priority_from_proto(roi::transcode::ObjectPriority p);
@@ -50,7 +50,9 @@ sve::SessionParams params_from_open(const roi::transcode::StreamOpen& open);
 template <typename ProtoSettings>
 void apply_settings(const ProtoSettings& in, sve::Settings& out)
 {
-    out.encoder = from_proto(in.encoder());
+    const sve::EncoderChoice choice = from_proto(in.encoder());
+    out.encoder = choice.kind;
+    out.backend_selection = choice.selection;
     switch (in.codec()) {
         case roi::transcode::CODEC_H264: out.codec = sve::Codec::H264; break;
         case roi::transcode::CODEC_SAME_AS_SOURCE:

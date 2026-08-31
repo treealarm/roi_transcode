@@ -2,6 +2,7 @@
 
 // The vocabulary both entry points share.
 
+#include "sve/backend_selection.h"
 #include "sve/importance.h"
 #include "sve/object_priority.h"
 #include "sve/policy.h"
@@ -18,20 +19,6 @@ namespace sve {
 struct Rational {
     int32_t num = 0;
     int32_t den = 1;
-};
-
-// Which backend does the encoding. Says nothing about the codec -- the same
-// silicon encodes both, and conflating the two is what made the old X265 name
-// wrong the moment H.264 output existed.
-enum class Encoder {
-    // Tries Quick Sync, then VA-API, then the CPU. Which one opened is reported
-    // back, because on this hardware the difference is worth knowing.
-    Auto,
-    Qsv,
-    Vaapi,
-    Nvenc,
-    // libx264 or libx265, whichever the codec asks for.
-    Cpu,
 };
 
 // How much time the encoder may spend looking for a better answer.
@@ -88,6 +75,16 @@ enum class CodecProfile {
     H265Main,
     H265Main10,
 };
+
+/// Which codecs a backend can produce at all, before any device is opened -- TZ v4.1 §8.4.
+///
+/// Answerable without opening anything, because that is what selection needs: a backend
+/// that could never serve the requested codec has to be skipped before it is asked for a
+/// device it may not have. The hardware backends answer yes to both; the two software ones
+/// answer for their own library only.
+bool encoder_supports(Encoder kind, Codec codec);
+
+
 
 const char* codec_profile_name(CodecProfile p);
 
@@ -240,6 +237,11 @@ struct Quality {
 
 struct Settings {
     Encoder encoder = Encoder::Auto;
+    /// Which backends Encoder::Auto may try, and in what order. Empty is InvalidArgument
+    /// under Auto: since 4.1 the library ships no default order, because the only honest
+    /// default is the one whoever deploys the system chooses for their own hardware
+    /// (§8.4). `encoder_choice_from_name` fills both fields together from a name.
+    BackendSelection backend_selection;
     /// H.264 by default: it is the codec every player and every browser handles, and a caller
     /// that has an opinion says so. `SameAsSource` is the one to reach for when transcoding.
     Codec codec = Codec::H264;

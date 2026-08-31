@@ -81,7 +81,7 @@ private:
     const sve::Status status = sve::Status::Ok();
     const sve::BackendSelection selection;
     const std::vector<sve::BackendRef> backend =
-        sve::resolve_backends(sve::Encoder::Cpu, selection);
+        sve::resolve_backends(sve::Encoder::X264, selection, sve::Codec::H264);
 
     // §22 and §29: the policy and the log sink are part of the public vocabulary, and
     // neither drags FFmpeg in with it.

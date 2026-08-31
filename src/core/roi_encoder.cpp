@@ -27,8 +27,12 @@ const char* RoiEncoder::label() const
     case Encoder::Nvenc:
         return h264 ? "h264_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)"
                     : "hevc_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)";
+    case Encoder::X264:
+        return "libx264 (CPU, per-macroblock quantOffsets)";
+    case Encoder::X265:
+        return "libx265 (CPU, per-block quantOffsets)";
     default:
-        return h264 ? "libx264 (CPU fallback)" : "libx265 (CPU fallback)";
+        return h264 ? "libx264 (CPU)" : "libx265 (CPU)";
     }
 }
 
@@ -40,7 +44,9 @@ const char* backend_name(Encoder kind)
     case Encoder::Qsv:   return "qsv";
     case Encoder::Vaapi: return "vaapi";
     case Encoder::Nvenc: return "nvenc";
-    default:             return "cpu";
+    case Encoder::X264:  return "x264";
+    case Encoder::X265:  return "x265";
+    default:             return "auto";
     }
 }
 
@@ -123,10 +129,16 @@ void RoiEncoder::open_deferred(const EncoderConfig& config)
     // bitrate target and gets neither has been misled.
 
     std::string errors;
-    const std::vector<BackendRef> chain =
-        resolve_backends(config.kind, config.backend_selection);
+    const std::vector<BackendRef> chain = resolve_backends(
+        config.kind, config.backend_selection, config.codec, &m_backends_skipped);
     if (chain.empty()) {
-        fail("backend selection excludes every backend this build has");
+        std::string why;
+        for (const std::string& reason : m_backends_skipped) {
+            why += " " + reason + ";";
+        }
+        fail(why.empty()
+            ? std::string("backend selection excludes every backend this build has")
+            : "backend selection leaves nothing that can encode this codec:" + why);
     }
     for (const IEncoderBackend& backend : chain) {
         auto opened = backend.Configure(config);

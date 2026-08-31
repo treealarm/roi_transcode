@@ -259,7 +259,7 @@ Result<SessionPtr> LibavBackend::Configure(const EncoderConfig& config) const
 {
     const char* name = codec_name(config.codec);
     const AVCodec* codec = avcodec_find_encoder_by_name(name);
-    if (!codec && kind() == Encoder::Cpu) {
+    if (!codec && (kind() == Encoder::X264 || kind() == Encoder::X265)) {
         // A build without libx264/libx265 may still have some other encoder for the codec;
         // better that than refusing to run at all.
         codec = avcodec_find_encoder(av_id_from_codec(config.codec));

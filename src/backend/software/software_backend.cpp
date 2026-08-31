@@ -1,9 +1,16 @@
-// libx264 / libx265 -- the fallback that is always available.
+// libx264 and libx265 -- two backends, not one -- TZ v4.1 §5.4.
 //
-// Its ROI support is the most capable of the three in one respect: the offsets go in as a
-// per-macroblock quantOffsets map, so there is no region count to run out of. The catch is
-// that they are applied through adaptive quantisation and are ignored outright when
-// aq-mode is 0 -- which is why it is set here and not left to the preset.
+// They were one class until 4.1, picking a library from the codec. That was convenient and
+// wrong in the same way: libx264 and libx265 are separate libraries with separate APIs and
+// separate capabilities, and a caller who lists "the CPU" in a preference order has not
+// actually said which of the two they mean. Now they say it, and a mismatch between the
+// backend they named and the codec they asked for is answered rather than absorbed.
+//
+// What the two still share is everything below the API: both reach the encoder through the
+// same libavcodec pair, both take offsets as a per-macroblock quantOffsets map -- which is
+// what makes the region count unlimited, unlike the Intel path -- and both ignore those
+// offsets outright when aq-mode is 0, which is why it is set here and not left to the
+// preset. So the implementation stays one class with the codec fixed at construction.
 
 #include "backend/common/backend_common.h"
 #include "preset.h"
@@ -23,20 +30,30 @@ namespace {
 
 class SoftwareBackend final : public LibavBackend {
 public:
-    Encoder kind() const override { return Encoder::Cpu; }
+    SoftwareBackend(Encoder kind, Codec codec, const char* encoder_name)
+        : m_kind(kind), m_codec(codec), m_name(encoder_name)
+    {
+    }
+
+    Encoder kind() const override { return m_kind; }
 
     EncoderCapabilities GetCapabilities(Codec codec) const override
     {
         EncoderCapabilities c;
-        c.h264 = true;
-        c.h265 = true;
+        if (codec != m_codec) {
+            // Not a degraded answer but an empty one: this backend cannot produce that
+            // codec at all, and selection reads exactly this to skip it (§8.4).
+            return c;
+        }
+        c.h264 = m_codec == Codec::H264;
+        c.h265 = m_codec == Codec::H265;
         c.roi_rectangles = true;
         // The offsets are a per-block quantOffsets map underneath, which is what makes the
         // region count unlimited: rectangles are just how FFmpeg describes them on the way
         // in. H.264 cells are macroblocks; for HEVC we paint 32x32 before merge (see
         // EncoderCapabilities::qp_map_block_*).
         c.qp_map = true;
-        if (codec == Codec::H264) {
+        if (m_codec == Codec::H264) {
             c.qp_map_block_width = 16;
             c.qp_map_block_height = 16;
         } else {
@@ -45,34 +62,31 @@ public:
         }
         c.runtime_roi_update = true;
         // Guard: CPU HEVC + ROI is unstable on this stack; keep SEI on H.264 only for now.
-        c.sei = (codec == Codec::H264);
+        c.sei = m_codec == Codec::H264;
         // Native bitrate path is currently H.264-only: libx265 + ROI + target_bitrate
         // is unstable on our stack, so HEVC stays on CRF/CQP + outer BitrateBudget.
-        c.native_bitrate = (codec == Codec::H264);
+        c.native_bitrate = m_codec == Codec::H264;
         c.max_roi_regions = 0;  // no limit worth naming
 
         // §15.3's profile is HEVC, so ten bits are only claimed for H.265 even where the
         // H.264 encoder would take them.
-        if (codec == Codec::H265) {
-            const auto ten = backend_common::query_ten_bit("libx265");
+        if (m_codec == Codec::H265) {
+            const auto ten = backend_common::query_ten_bit(m_name);
             c.main10 = ten.main10;
             c.p010_input = ten.p010_input;
         }
         return c;
     }
 
-    const char* codec_name(Codec codec) const override
-    {
-        return codec == Codec::H264 ? "libx264" : "libx265";
-    }
+    const char* codec_name(Codec) const override { return m_name; }
 
     Status configure_context(LibavSession& out, const EncoderConfig& p) const override
     {
         if (p.input.pixel_format == PixelFormat::P010) {
-            const auto ten = backend_common::query_ten_bit(codec_name(p.codec));
+            const auto ten = backend_common::query_ten_bit(m_name);
             if (!ten.main10) {
-                return Status::Unsupported(std::string(codec_name(p.codec))
-                    + " in this build has no ten-bit path");
+                return Status::Unsupported(
+                    std::string(m_name) + " in this build has no ten-bit path");
             }
             // libx265 takes yuv420p10le and not P010, so the frame is converted on the way
             // in -- counted in frames_converted like any other conversion.
@@ -87,7 +101,7 @@ public:
         // Accept AV_FRAME_DATA_SEI_UNREGISTERED as user-data-unregistered SEI (§19).
         av_opt_set_int(out.enc.p->priv_data, "udu_sei", 1, 0);
 
-        if (p.rate_control.target_bitrate > 0 && p.codec == Codec::H264) {
+        if (p.rate_control.target_bitrate > 0 && m_codec == Codec::H264) {
             // Native bitrate mode (TZ v3 §15–16) for H.264. Do not also set CRF.
             const int64_t target = static_cast<int64_t>(p.rate_control.target_bitrate);
             const float peak_frac = p.rate_control.max_peak_overshoot > 0.0f
@@ -109,13 +123,24 @@ public:
         }
         return Status::Ok();
     }
+
+private:
+    Encoder m_kind;
+    Codec m_codec;
+    const char* m_name;
 };
 
 } // namespace
 
-const IEncoderBackend& software_backend()
+const IEncoderBackend& x264_backend()
 {
-    static const SoftwareBackend instance;
+    static const SoftwareBackend instance(Encoder::X264, Codec::H264, "libx264");
+    return instance;
+}
+
+const IEncoderBackend& x265_backend()
+{
+    static const SoftwareBackend instance(Encoder::X265, Codec::H265, "libx265");
     return instance;
 }
 

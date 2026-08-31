@@ -34,7 +34,7 @@ namespace {
 constexpr int32_t kWidth = 128;
 constexpr int32_t kHeight = 96;
 
-SmartEncoderConfig config_for(Encoder backend = Encoder::Cpu, Codec codec = Codec::H264)
+SmartEncoderConfig config_for(Encoder backend = Encoder::X264, Codec codec = Codec::H264)
 {
     SmartEncoderConfig cfg;
     cfg.input.width = kWidth;
@@ -109,7 +109,7 @@ void same_as_source_needs_a_source()
 {
     // This entry point is handed frames, not a file, so there is nothing to mirror. Better
     // an InvalidArgument than an encoder that quietly picked one.
-    SmartEncoderConfig cfg = config_for(Encoder::Cpu, Codec::SameAsSource);
+    SmartEncoderConfig cfg = config_for(Encoder::X264, Codec::SameAsSource);
     CHECK(SmartVideoEncoder::Create(cfg).status().code() == StatusCode::InvalidArgument);
 }
 
@@ -233,7 +233,7 @@ void cpu_h265_refuses_a_target_bitrate_out_loud()
     // STATUS.md Р5. The guard is a standing contract, so it is asserted rather than left to
     // whoever next reads the log: at Create it downgrades and records why, and a caller who
     // asks again through Reconfigure is told instead of quietly ignored.
-    SmartEncoderConfig cfg = config_for(Encoder::Cpu, Codec::H265);
+    SmartEncoderConfig cfg = config_for(Encoder::X265, Codec::H265);
     cfg.settings.rate_control.target_bitrate = 800000;
     auto enc = open_encoder(cfg);
     CHECK(enc->GetStatistics().cpu_h265_target_guard);
@@ -249,45 +249,97 @@ void the_selection_orders_the_backends_and_can_exclude_them()
     // caller has already been explicit and quietly getting libx264 instead is the failure
     // this rule exists to prevent.
     BackendSelection none;
-    none.preferred.clear();
-    none.allow_software_fallback = false;
-    CHECK(resolve_backends(Encoder::Cpu, none).size() == 1);
+    CHECK(resolve_backends(Encoder::X264, none, Codec::H264).size() == 1);
 
     // Auto walks the list, in the order given.
     BackendSelection cpu_first;
-    cpu_first.preferred = {Encoder::Cpu, Encoder::Qsv};
-    const auto chain = resolve_backends(Encoder::Auto, cpu_first);
+    cpu_first.preferred = {Encoder::X264, Encoder::Qsv};
+    const auto chain = resolve_backends(Encoder::Auto, cpu_first, Codec::H264);
     CHECK(chain.size() == 2);
-    CHECK(chain[0].get().kind() == Encoder::Cpu);
+    CHECK(chain[0].get().kind() == Encoder::X264);
     CHECK(chain[1].get().kind() == Encoder::Qsv);
 
-    // Software can be shut out of the automatic path entirely.
+    // Software is shut out of the automatic path by leaving it off the list, and by
+    // nothing else. §8.4 dropped the separate allow_software_fallback switch: two ways to
+    // say the same thing is one way to have them disagree.
     BackendSelection hardware_only;
-    hardware_only.allow_software_fallback = false;
-    for (const BackendRef& ref : resolve_backends(Encoder::Auto, hardware_only)) {
-        CHECK(ref.get().kind() != Encoder::Cpu);
+    hardware_only.preferred = {Encoder::Qsv, Encoder::Vaapi, Encoder::Nvenc};
+    for (const BackendRef& ref : resolve_backends(Encoder::Auto, hardware_only, Codec::H264)) {
+        CHECK(ref.get().kind() != Encoder::X264);
+        CHECK(ref.get().kind() != Encoder::X265);
     }
 
     // And a backend absent from the list is not reached unless unlisted ones are allowed.
     BackendSelection only_nvenc;
     only_nvenc.preferred = {Encoder::Nvenc};
-    CHECK(resolve_backends(Encoder::Auto, only_nvenc).size() == 1);
+    CHECK(resolve_backends(Encoder::Auto, only_nvenc, Codec::H264).size() == 1);
     only_nvenc.allow_unlisted = true;
-    CHECK(resolve_backends(Encoder::Auto, only_nvenc).size() > 1);
+    CHECK(resolve_backends(Encoder::Auto, only_nvenc, Codec::H264).size() > 1);
 }
 
-void a_selection_that_excludes_everything_fails_to_open()
+void a_backend_that_cannot_encode_the_codec_is_left_out_with_its_reason()
 {
-    SmartEncoderConfig cfg = config_for(Encoder::Auto);
-    cfg.backend_selection.preferred.clear();
-    cfg.backend_selection.allow_software_fallback = false;
-    CHECK(!SmartVideoEncoder::Create(cfg).ok());
+    // §5.4 made libx264 and libx265 two backends, so a preference list can now name one
+    // that has nothing to offer this particular encode. Under Auto it is skipped rather
+    // than opened and found wanting -- and skipping it silently is what §50 forbids, so
+    // the reason comes back with the chain.
+    BackendSelection both;
+    both.preferred = {Encoder::X264, Encoder::X265};
+
+    std::vector<std::string> skipped;
+    const auto for_hevc = resolve_backends(Encoder::Auto, both, Codec::H265, &skipped);
+    CHECK(for_hevc.size() == 1);
+    CHECK(for_hevc[0].get().kind() == Encoder::X265);
+    CHECK(skipped.size() == 1);
+    CHECK(skipped[0].find("x264") != std::string::npos);
+
+    skipped.clear();
+    const auto for_avc = resolve_backends(Encoder::Auto, both, Codec::H264, &skipped);
+    CHECK(for_avc.size() == 1);
+    CHECK(for_avc[0].get().kind() == Encoder::X264);
+    CHECK(skipped.size() == 1);
+    CHECK(skipped[0].find("x265") != std::string::npos);
+
+    // Named outright, the same mismatch is an error rather than a skip: the caller asked
+    // for something this backend cannot do, and answering with a different one would be
+    // the substitution the rule exists to prevent.
+    SmartEncoderConfig cfg = config_for(Encoder::X264, Codec::H265);
+    const auto made = SmartVideoEncoder::Create(cfg);
+    CHECK(!made.ok());
+    CHECK(made.status().code() == StatusCode::Unsupported);
+}
+
+void an_unusable_preference_order_is_refused_before_anything_opens()
+{
+    // §8.4: Auto with no order is InvalidArgument. The library used to ship a default,
+    // which amounted to guessing at hardware it cannot see.
+    SmartEncoderConfig empty = config_for(Encoder::Auto);
+    empty.backend_selection.preferred.clear();
+    const auto no_order = SmartVideoEncoder::Create(empty);
+    CHECK(!no_order.ok());
+    CHECK(no_order.status().code() == StatusCode::InvalidArgument);
+
+    // Auto cannot appear inside its own order, and no backend twice.
+    SmartEncoderConfig recursive = config_for(Encoder::Auto);
+    recursive.backend_selection.preferred = {Encoder::Auto, Encoder::X264};
+    CHECK(SmartVideoEncoder::Create(recursive).status().code()
+        == StatusCode::InvalidArgument);
+
+    SmartEncoderConfig twice = config_for(Encoder::Auto);
+    twice.backend_selection.preferred = {Encoder::X264, Encoder::X264};
+    CHECK(SmartVideoEncoder::Create(twice).status().code() == StatusCode::InvalidArgument);
+
+    // A well-formed order that no backend in this build can serve fails at open, which is
+    // a different answer: the request was valid, the machine could not meet it.
+    SmartEncoderConfig hardware_only = config_for(Encoder::Auto);
+    hardware_only.backend_selection.preferred = {Encoder::Nvenc};
+    CHECK(!SmartVideoEncoder::Create(hardware_only).ok());
 }
 
 void diagnostics_go_where_the_caller_says()
 {
     std::vector<std::pair<LogLevel, std::string>> lines;
-    SmartEncoderConfig cfg = config_for(Encoder::Cpu, Codec::H265);
+    SmartEncoderConfig cfg = config_for(Encoder::X265, Codec::H265);
     cfg.settings.rate_control.target_bitrate = 800000;   // trips the CPU H.265 guard
     cfg.log = [&lines](LogLevel level, std::string_view message) {
         lines.emplace_back(level, std::string(message));
@@ -321,7 +373,7 @@ void strict_refuses_where_permissive_degrades()
     // Same request, two policies. Under Permissive the encoder opens and records that it
     // had to downgrade; under Strict it refuses, and the caller learns before encoding a
     // single frame rather than from a counter afterwards.
-    SmartEncoderConfig permissive = config_for(Encoder::Cpu, Codec::H265);
+    SmartEncoderConfig permissive = config_for(Encoder::X265, Codec::H265);
     permissive.settings.rate_control.target_bitrate = 800000;
     permissive.log = [](LogLevel, std::string_view) {};
     CHECK(SmartVideoEncoder::Create(permissive).ok());
@@ -364,7 +416,8 @@ int main()
     reconfigure_takes_what_8_2_allows_and_refuses_the_rest();
     cpu_h265_refuses_a_target_bitrate_out_loud();
     the_selection_orders_the_backends_and_can_exclude_them();
-    a_selection_that_excludes_everything_fails_to_open();
+    a_backend_that_cannot_encode_the_codec_is_left_out_with_its_reason();
+    an_unusable_preference_order_is_refused_before_anything_opens();
     diagnostics_go_where_the_caller_says();
     strict_refuses_where_permissive_degrades();
     strict_refuses_a_frame_whose_regions_do_not_fit();

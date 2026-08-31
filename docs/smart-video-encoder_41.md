@@ -1,8 +1,8 @@
 # Техническое задание. Smart Video Encoder (`smart-video-encoder`)
 
-**Версия:** 3.4
+**Версия:** 4.1
 **Статус:** Draft / для утверждения  
-**Дата:** 2026-08-29  
+**Дата:** 2026-08-31  
 **Целевая ОС P0:** Ubuntu 24.04, Linux x86_64  
 **Система сборки:** CMake + vcpkg  
 **CI/CD:** GitLab CI  
@@ -12,6 +12,8 @@
 
 | Версия | Изменения |
 |---|---|
+| 4.1 | Удалён FFmpeg encoder backend; software encoding реализуется независимыми direct backend-модулями `X264Backend` и `X265Backend` поверх libx264/libx265; FFmpeg оставлен только как опциональный `AVFrame` interop-компонент; software fallback полностью определяется пользовательским `BackendSelection::preferred`; добавлены codec-native quant-offset map, отдельные capability/CI/benchmark/license gates для x264 и x265. |
+| 4.0 | FFmpeg преобразован из обязательного нижнего слоя в независимый software peer backend; NVIDIA NVENC, Intel oneVPL и Rockchip MPP реализуются как независимые native backend modules без зависимости от FFmpeg/libavcodec; backend'ы поставляются как опциональные runtime-модули со стабильной C ABI регистрации; сохранены публичный API без FFmpeg (кроме opt-in `sve/frame.h`), пользовательский `BackendSelection::preferred`, единые factory-функции и session-based backend interface для конкурентного кодирования нескольких потоков. |
 | 3.4 | Рефакторинг публичного API (8.3–8.13): входной формат выделен в `InputVideoFormat`; добавлен управляемый порядок выбора backend через `BackendSelection`; введены владеющие `Frame`/`TimedFrame` и `RawFrameView` с явным owner; `EncodedPacket` переведён на shared immutable `PacketBuffer`; добавлен `MediaTimestamp` с явным `time_base`; введён push facade `PushVideoEncoder` и типизированные события packet/EOS/error без использования `nullptr`; добавлен `CodecParameters` с extradata; добавлены единые factory-функции; определена lifecycle-модель `EncoderState` и семантика `Stop`/`Flush`. |
 | 3.3 | Правки по аудиту: методика ROI-метрик и раздельные метрики synthetic/natural (34, 35, 49); Python P0 синхронизирован с CI/тестами (30, 44, 47, 48, 49); покрытие 10-bit P010/Main10 (15.3, 32, 48, 49, 55); пиннинг MOT17 моделей (36.1); статистический протокол: прогоны, seeds, агрегация, coverage gate (41); `FallbackPolicy` (22, Прил. C); расширен `EncoderCapabilities` (7.2); GOP в секундах (15); согласованность rolling bitrate с конфигом (16); параллельные hardware-стадии (44); export/ABI/semver и стратегия Rockchip MPP (26.3, 26.4); retention артефактов (45); исправлен пример (52); RGB выведен из DoD (55); раздел 49 — единственный нормативный источник порогов (14, 16); Приложение C «Открытые определения API»; исправлена иерархия заголовков |
 | 3.2 | `time_base` и правила PTS; `BinaryMask`; правила CQ/CQP; Submit/Receive backend interface; thread-safety контракт; CBOR + CRC-32C + лимиты входа; sidecar-формат; `RequestKeyFrame`/`Reconfigure` |
@@ -34,12 +36,14 @@
 - adaptive recompression;
 - кодирование видеопотока камеры;
 - CPU frames;
-- `AVFrame`;
+- `AVFrame` через opt-in FFmpeg interop adapter;
 - CUDA-backed `AVFrame` / GPU memory;
 - backend NVIDIA NVENC;
 - backend Intel oneVPL;
 - backend Rockchip MPP;
-- программный fallback через FFmpeg software encoders.
+- direct software backend libx264 для H.264;
+- direct software backend libx265 для H.265;
+- FFmpeg только как опциональный `AVFrame` interop adapter, не как encoder backend.
 
 ---
 
@@ -117,6 +121,11 @@ Windows/Docker Desktop допускаются только как development/CI
 
 ## 5.1 NVIDIA
 
+`NvencBackend` — native backend, использующий NVIDIA NVENCODE API напрямую. Он не должен
+линковаться с FFmpeg/libavcodec и не использует FFmpeg NVENC encoders. FFmpeg interop adapter
+может преобразовать `AVFrame` в `IFrameBuffer` до вызова backend, не создавая зависимости
+`NvencBackend -> FFmpeg`.
+
 Основной путь:
 
 ```text
@@ -126,10 +135,10 @@ AVFrame / CUDA frame
 smart-video-encoder
         |
         v
-FFmpeg libavcodec
+NvencBackend
         |
         v
-h264_nvenc / hevc_nvenc
+NVIDIA NVENCODE API
         |
         v
 NVENC
@@ -143,17 +152,22 @@ NVENC
 
 ## 5.2 Intel
 
+`OneVplBackend` — native backend, использующий Intel oneVPL напрямую и не зависящий от
+FFmpeg/QSV.
+
 Основной путь:
 
 ```text
-AVFrame
-   |
-   +--> FFmpeg QSV, если возможностей достаточно
-   |
-   +--> direct oneVPL adapter
-           |
-           v
-         oneVPL
+AVFrame / supported hardware surface
+       |
+       v
+smart-video-encoder
+       |
+       v
+OneVplBackend
+       |
+       v
+Intel oneVPL
 ```
 
 Для ROI использовать capability query. Поддерживаемый максимум ROI и доступные режимы определяются runtime API.
@@ -165,7 +179,7 @@ AVFrame
 
 ## 5.3 Rockchip
 
-Использовать Rockchip MPP напрямую через backend adapter.
+`RockchipMppBackend` использует Rockchip MPP напрямую и не зависит от FFmpeg/libavcodec.
 
 Поддерживаемые P0:
 - H.264;
@@ -176,9 +190,22 @@ AVFrame
 
 Целевые SoC определяются capability layer. Минимальный hardware validation target должен включать один актуальный Rockchip SoC с H.264/H.265 encoder и ROI.
 
-## 5.4 Software fallback
+## 5.4 Direct software backend'ы
 
-Через FFmpeg/libavcodec.
+Software encoding реализуется двумя независимыми peer backend-модулями:
+
+- `X264Backend` — H.264 через direct libx264 API;
+- `X265Backend` — H.265 через direct libx265 API.
+
+FFmpeg/libavcodec в software encode path не используется. Canonical importance map
+преобразуется непосредственно в codec-native quantization offsets на сетке backend без
+промежуточного преобразования в `AVRegionOfInterest`.
+
+`X264Backend` формирует macroblock-level offsets и передаёт их через поддерживаемый pinned
+libx264 API. `X265Backend` выполняет отдельное codec-specific преобразование в доступный
+CU/CTU-oriented control pinned libx265 API. Backend'ы не обязаны иметь одинаковые grid,
+диапазон, знак или единицы offsets; преобразование, clipping и lifetime map фиксируются в
+adapter contract и telemetry.
 
 Назначение:
 - CI;
@@ -186,7 +213,25 @@ AVFrame
 - отсутствие hardware;
 - reference baseline.
 
-Software backend не обязан обеспечивать все object-first возможности hardware backend. В capability report должен быть явно указан режим реализации.
+Software backend не обязан обеспечивать все object-first возможности hardware backend. В capability report должен быть явно указан фактический native control mode.
+
+## 5.5 Независимость backend'ов
+
+Все backend'ы являются peer-модулями. Нормативный dependency graph:
+
+```text
+sve_core
+  +-- optional --> sve_backend_x264 --> libx264
+  +-- optional --> sve_backend_x265 --> libx265
+  +-- optional --> sve_backend_nvenc --> NVIDIA NVENCODE API
+  +-- optional --> sve_backend_onevpl --> Intel oneVPL
+  +-- optional --> sve_backend_rockchip --> Rockchip MPP
+  +-- optional --> sve_ffmpeg_interop --> FFmpeg libavutil
+```
+
+Encoder backend modules не зависят от FFmpeg. Fallback выполняется между peer-backend'ами
+через общий capability registry, а не внутри backend. FFmpeg interop только преобразует
+внешний `AVFrame` в `Frame`/`IFrameBuffer` и не выполняет кодирование.
 
 ---
 
@@ -219,22 +264,23 @@ Software backend не обязан обеспечивать все object-first 
                           v
 +---------------------------------------------------------+
 |                  Capability Layer                       |
-| NVENC | oneVPL | Rockchip MPP | FFmpeg Software        |
+| x264 | x265 | NVENC native | oneVPL native | MPP native|
 +-------------------------+-------------------------------+
                           |
                           v
 +---------------------------------------------------------+
 |                 Backend Adapters                        |
 |                                                         |
+| X264Backend                                              |
+| X265Backend                                              |
 | NvencBackend                                             |
 | OneVplBackend                                            |
 | RockchipMppBackend                                       |
-| SoftwareBackend                                          |
 +---------------------------------------------------------+
                           |
                           v
 +---------------------------------------------------------+
-|               AVPacket / EncodedFrame                   |
+|                    EncodedPacket                        |
 +---------------------------------------------------------+
 ```
 
@@ -300,7 +346,7 @@ struct EncoderCapabilities {
 
     bool av1;                 // архитектурная готовность (P1)
     bool main10;              // HEVC Main10 / 10-bit encode
-    bool p010_input;          // приём AV_PIX_FMT_P010
+    bool p010_input;          // приём PixelFormat::P010
     bool b_frames;
 
     uint32_t max_width;
@@ -323,14 +369,9 @@ namespace sve {
 
 class SmartVideoEncoder {
 public:
-    static std::unique_ptr<SmartVideoEncoder>
-    Create(const EncoderConfig& config);
-
     virtual ~SmartVideoEncoder() = default;
 
-    virtual Status SubmitFrame(
-        const AVFrame* frame,
-        const FrameMetadata& metadata) = 0;
+    virtual Status SubmitFrame(TimedFrame frame) = 0;
 
     virtual Status ReceivePacket(
         EncodedPacket* packet) = 0;
@@ -359,6 +400,10 @@ public:
 - `Reconfigure` применяет изменяемые на лету параметры (см. `RuntimeEncoderSettings` в 8.2). Недопустимые для runtime изменения (codec, resolution, backend, pixel format) возвращают `InvalidArgument`.
 - `Flush` переводит encoder в draining: после него `SubmitFrame` возвращает `InvalidArgument`, а `ReceivePacket` выдаёт оставшиеся пакеты до `EndOfStream`.
 
+Основной интерфейс `SmartVideoEncoder` не зависит от FFmpeg. Overload
+`SubmitFrame(const AVFrame*, const FrameMetadata&)` объявляется только в opt-in interop
+header `sve/frame.h` как adapter над `Frame::Ref` и основным `SubmitFrame(TimedFrame)`.
+
 ## 8.2 Конфигурация
 
 ```cpp
@@ -370,10 +415,11 @@ enum class Codec {
 
 enum class Backend {
     Auto,
+    X264,
+    X265,
     NvidiaNvenc,
     IntelOneVpl,
-    RockchipMpp,
-    FfmpegSoftware
+    RockchipMpp
 };
 
 enum class RateControl {
@@ -393,19 +439,16 @@ enum class CodecProfile {
     H265Main10
 };
 
+struct BackendSelection {
+    std::vector<Backend> preferred;
+    bool allow_unlisted = false;
+};
+
 struct EncoderConfig {
     Codec codec = Codec::H265;
     Backend backend = Backend::Auto;
-
-    uint32_t width = 0;
-    uint32_t height = 0;
-
-    AVRational frame_rate{30, 1};
-
-    // Timebase для всех PTS (frame->pts, FrameMetadata.pts, EncodedPacket).
-    AVRational time_base{1, 90000};
-
-    AVPixelFormat pixel_format = AV_PIX_FMT_YUV420P;
+    BackendSelection backend_selection;
+    InputVideoFormat input;
     CodecProfile profile = CodecProfile::Auto;
 
     uint64_t target_bitrate = 0;
@@ -437,7 +480,7 @@ struct EncoderConfig {
 struct RuntimeEncoderSettings {
     std::optional<uint64_t> target_bitrate;
     std::optional<uint64_t> max_bitrate;
-    std::optional<AVRational> frame_rate;
+    std::optional<Rational> frame_rate;
     std::optional<AdaptiveConfig> adaptive;
 };
 ```
@@ -445,14 +488,26 @@ struct RuntimeEncoderSettings {
 Правила конфигурации:
 
 - `CQ` — постоянное «качество» с переменным bitrate (backend-специфический quality level); `CQP` — фиксированный QP без rate control. Для обоих режимов bitrate acceptance (раздел 16) не применяется; вместо этого `qp`/`cq_level` фиксируются в benchmark manifest.
-- `P010` требует `CodecProfile::H265Main10` либо `Auto` с автоматическим выбором Main10; несовместимая пара `pixel_format`/`profile` возвращает `InvalidArgument` при `Create`.
+- `PixelFormat::P010` требует `CodecProfile::H265Main10` либо `Auto` с автоматическим выбором Main10; несовместимая пара `input.pixel_format`/`profile` приводит к исключению со статусом `InvalidArgument` при создании encoder.
 - `qp`/`cq_level` вне диапазона backend возвращают `InvalidArgument` с указанием допустимого диапазона в сообщении ошибки.
 
 ## 8.3 Входной видеоформат
 
-Формат входа отделяется от параметров кодирования:
+Формат входа отделяется от параметров кодирования. В публичном словаре используются только
+собственные стабильные типы библиотеки:
 
 ```cpp
+struct Rational {
+    int32_t numerator = 0;
+    int32_t denominator = 1;
+};
+
+enum class PixelFormat {
+    Yuv420P,
+    Nv12,
+    P010,
+};
+
 struct InputVideoFormat {
     PixelFormat pixel_format = PixelFormat::Yuv420P;
     uint32_t width = 0;
@@ -462,39 +517,64 @@ struct InputVideoFormat {
 };
 ```
 
-`EncoderConfig` содержит поле `InputVideoFormat input`. Изменение формата после начала обработки запрещено и возвращает `InvalidArgument`. Это позволяет конфигурировать формат до запуска, использовать один контракт для `AVFrame` и raw planes и не смешивать характеристики входа с rate-control.
+`EncoderConfig` содержит поле `InputVideoFormat input`; дублирующие поля `width`, `height`,
+`frame_rate`, `time_base` и `pixel_format` непосредственно в `EncoderConfig` отсутствуют.
+Изменение формата после начала обработки запрещено и возвращает `InvalidArgument`. Это
+позволяет конфигурировать формат до запуска, использовать один контракт для `AVFrame` и raw
+planes и не смешивать характеристики входа с rate-control.
+
+Основной публичный заголовок `sve/sve.h` и все публичные заголовки, кроме FFmpeg interop
+header `sve/frame.h`, не должны включать заголовки FFmpeg, упоминать типы FFmpeg в
+декларациях или требовать FFmpeg include paths у потребителя. `sve/frame.h` содержит
+изолированный interop API для `AVFrame` и подключается только пользователями, которым он
+необходим. Преобразования `Rational`/`PixelFormat` в типы FFmpeg выполняются внутри interop
+или backend implementation и не являются частью стабильного ABI библиотеки.
+
+Это свойство проверяется отдельной CI compile-target: она компилирует все публичные
+заголовки, кроме `sve/frame.h`, в окружении без заголовков и include paths FFmpeg. Попадание
+типа или include FFmpeg в основной публичный API является ошибкой сборки.
 
 ## 8.4 Выбор backend
 
-При `Backend::Auto` используется явно заданная последовательность предпочтений:
+При `Backend::Auto` пользователь передаёт предпочтительный порядок backend через
+`BackendSelection::preferred`; библиотека не использует hardcoded-последовательность:
+
+`EncoderConfig` содержит `BackendSelection backend_selection`. Пользователь обязан заполнить
+`preferred` при выборе `Backend::Auto`; пустой список возвращает `InvalidArgument`. В списке
+разрешены только конкретные backend, поэтому `Backend::Auto` в нём возвращает
+`InvalidArgument`; дубликаты также запрещены. Backend перебираются строго в переданном
+порядке. Выбор, отказ и fallback фиксируются в telemetry. `allow_unlisted = false` запрещает
+использование backend, отсутствующих в списке. Software fallback не добавляется неявно:
+пользователь включает `Backend::X264` или `Backend::X265` в `preferred` в требуемой позиции.
+Backend, не поддерживающий `EncoderConfig::codec`, пропускается при `Backend::Auto` с записью
+причины в telemetry; при явном выборе такого backend создание завершается `Unsupported`.
+
+Пример пользовательского порядка:
 
 ```cpp
-struct BackendSelection {
-    std::vector<Backend> preferred{
-        Backend::IntelOneVpl,
-        Backend::NvidiaNvenc,
-        Backend::RockchipMpp,
-        Backend::FfmpegSoftware,
-    };
-    bool allow_unlisted = false;
-    bool allow_software_fallback = true;
+sve::EncoderConfig config;
+config.backend = sve::Backend::Auto;
+config.backend_selection.preferred = {
+    sve::Backend::NvidiaNvenc,
+    sve::Backend::IntelOneVpl,
+    sve::Backend::X265,
 };
 ```
 
-`EncoderConfig` содержит `BackendSelection backend_selection`. Backend перебираются строго в указанном порядке. Выбор, отказ и fallback фиксируются в telemetry. `allow_unlisted = false` запрещает использование backend, отсутствующих в списке; `allow_software_fallback = false` запрещает автоматический переход на software encoder.
+## 8.5 Владение кадром и FFmpeg interop
 
-## 8.5 Владение кадром
-
-Наряду с невладеющим `SubmitFrame(const AVFrame*, ...)` предоставляется владеющий API:
+Основной API использует владеющий backend-neutral тип `Frame`:
 
 ```cpp
 class Frame {
 public:
-    static Frame Ref(const AVFrame* frame);   // av_frame_ref
-    static Frame Adopt(AVFrame* frame);       // передача владения
+    Frame(const Frame&) = default;
+    Frame(Frame&&) noexcept = default;
+    Frame& operator=(const Frame&) = default;
+    Frame& operator=(Frame&&) noexcept = default;
 
-    const AVFrame* get() const noexcept;
-    AVFrame* mutable_get() noexcept;
+    const IFrameBuffer& buffer() const noexcept;
+    IFrameBuffer& mutable_buffer() noexcept;
 };
 
 struct TimedFrame {
@@ -503,7 +583,28 @@ struct TimedFrame {
 };
 ```
 
-`SubmitFrame(TimedFrame)` передаёт encoder безопасную ссылку на underlying storage. Невладеющий overload сохраняется для существующих интеграций, но реализация обязана выполнить `av_frame_ref`, если frame используется после возврата из вызова.
+`SubmitFrame(TimedFrame)` передаёт encoder безопасное shared ownership underlying storage.
+Конкретная реализация `IFrameBuffer` может представлять CPU planes, CUDA/device memory или
+другой hardware surface.
+
+Только `sve/frame.h` предоставляет FFmpeg adapter:
+
+```cpp
+class AvFrameAdapter {
+public:
+    static Frame Ref(const AVFrame* frame);   // выполняет av_frame_ref
+    static Frame Adopt(AVFrame* frame);       // принимает ownership
+};
+
+Status SubmitAvFrame(
+    SmartVideoEncoder& encoder,
+    const AVFrame* frame,
+    const FrameMetadata& metadata);
+```
+
+Пользователь, не использующий этот adapter, не обязан устанавливать headers или libraries
+FFmpeg. Если кадр используется после возврата из interop-вызова, adapter обязан удерживать
+корректный `av_frame_ref` до уничтожения внутреннего frame storage.
 
 ## 8.6 Владение encoded packet
 
@@ -561,7 +662,6 @@ using EncoderCallback = std::function<void(EncoderEvent)>;
 
 class PushVideoEncoder {
 public:
-    static std::unique_ptr<PushVideoEncoder> Create(const EncoderConfig&);
     virtual Status SetInputFormat(const InputVideoFormat&) = 0;
     virtual Status Subscribe(EncoderCallback) = 0;
     virtual Status Process(TimedFrame) = 0;
@@ -627,20 +727,26 @@ Status GetCodecParameters(CodecParameters* parameters) const;
 
 ## 8.12 Фабрики
 
-Основной factory API дополняется convenience-функциями:
+Публичный factory API:
 
 ```cpp
 std::unique_ptr<SmartVideoEncoder>
 CreateVideoEncoder(const EncoderConfig& config);
 
-std::unique_ptr<SmartVideoEncoder>
-CreateVideoEncoderAuto(EncoderConfig config, BackendSelection selection);
-
 std::unique_ptr<PushVideoEncoder>
 CreatePushVideoEncoder(const EncoderConfig& config);
 ```
 
-Все factory используют одну реализацию выбора backend и валидации. Codec и backend не кодируются в имени фабрики.
+Свободные factory-функции являются единственным публичным способом создания encoder.
+Конкретный backend и режим его выбора полностью определяются `EncoderConfig`: для
+автоматического выбора пользователь задаёт `Backend::Auto` и заполняет
+`backend_selection.preferred` согласно разделу 8.4. Отдельная factory-функция для
+автоматического выбора не предоставляется.
+
+Обе factory-функции используют одну реализацию валидации и выбора backend. Codec и backend
+не кодируются в имени factory. При ошибке создания factory выбрасывает типизированное
+исключение, содержащее `StatusCode` и диагностические поля из раздела 25. Возврат `nullptr`
+как способ сообщить об ошибке запрещён.
 
 ## 8.13 Lifecycle
 
@@ -723,17 +829,17 @@ struct ObjectMetadata {
 };
 
 struct FrameMetadata {
-    int64_t pts = AV_NOPTS_VALUE;
+    int64_t pts = kNoTimestamp;
     std::vector<ObjectMetadata> objects;
 };
 ```
 
 Правило PTS:
 
-- все PTS интерпретируются в `EncoderConfig::time_base`;
-- источник истины — `frame->pts`; `FrameMetadata.pts` служит для валидации соответствия metadata кадру;
-- при расхождении `frame->pts` и `FrameMetadata.pts` вызов `SubmitFrame` возвращает `InvalidArgument`;
-- `FrameMetadata.pts = AV_NOPTS_VALUE` означает «использовать `frame->pts` без проверки».
+- все PTS интерпретируются в `EncoderConfig::input.time_base`;
+- источник истины — timestamp в `Frame`/`IFrameBuffer`; `FrameMetadata.pts` служит для валидации соответствия metadata кадру;
+- при расхождении timestamp кадра и `FrameMetadata.pts` вызов `SubmitFrame` возвращает `InvalidArgument`;
+- `FrameMetadata.pts = kNoTimestamp` означает «использовать timestamp кадра без дополнительной проверки».
 
 Правила геометрии:
 
@@ -1063,7 +1169,7 @@ P95 rolling bitrate <= 120% target
 
 Правила согласованности:
 
-- при `RateControl::VBR` конфигурация обязана удовлетворять `max_bitrate >= target_bitrate`; пара `max_bitrate`/`vbv_buffer_size`, при которой rolling-порог «P95 <= 120% target» недостижим или противоречив, отклоняется в `Create` с `InvalidArgument`;
+- при `RateControl::VBR` конфигурация обязана удовлетворять `max_bitrate >= target_bitrate`; пара `max_bitrate`/`vbv_buffer_size`, при которой rolling-порог «P95 <= 120% target» недостижим или противоречив, приводит к исключению со статусом `InvalidArgument` из `CreateVideoEncoder`/`CreatePushVideoEncoder`;
 - P95 rolling-статистика валидна только для последовательностей длительностью >= 30 секунд; для более коротких rolling-критерий помечается `NOT_APPLICABLE` в отчёте и не участвует в вердикте.
 
 Нормативные пороги bitrate acceptance — в разделе 49.
@@ -1075,27 +1181,27 @@ P95 rolling bitrate <= 120% target
 P0:
 
 ```text
-AV_PIX_FMT_YUV420P
-AV_PIX_FMT_NV12
-AV_PIX_FMT_P010
+PixelFormat::Yuv420P
+PixelFormat::Nv12
+PixelFormat::P010
 ```
 
 Дополнительно допускается:
 - RGB/BGR input через conversion path;
 - CUDA hardware frames;
-- другие hardware frames через FFmpeg hwcontext.
+- другие hardware surfaces через backend-neutral `IFrameBuffer`;
+- FFmpeg hardware frames через opt-in `sve/frame.h` adapter, если их можно безопасно сопоставить с выбранным native backend.
 
 При hardware input библиотека должна предпочитать zero-copy или hardware mapping. Необязательное скачивание GPU frame в RAM запрещено, если backend способен принять совместимый hardware frame.
 
 ---
 
-# 18. AVFrame ownership
+# 18. Владение кадрами и AVFrame interop
 
-Библиотека:
-- не изменяет ownership caller frame;
-- выполняет reference, если кадр должен жить асинхронно;
-- освобождает все внутренние references;
-- не сохраняет raw pointer после завершения соответствующей операции без `av_frame_ref`.
+Основной `Frame` безопасно удерживает storage через backend-neutral ownership. Для FFmpeg
+interop библиотека не изменяет ownership caller `AVFrame`, выполняет `av_frame_ref`, если
+кадр должен жить асинхронно, освобождает все внутренние references и не сохраняет raw pointer
+после завершения операции без удерживаемой ссылки.
 
 ---
 
@@ -1130,7 +1236,7 @@ P0 должна поддерживаться возможность backend-spec
 ```text
 version        (uint8, текущая = 1)
 frame_id       (uint64)
-pts            (int64, в EncoderConfig::time_base)
+pts            (int64, в EncoderConfig::input.time_base)
 object_count   (uint16)
 objects[]      (сериализованные ObjectMetadata без mask data)
 crc            (CRC-32C / Castagnoli, полином 0x1EDC6F41,
@@ -1171,24 +1277,18 @@ Acceptance:
 
 ---
 
-# 20. FFmpeg как нижний слой
+# 20. FFmpeg только как opt-in interop
 
-FFmpeg является основным abstraction layer для:
-- `AVFrame`;
-- `AVPacket`;
-- pixel formats;
-- hardware device contexts;
-- hardware frame contexts;
-- software fallback;
-- NVENC/QSV integration;
-- parsing/bitstream utilities.
+FFmpeg не является encoder backend или общей прослойкой. Его использование ограничено
+opt-in `sve/frame.h` adapter для интеграции с пользовательскими `AVFrame`.
 
-Прямой backend API допускается там, где FFmpeg:
-- не предоставляет требуемый ROI/QP mechanism;
-- скрывает capability;
-- не даёт требуемую CTU/QP control;
-- не обеспечивает нужный metadata insertion;
-- не позволяет zero-copy path.
+Core и все encoder backend modules не должны иметь link-time или runtime dependency на
+FFmpeg. `EncodedPacket` владеет собственным immutable byte buffer и не экспортирует
+`AVPacket`. Кодирование software H.264/H.265 выполняют direct `X264Backend`/`X265Backend`.
+
+FFmpeg interop adapter может ссылаться на FFmpeg и преобразовывать `AVFrame` в canonical
+`Frame`/`IFrameBuffer`. После преобразования adaptive policy и native backend interface
+работают только с собственными типами библиотеки.
 
 ---
 
@@ -1199,30 +1299,65 @@ class IEncoderBackend {
 public:
     virtual ~IEncoderBackend() = default;
 
-    virtual Status Open(const EncoderConfig&) = 0;
+    // Создаёт независимый сеанс кодирования. Состояние потока хранится в сеансе,
+    // а не в объекте backend.
+    virtual Result<SessionPtr> Configure(
+        const EncoderConfig& config) const = 0;
 
-    virtual EncoderCapabilities QueryCapabilities() = 0;
+    virtual EncoderCapabilities QueryCapabilities() const = 0;
 
     // Принимает кадр с применённой adaptive-конфигурацией.
     // Возвращает Again при заполненной внутренней очереди backend.
-    virtual Status Submit(
-        const AVFrame* frame,
-        const AppliedAdaptiveFrameConfig& adaptive) = 0;
+    virtual Status SubmitFrame(
+        BackendSession& session,
+        IFrameBuffer& frame,
+        const BackendFrameControl& control) const = 0;
 
     // Возвращает готовый пакет либо Again, если пакета нет.
     // Соответствие кадр -> пакет: 1 -> 0..N (B-frames, lookahead, reordering).
-    virtual Status Receive(EncodedPacket* output) = 0;
+    virtual Result<EncodedPacket> ReceivePacket(
+        BackendSession& session) const = 0;
 
-    virtual Status Flush() = 0;
+    virtual Status Flush(BackendSession& session) const = 0;
 
-    virtual BackendStatistics Statistics() const = 0;
+    virtual BackendStatistics Statistics(
+        const BackendSession& session) const = 0;
 };
 ```
 
-`AppliedAdaptiveFrameConfig` является внутренним canonical representation:
+`IEncoderBackend` описывает доступ к реализации backend и может совместно использоваться
+несколькими потоками кодирования. Вызов `Configure` не переводит сам объект backend в
+состояние конкретного кодирования, а создаёт отдельный `BackendSession`, владеющий codec,
+device и queue state соответствующего потока. Один backend обязан поддерживать несколько
+одновременно существующих сеансов в пределах возможностей устройства без глобальной
+сериализации независимых потоков.
+
+`SessionPtr` — владеющий smart pointer на `BackendSession`. Уничтожение последней ссылки
+закрывает сеанс и освобождает связанные с ним ресурсы; оно не влияет на другие сеансы того же
+backend. `SessionPtr` имеет unique ownership; вызовы методов принимают ссылку на сеанс, а не
+копируют ownership. Сеанс нельзя передавать в экземпляр backend другого типа или использовать
+после его закрытия. Такая ошибка возвращает `InvalidArgument`.
+
+`Result<T>` содержит либо значение `T`, либо `Status`; одновременное наличие значения и
+ошибочного статуса запрещено. Для `ReceivePacket` отсутствие готового пакета представляется
+статусом `Again`, а завершённый draining — статусом `EndOfStream` без значения.
+
+Методы backend являются `const`, поскольку изменяют только переданный сеанс либо внешние
+device resources. Это не означает автоматическую thread-safety одного сеанса: для каждого
+`BackendSession` действует модель single-producer / single-consumer из раздела 24. Разные
+сеансы разрешено обслуживать конкурентно. Общие кэши, device handles и другие ресурсы внутри
+backend должны быть синхронизированы без удержания глобальной блокировки на протяжении
+операции кодирования.
+
+`IFrameBuffer` является внутренней backend-neutral абстракцией кадра. FFmpeg interop adapter
+может предоставлять её реализацию поверх `AVFrame`, но конкретный тип FFmpeg не является
+обязательной частью backend interface. `BackendFrameControl` содержит применённые ROI/QP
+controls, keyframe request и frame quality budget.
+
+`BackendFrameControl` является внутренним canonical representation:
 
 ```cpp
-struct AppliedAdaptiveFrameConfig {
+struct BackendFrameControl {
     std::vector<ResolvedROI> rois;
 
     std::optional<QPMap> qp_map;
@@ -1235,9 +1370,12 @@ struct AppliedAdaptiveFrameConfig {
 
 Требования к backend adapter:
 
-- пакеты выдаются в decode order с корректными PTS/DTS в `EncoderConfig::time_base`;
+- пакеты выдаются в decode order с корректными PTS/DTS в `EncoderConfig::input.time_base`;
 - при `max_b_frames > 0` adapter обязан сопоставлять metadata входного кадра выходному пакету по PTS, а не по порядку вызовов;
-- `Flush` переводит backend в draining: `Receive` возвращает оставшиеся пакеты, затем `EndOfStream`.
+- `Flush(session)` переводит только переданный сеанс в draining и не влияет на другие сеансы;
+- после `Flush(session)` вызов `ReceivePacket(session)` возвращает оставшиеся пакеты, затем `EndOfStream`;
+- ошибка, EOS, flush или уничтожение одного сеанса не должны менять состояние других сеансов;
+- capability и ограничения, общие для устройства, возвращаются backend, а фактически выбранные режимы и статистика кодирования относятся к конкретному сеансу.
 
 ---
 
@@ -1382,6 +1520,9 @@ smart-video-encoder/
 │   │   ├── nvenc/
 │   │   ├── onevpl/
 │   │   ├── rockchip/
+│   │   ├── x264/
+│   │   └── x265/
+│   ├── interop/
 │   │   └── ffmpeg/
 │   └── metadata/
 ├── tests/
@@ -1399,10 +1540,12 @@ smart-video-encoder/
 ## 26.2 Options
 
 ```cmake
-option(SVE_ENABLE_NVENC "Enable NVIDIA backend" ON)
-option(SVE_ENABLE_ONEVPL "Enable Intel oneVPL backend" ON)
-option(SVE_ENABLE_ROCKCHIP "Enable Rockchip MPP backend" ON)
-option(SVE_ENABLE_SOFTWARE "Enable software backend" ON)
+option(SVE_BUILD_BACKEND_X264 "Build direct libx264 backend module" ON)
+option(SVE_BUILD_BACKEND_X265 "Build direct libx265 backend module" ON)
+option(SVE_BUILD_FFMPEG_INTEROP "Build opt-in AVFrame interop component" ON)
+option(SVE_BUILD_BACKEND_NVENC "Build native NVIDIA NVENC backend module" ON)
+option(SVE_BUILD_BACKEND_ONEVPL "Build native Intel oneVPL backend module" ON)
+option(SVE_BUILD_BACKEND_ROCKCHIP "Build native Rockchip MPP backend module" OFF)
 
 option(SVE_BUILD_TESTS "Build tests" ON)
 option(SVE_BUILD_BENCHMARKS "Build benchmarks" ON)
@@ -1416,15 +1559,70 @@ Backend dependency должна быть optional, чтобы CI x86 без hard
 
 - установка экспортирует CMake package config: `find_package(sve CONFIG)`, target `sve::sve`;
 - поставляется pkg-config файл `sve.pc`;
-- shared library имеет SONAME `libsve.so.<major>`;
+- core shared library имеет SONAME `libsve.so.<major>`; backend modules имеют собственные
+  module ABI versions и не экспортируются как пользовательские link targets;
 - публичный C++ API версионируется по semver: major — breaking changes, minor — обратно совместимые дополнения, patch — исправления;
 - C++ и Python версии происходят из единого version source (см. 58.7).
 
-## 26.4 Rockchip MPP и vcpkg
+## 26.4 Модульная сборка и runtime plugin ABI
+
+Каждый backend собирается как независимый optional shared module:
+
+```text
+libsve.so.<major>
+libsve_backend_x264.so
+libsve_backend_x265.so
+libsve_backend_nvenc.so
+libsve_backend_onevpl.so
+libsve_backend_rockchip.so
+```
+
+При отключённой CMake option соответствующий module не собирается, его SDK не требуется, а
+registry не объявляет backend доступным. Удаление optional module из установленной системы не
+должно приводить к падению core: backend получает состояние `DeviceUnavailable`/unavailable и
+может участвовать в telemetry выбора.
+
+Каждый module экспортирует ровно одну обязательную C ABI entry point:
+
+```cpp
+extern "C" SVE_BACKEND_EXPORT
+const SveBackendPluginDescriptorV1* sve_backend_plugin_v1() noexcept;
+```
+
+`SveBackendPluginDescriptorV1` содержит как минимум:
+
+- `abi_version` и `descriptor_size`;
+- стабильный backend identifier и module version;
+- factory/destroy callbacks;
+- capability query callback;
+- allocator/deallocator callbacks либо правило, что объект освобождается в создавшем module;
+- optional diagnostic callback.
+
+Исключения не должны пересекать C ABI boundary; module преобразует их в `Status`. Core до
+вызова callbacks проверяет ABI version и размер descriptor. Несовместимый, повреждённый или
+дублирующий module не загружается и фиксируется в telemetry. Module не выгружается, пока жив
+хотя бы один созданный им backend или `BackendSession`.
+
+Порядок поиска modules детерминирован: explicit application path, install-relative directory,
+затем system-configured directory. Поиск в current working directory по умолчанию запрещён.
+Разрешены только canonical paths; production profile может требовать allowlist/hash/signature.
+
+Публичный CMake target остаётся `sve::sve`; имена backend `.so` являются packaging detail.
+Core и основной `sve.pc` не объявляют FFmpeg, x264 или x265 обязательными/private dependency.
+Requirements публикуются только component metadata соответствующего module/interop target.
+
+Шаблон основного `sve.pc` обязан иметь пустое `Requires.private` относительно FFmpeg, x264 и
+x265. Отдельные component metadata для `X264Backend` и `X265Backend` могут объявлять только
+соответственно libx264 и libx265. FFmpeg interop component может объявлять `libavutil`, но не
+`libavcodec`/`libavformat`, если они не требуются реализацией adapter. CI проверяет
+сгенерированный `sve.pc`, чтобы codec и FFmpeg dependencies не стали транзитивными
+зависимостями core.
+
+## 26.5 Rockchip MPP и vcpkg
 
 MPP отсутствует в vcpkg registry. Стратегия P0 (критический путь Milestone 4):
 
-- x86 CI: `SVE_ENABLE_ROCKCHIP=OFF`, backend недоступен и не блокирует сборку;
+- x86 CI: `SVE_BUILD_BACKEND_ROCKCHIP=OFF`, backend недоступен и не блокирует сборку;
 - aarch64: сборка против BSP sysroot либо system libraries target board; путь задаётся через CMake toolchain/`MPP_ROOT`;
 - допускается собственный vcpkg overlay port `rockchip-mpp`, version-pinned на конкретный commit MPP;
 - выбранная стратегия и версия MPP фиксируются в build manifest.
@@ -1457,8 +1655,8 @@ docker/Dockerfile.rockchip
 
 Проверки:
 - `nvidia-smi`;
-- FFmpeg encoder discovery;
-- encode/decode smoke test.
+- native NVENCODE API capability discovery;
+- native H.264/H.265 encode/decode smoke test;
 
 ## 27.3 Intel
 
@@ -2016,7 +2214,7 @@ P95
 
 Число прогонов и детерминизм:
 
-- software backend: детерминированные настройки (фиксированный seed, `threads=1` либо документированные deterministic flags x264/x265); один прогон;
+- `X264Backend`/`X265Backend`: детерминированные настройки (фиксированный seed, `threads=1` либо документированные deterministic flags); один прогон;
 - hardware backend: >= 3 прогонов на конфигурацию; в отчёте mean ± 95% CI;
 - все seeds фиксируются в манифесте.
 
@@ -2127,7 +2325,7 @@ lint (C++ + Python)
   |
 build ────────────► python-build (wheels: x86_64, aarch64)
   |                       |
-unit                 python-test (CPython matrix, software backend)
+unit                 python-test (CPython matrix, X264/X265)
   |                       |
 integration          python-wheel-install-test
   |                       |
@@ -2163,17 +2361,42 @@ Matrix:
 - GCC;
 - Clang.
 
+Дополнительно выполняется compile-test публичных заголовков без FFmpeg: все установочные
+заголовки, кроме `sve/frame.h`, компилируются без FFmpeg include paths. Этот тест обязателен
+и предотвращает попадание типов или include-директив FFmpeg в основной публичный API.
+
+Build matrix дополнительно проверяет независимые профили:
+
+- core без backend modules и без FFmpeg;
+- core + `X264Backend` без FFmpeg и vendor hardware SDK;
+- core + `X265Backend` без FFmpeg и vendor hardware SDK;
+- core + FFmpeg interop без encoder backend modules;
+- core + `NvencBackend` без FFmpeg;
+- core + `OneVplBackend` без FFmpeg;
+- core + `RockchipMppBackend` без FFmpeg;
+- удаление optional module после установки без падения core.
+
+Для encoder modules выполняется dependency scan (`readelf`/`ldd`): зависимости от
+`libavcodec`, `libavformat` и других FFmpeg libraries запрещены. `X264Backend` может зависеть
+только от разрешённых libx264/system libraries, `X265Backend` — от libx265/system libraries.
+FFmpeg interop component не должен зависеть от libx264/libx265 или vendor hardware runtimes.
+Отдельно тестируются plugin ABI version mismatch, duplicate registration и безопасный отказ
+загрузки повреждённого module.
+
 ### unit
 - CTest;
 - JUnit XML.
 
 ### integration
-- software backend;
-- mocked capability layer.
+- `X264Backend` и `X265Backend`;
+- mocked capability layer;
+- одновременная работа нескольких `BackendSession` одного backend без взаимного влияния;
+- независимые submit/backpressure/flush/EOS/error paths для конкурентных сеансов;
+- освобождение одного сеанса без остановки и повреждения остальных.
 
 ### python-build / python-test / python-wheel-install-test
 - сборка wheels для Linux x86_64 и aarch64 (runner — раздел 47) по CPython matrix из 58.9;
-- pytest suite 58.9 на software backend (Debug/Release extension);
+- pytest suite 58.9 на `X264Backend`/`X265Backend` (Debug/Release extension);
 - установка wheel в чистый virtual environment и `import smart_video_encoder` без build tree.
 
 ### synthetic
@@ -2196,6 +2419,9 @@ Hardware job должен:
 2. сохранить environment manifest;
 3. выполнить smoke;
 4. выполнить selected quality suite.
+
+Native hardware job обязан доказать, что выбран соответствующий native backend module, а не
+одноимённый hardware encoder через FFmpeg.
 
 ---
 
@@ -2305,7 +2531,7 @@ Rockchip runner используется только для native hardware/MPP
 Отдельный aarch64 runner (или cross-build environment) используется для:
 - сборки aarch64 Python wheels (58.7);
 - aarch64 Python test matrix;
-- проверки core/software backend на ARM без hardware-зависимостей.
+- проверки core, `X264Backend` и `X265Backend` на ARM без hardware-зависимостей.
 
 ---
 
@@ -2366,7 +2592,7 @@ Requested unsupported feature:
 ## AT-008 Python wrapper
 
 - установка wheel в чистый virtual environment, `import smart_video_encoder`;
-- encode/receive/flush/EOS на software backend;
+- encode/receive/flush/EOS на `X264Backend` и `X265Backend`;
 - эквивалентность C++/Python packets, PTS и metadata (58.10.1);
 - exception mapping для всех `StatusCode`.
 
@@ -2500,38 +2726,52 @@ void DrainPackets(sve::SmartVideoEncoder& encoder) {
 sve::EncoderConfig config;
 config.codec = sve::Codec::H265;
 config.backend = sve::Backend::Auto;
+config.backend_selection.preferred = {
+    sve::Backend::NvidiaNvenc,
+    sve::Backend::IntelOneVpl,
+    sve::Backend::X265,
+};
+
+config.input.pixel_format = sve::PixelFormat::Yuv420P;
+config.input.width = 1920;
+config.input.height = 1080;
+config.input.frame_rate = {30, 1};
+config.input.time_base = {1, 90000};
 
 config.target_bitrate = 6'000'000;
 config.gop_size = 60;
 
 config.adaptive.enabled = true;
 
-auto encoder = sve::SmartVideoEncoder::Create(config);
+auto encoder = sve::CreateVideoEncoder(config);
 
-while (AVFrame* frame = GetFrame()) {      // nullptr = конец входа
-    sve::FrameMetadata metadata;
-    metadata.pts = frame->pts;
-    metadata.objects = GetDetectorObjects();
+while (std::optional<sve::TimedFrame> frame = GetFrame()) {
+    frame->metadata.objects = GetDetectorObjects();
 
-    sve::Status s = encoder->SubmitFrame(frame, metadata);
+    sve::Status s = encoder->SubmitFrame(*frame);
     while (s.code() == sve::StatusCode::Again) {   // backpressure
         DrainPackets(*encoder);                    // освобождаем output queue
-        s = encoder->SubmitFrame(frame, metadata);
+        s = encoder->SubmitFrame(*frame);
     }
+    if (!s.ok()) HandleError(s);
 
     DrainPackets(*encoder);
 }
 
-encoder->Flush();
+if (sve::Status s = encoder->Flush(); !s.ok()) HandleError(s);
 
 sve::EncodedPacket packet;                          // добор до EOS
 for (;;) {
     sve::Status s = encoder->ReceivePacket(&packet);
     if (s.code() == sve::StatusCode::EndOfStream) break;
     if (s.code() == sve::StatusCode::Again) continue;
+    if (!s.ok()) HandleError(s);
     Consume(packet);
 }
 ```
+
+Вариант с `AVFrame` дополнительно подключает `sve/frame.h`, создаёт `Frame` через
+`AvFrameAdapter::Ref` и далее использует тот же `TimedFrame` flow.
 
 ---
 
@@ -2567,34 +2807,38 @@ benchmarks/
 ## Milestone 1 — Core
 
 - public API;
-- AVFrame;
-- software backend;
+- backend-neutral `Frame`/`IFrameBuffer` и opt-in AVFrame interop;
+- plugin registry и C ABI loader;
+- direct `X264Backend` и `X265Backend` modules;
+- pinned libx264/libx265 API integration и codec-native quant-offset conversion;
+- обязательный license review software codec modules;
 - ROI normalization;
 - metadata core;
 - Python wrapper и packaging;
 - CMake/vcpkg;
 - GitLab CI.
 
-## Milestone 2 — Intel
+## Milestone 2 — Intel native
 
-- oneVPL adapter;
+- native oneVPL backend module без FFmpeg/QSV dependency;
 - H.264/H.265;
 - ROI DeltaQP;
 - capability query;
 - Docker/runtime validation.
 
-## Milestone 3 — NVIDIA
+## Milestone 3 — NVIDIA native
 
 - H.264;
 - H.265;
-- CUDA input;
-- capability detection;
+- direct NVENCODE API;
+- CUDA input и zero-copy;
+- native capability detection;
 - adaptive ROI path;
 - hardware tests.
 
 ## Milestone 4 — Rockchip
 
-- MPP adapter;
+- native MPP backend module без FFmpeg dependency;
 - H.264/H.265;
 - ROI;
 - CTU QP where available;
@@ -2625,9 +2869,14 @@ benchmarks/
 - используется CMake + vcpkg;
 - GitLab CI полностью автоматизирован;
 - реализованы H.264 и H.265;
-- реализованы NVIDIA, Intel oneVPL и Rockchip MPP backend'ы согласно capability matrix;
-- software fallback доступен;
-- AVFrame является обязательным входным интерфейсом;
+- реализованы независимые direct `X264Backend`, `X265Backend`, native NVIDIA NVENC, native
+  Intel oneVPL и Rockchip MPP backend modules согласно capability matrix;
+- encoder backend modules не имеют зависимости от FFmpeg и проходят обязательный dependency scan;
+- runtime plugin ABI, version check и безопасное отсутствие optional modules работают;
+- software fallback через libx264/libx265 задаётся явно в `BackendSelection::preferred`;
+- версии, commits, build/API numbers, bit depth и license mode libx264/libx265 зафиксированы в build manifest, а license review пройден до включения modules в release artifacts;
+- backend-neutral `Frame` является основным входным интерфейсом, а `AVFrame` поддерживается
+  через opt-in `sve/frame.h` interop;
 - CPU YUV path (YUV420P/NV12/P010) работает; RGB/BGR conversion path — опционален (раздел 17) и не блокирует релиз;
 - 10-bit P010/Main10 path проходит functional codec tests (AT-009) на backend'ах с capability `main10`;
 - CUDA path работает на certified NVIDIA profile;
@@ -2684,15 +2933,16 @@ Detector / Tracker ->| Object Metadata|
                     | / Quality Map  |
                     +--------+-------+
                              |
-             +---------------+---------------+
-             |               |               |
-             v               v               v
-          NVENC            oneVPL            MPP
-             |               |               |
-             +---------------+---------------+
+           +------------+----------+----------+------------+
+           |            |          |          |
+           v            v          v          v
+       x264/x265      NVENC      oneVPL       MPP
+       direct SW      native     native       native
+           |            |          |          |
+           +------------+----------+----------+
                              |
                              v
-                       AVPacket/SEI
+                  EncodedPacket/SEI
                              |
                              v
                      Video + Metadata
@@ -2700,7 +2950,9 @@ Detector / Tracker ->| Object Metadata|
 
 Ключевое требование:
 
-> Публичная логика object-first compression должна быть backend-independent, а различия NVENC/oneVPL/Rockchip должны быть изолированы в capability-driven adapters.
+> Публичная логика object-first compression должна быть backend-independent; software encode
+> выполняется direct x264/x265 modules, а различия x264/x265/NVENC/oneVPL/Rockchip изолированы
+> в независимых capability-driven modules. FFmpeg используется только для opt-in interop.
 
 Это позволяет:
 - использовать один API для камер и transcoding;
@@ -2757,8 +3009,20 @@ import smart_video_encoder as sve
 config = sve.EncoderConfig(
     codec=sve.Codec.H265,
     backend=sve.Backend.AUTO,
-    width=1920,
-    height=1080,
+    backend_selection=sve.BackendSelection(
+        preferred=[
+            sve.Backend.NVIDIA_NVENC,
+            sve.Backend.INTEL_ONE_VPL,
+            sve.Backend.X265,
+        ],
+    ),
+    input=sve.InputVideoFormat(
+        pixel_format=sve.PixelFormat.YUV420P,
+        width=1920,
+        height=1080,
+        frame_rate=sve.Rational(30, 1),
+        time_base=sve.Rational(1, 90_000),
+    ),
     target_bitrate=6_000_000,
 )
 
@@ -2834,9 +3098,15 @@ Wrapper не должен принимать произвольный integer к
 - wheel build для поддерживаемых CPython versions на Linux x86_64 и Linux aarch64;
 - source distribution, если она воспроизводимо собирается с документированными system dependencies.
 
-Wheel не должен незаконно или технически небезопасно vendor'ить GPU drivers, NVIDIA kernel components либо host-specific hardware runtime. Политика bundling FFmpeg/oneVPL/MPP shared libraries должна быть документирована с учётом ABI, лицензий и wheel repair. При использовании системных libraries import-time diagnostics должны сообщать отсутствующую library и ожидаемую ABI/version.
+Wheel не должен незаконно или технически небезопасно vendor'ить libx264/libx265, GPU drivers,
+NVIDIA kernel components либо host-specific hardware runtime. Политика bundling
+libx264/libx265, optional FFmpeg interop, oneVPL и MPP shared libraries должна быть
+документирована с учётом ABI, лицензий и wheel repair. При использовании системных libraries
+import-time diagnostics должны сообщать отсутствующую library и ожидаемую ABI/version.
 
-Python и C++ package versions должны происходить из одного version source. Build manifest Python package должен включать git commit, build ID, compiler, C++ ABI, FFmpeg/backend versions и enabled features.
+Python и C++ package versions должны происходить из одного version source. Build manifest
+Python package должен включать git commit, build ID, compiler, C++ ABI, pinned libx264/libx265
+versions/build numbers, optional FFmpeg interop version, backend versions и enabled features.
 
 ## 58.8 CMake и структура
 
@@ -2871,7 +3141,7 @@ Python extension собирается только при `SVE_BUILD_PYTHON=ON`.
 - config/enums/metadata round-trip;
 - NumPy YUV420P/NV12/P010 shape, dtype и stride validation;
 - ownership/lifetime tests, включая удаление исходного NumPy owner после submit;
-- encode/receive/flush/EOS на software backend;
+- encode/receive/flush/EOS на `X264Backend` и `X265Backend`;
 - H.264/H.265 decode validation и точный frame count;
 - PTS и metadata mapping 100%;
 - exception mapping для всех `StatusCode`;
@@ -2908,7 +3178,7 @@ profile: object-first-primary-v1
 codec: h265
 rate_control: vbr
 
-gop_size: 60
+intra_period_seconds: 2
 b_frames: 0
 
 lookahead: false
@@ -2928,7 +3198,7 @@ profile: baseline-primary-v1
 codec: h265
 rate_control: vbr
 
-gop_size: 60
+intra_period_seconds: 2
 b_frames: 0
 
 lookahead: false
@@ -3002,7 +3272,7 @@ metrics:
 
 ## Приложение C. Открытые определения API
 
-Следующие типы упоминаются в ТЗ, но их полные определения фиксируются на design review до code freeze Milestone 1: `AdaptiveConfig`, `MetadataConfig`, `PointF`, `Status`, `EncodedPacket`, `EncoderStatistics`, `BackendStatistics`, `AppliedROIInfo`, `ResolvedROI`, `QPMap`, `FrameQualityBudget`, `MetadataCoordinateSystem`.
+Следующие типы упоминаются в ТЗ, но их полные определения фиксируются на design review до code freeze Milestone 1: `AdaptiveConfig`, `MetadataConfig`, `PointF`, `Status`, `Result<T>`, `BackendSession`, `SessionPtr`, `IFrameBuffer`, `EncodedPacket`, `EncoderStatistics`, `BackendStatistics`, `AppliedROIInfo`, `ResolvedROI`, `QPMap`, `FrameQualityBudget`, `BackendFrameControl`, `MetadataCoordinateSystem`.
 
 Минимальные обязательные поля, на которые ссылается текст ТЗ:
 

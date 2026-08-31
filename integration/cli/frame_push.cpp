@@ -40,7 +40,8 @@ void usage()
 {
     std::fprintf(stderr,
         "Usage: roi-frame-push --in CLIP --roi roi.json --out OUT.mp4\n"
-        "         [--push raw|bitstream] [--mask] [--encoder auto|qsv|vaapi|nvenc|cpu]\n"
+        "         [--push raw|bitstream] [--mask]\n"
+        "         [--encoder auto|qsv|vaapi|nvenc|x264|x265|cpu]\n"
         "         [--codec h265|h264]\n"
         "         [--crf 28] [--gop N] [--preset balanced]\n"
         "\n"
@@ -48,18 +49,6 @@ void usage()
         "  --push raw        decode here, submit raw planes (default)\n"
         "  --push bitstream  submit compressed access units, Session decodes\n"
         "  --mask            rasterize the boxes into a grayscale mask\n");
-}
-
-sve::Encoder parse_encoder(const char* s)
-{
-    if (std::strcmp(s, "auto") == 0) return sve::Encoder::Auto;
-    if (std::strcmp(s, "qsv") == 0) return sve::Encoder::Qsv;
-    if (std::strcmp(s, "vaapi") == 0) return sve::Encoder::Vaapi;
-    if (std::strcmp(s, "nvenc") == 0) return sve::Encoder::Nvenc;
-    if (std::strcmp(s, "cpu") == 0) return sve::Encoder::Cpu;
-    // The old spelling, kept so existing scripts keep working.
-    if (std::strcmp(s, "x265") == 0) return sve::Encoder::Cpu;
-    throw std::runtime_error("unknown --encoder (auto|qsv|vaapi|nvenc|cpu)");
 }
 
 sve::InputCodec codec_of(AVCodecID id)
@@ -116,6 +105,7 @@ struct Args {
     bool bitstream = false;
     bool use_mask = false;
     sve::Encoder encoder = sve::Encoder::Auto;
+    sve::BackendSelection backend_selection;
     sve::Codec codec = sve::Codec::H265;
     int crf = 28;
     int gop = 0;
@@ -158,6 +148,11 @@ int run(const Args& args)
         sp.fps_den = vs->avg_frame_rate.den;
     }
     sp.settings.encoder = args.encoder;
+    // Same as the transcode CLI: --encoder left unsaid means this application's own order,
+    // because the library no longer has one to fall back on (§8.4).
+    sp.settings.backend_selection = args.backend_selection.preferred.empty()
+        ? sve::encoder_choice_from_name("auto").selection
+        : args.backend_selection;
     sp.settings.codec = args.codec;
     sp.settings.crf = args.crf;
     sp.settings.gop = args.gop;
@@ -360,7 +355,10 @@ int main(int argc, char** argv)
             } else if (std::strcmp(a, "--mask") == 0) {
                 args.use_mask = true;
             } else if (std::strcmp(a, "--encoder") == 0) {
-                args.encoder = parse_encoder(need("--encoder"));
+                const sve::EncoderChoice choice =
+                    sve::encoder_choice_from_name(need("--encoder"));
+                args.encoder = choice.kind;
+                args.backend_selection = choice.selection;
             } else if (std::strcmp(a, "--codec") == 0) {
                 args.codec = parse_codec(need("--codec"));
             } else if (std::strcmp(a, "--crf") == 0) {

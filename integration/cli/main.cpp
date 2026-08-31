@@ -11,7 +11,7 @@ void usage()
 {
     std::fprintf(stderr,
         "Usage: roi-transcode --in CLIP --roi roi.json --out OUT.mp4\n"
-        "         [--encoder auto|qsv|vaapi|nvenc|cpu] [--codec h264|h265|source]\n"
+        "         [--encoder auto|qsv|vaapi|nvenc|x264|x265|cpu] [--codec h264|h265|source]\n"
         "         [--crf 28] [--gop N] [--preset balanced]\n"
         "         [--target-bitrate BPS] [--bitrate-overshoot F]\n"
         "\n"
@@ -29,17 +29,6 @@ void usage()
         "libx265 is the CPU fallback (needs aq-mode).\n");
 }
 
-sve::Encoder parse_encoder(const char* s)
-{
-    if (std::strcmp(s, "auto") == 0) return sve::Encoder::Auto;
-    if (std::strcmp(s, "qsv") == 0) return sve::Encoder::Qsv;
-    if (std::strcmp(s, "vaapi") == 0) return sve::Encoder::Vaapi;
-    if (std::strcmp(s, "nvenc") == 0) return sve::Encoder::Nvenc;
-    if (std::strcmp(s, "cpu") == 0) return sve::Encoder::Cpu;
-    // The old spelling, kept so existing scripts keep working.
-    if (std::strcmp(s, "x265") == 0) return sve::Encoder::Cpu;
-    throw std::runtime_error("unknown --encoder (auto|qsv|vaapi|nvenc|cpu)");
-}
 sve::Codec parse_codec(const char* s)
 {
     if (std::strcmp(s, "source") == 0) return sve::Codec::SameAsSource;
@@ -57,6 +46,13 @@ int main(int argc, char** argv)
     RoiJson roi_doc;
     bool have_roi = false;
     sve::Settings settings;
+    // The library ships no default backend order since 4.1 (§8.4), so this application
+    // states its own -- the same one it used when the default lived in the library.
+    {
+        const sve::EncoderChoice choice = sve::encoder_choice_from_name("auto");
+        settings.encoder = choice.kind;
+        settings.backend_selection = choice.selection;
+    }
 
     try {
         for (int i = 1; i < argc; ++i) {
@@ -76,7 +72,10 @@ int main(int argc, char** argv)
                 roi_doc = load_roi_json(need("--roi"));
                 have_roi = true;
             } else if (std::strcmp(a, "--encoder") == 0) {
-                settings.encoder = parse_encoder(need("--encoder"));
+                const sve::EncoderChoice choice =
+                    sve::encoder_choice_from_name(need("--encoder"));
+                settings.encoder = choice.kind;
+                settings.backend_selection = choice.selection;
             } else if (std::strcmp(a, "--codec") == 0) {
                 settings.codec = parse_codec(need("--codec"));
             } else if (std::strcmp(a, "--crf") == 0) {

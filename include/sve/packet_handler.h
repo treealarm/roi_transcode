@@ -29,7 +29,7 @@ struct StreamInfo {
     std::span<const uint8_t> extradata;
     // Which backend actually opened; with Encoder::Auto this is the only way
     // to find out.
-    Encoder encoder_used = Encoder::Cpu;
+    Encoder encoder_used = Encoder::X264;
     std::string encoder_name;
 };
 

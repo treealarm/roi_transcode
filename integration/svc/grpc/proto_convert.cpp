@@ -95,19 +95,23 @@ void fill_job(const RoiJobStatus& st, roi::transcode::Job* out)
         st.roi_lag_p99_ms, st.roi_lag_acceptance, out->mutable_roi_lag());
 }
 
-sve::Encoder from_proto(roi::transcode::Encoder e)
+sve::EncoderChoice from_proto(roi::transcode::Encoder e)
 {
     switch (e) {
     case roi::transcode::ENCODER_QSV:
-        return sve::Encoder::Qsv;
+        return sve::encoder_choice_from_name("qsv");
     case roi::transcode::ENCODER_VAAPI:
-        return sve::Encoder::Vaapi;
+        return sve::encoder_choice_from_name("vaapi");
     case roi::transcode::ENCODER_NVENC:
-        return sve::Encoder::Nvenc;
+        return sve::encoder_choice_from_name("nvenc");
     case roi::transcode::ENCODER_CPU:
-        return sve::Encoder::Cpu;
+        // Still one value on the wire, and it stays one: 4.1 split the software backend in
+        // two inside the library, which is not a reason to break every client that already
+        // sends this. It resolves to Auto over x264 and x265, so whichever of the two
+        // cannot produce the requested codec is skipped with its reason logged.
+        return sve::encoder_choice_from_name("cpu");
     default:
-        return sve::Encoder::Auto;
+        return sve::encoder_choice_from_name("auto");
     }
 }
 
@@ -120,7 +124,8 @@ roi::transcode::Encoder to_proto(sve::Encoder k)
         return roi::transcode::ENCODER_VAAPI;
     case sve::Encoder::Nvenc:
         return roi::transcode::ENCODER_NVENC;
-    case sve::Encoder::Cpu:
+    case sve::Encoder::X264:
+    case sve::Encoder::X265:
         return roi::transcode::ENCODER_CPU;
     default:
         return roi::transcode::ENCODER_AUTO;

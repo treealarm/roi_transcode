@@ -110,7 +110,7 @@ struct EncoderStatistics {
     int64_t fallbacks_applied = 0;
 
     /// Which backend actually opened. With Encoder::Auto this is the only way to find out.
-    Encoder encoder_used = Encoder::Cpu;
+    Encoder encoder_used = Encoder::X264;
     std::string encoder_name;
 
     /// §14 ROI lag, when the boxes carried track ids to measure it from.

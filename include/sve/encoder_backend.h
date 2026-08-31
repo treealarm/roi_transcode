@@ -202,14 +202,24 @@ public:
 /// that are never released.
 using BackendRef = std::reference_wrapper<const IEncoderBackend>;
 
-/// The backends to try, in order -- TZ v3.4 §8.4.
+/// The backends to try, in order -- TZ v4.1 §8.4.
 ///
 /// Encoder::Auto walks `selection`; a named kind gives just that one and ignores the
 /// selection's permissions, because the caller has already been explicit and asking for
 /// QSV while getting libx264 is exactly what must not happen silently.
 ///
+/// `codec` is what the caller intends to produce, and backends that cannot produce it are
+/// left out: since 4.1 split the software encoder into X264 and X265, a preference list can
+/// name one that has nothing to offer this particular encode. Each one left out appends its
+/// reason to `skipped` when that is given -- §50 forbids a silent fallback, and a backend
+/// quietly dropped from the chain is one.
+///
+/// An empty result means nothing can serve this codec. For a named kind that is §8.4's
+/// Unsupported; for Auto it is an exhausted chain.
+///
 /// Returns a vector rather than a span over static storage: the order is now the caller's
 /// to choose, so there is no fixed list to point at.
-std::vector<BackendRef> resolve_backends(Encoder requested, const BackendSelection& selection);
+std::vector<BackendRef> resolve_backends(Encoder requested, const BackendSelection& selection,
+    Codec codec, std::vector<std::string>* skipped = nullptr);
 
 } // namespace sve

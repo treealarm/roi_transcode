@@ -78,15 +78,15 @@ public:
 [[maybe_unused]] void names_the_backend_interface()
 {
     for (const sve::BackendRef& ref :
-        sve::resolve_backends(sve::Encoder::Cpu, {})) {
+        sve::resolve_backends(sve::Encoder::X264, {}, sve::Codec::H264)) {
         const sve::IEncoderBackend& b = ref.get();
         const sve::EncoderCapabilities named = b.GetCapabilities(
             sve::Codec::H264);
         (void)named.h264;
     }
     const sve::EncoderCapabilities caps =
-        sve::resolve_backends(sve::Encoder::Cpu, {})[0].get().GetCapabilities(
-            sve::Codec::H264);
+        sve::resolve_backends(sve::Encoder::X264, {}, sve::Codec::H264)[0]
+            .get().GetCapabilities(sve::Codec::H264);
     (void)caps.h264;
     (void)caps.qp_map;
     (void)caps.qp_map_block_width;
@@ -95,22 +95,28 @@ public:
     (void)caps.native_bitrate;
     (void)caps.max_roi_regions;
     if (!caps.qp_map || caps.qp_map_block_width != 16 || caps.qp_map_block_height != 16) {
-        std::fprintf(stderr, "fail: Cpu H.264 must advertise qp_map 16x16\n");
+        std::fprintf(stderr, "fail: x264 must advertise qp_map 16x16\n");
         std::exit(1);
     }
     if (!caps.sei) {
-        std::fprintf(stderr, "fail: Cpu must advertise sei\n");
+        std::fprintf(stderr, "fail: x264 must advertise sei\n");
         std::exit(1);
     }
     if (!caps.native_bitrate) {
-        std::fprintf(stderr, "fail: Cpu must advertise native_bitrate\n");
+        std::fprintf(stderr, "fail: x264 must advertise native_bitrate\n");
+        std::exit(1);
+    }
+    // The HEVC answer comes from the other backend now, and asking x264 for it gives an
+    // empty capability rather than a smaller one -- which is what selection reads (§8.4).
+    if (caps.h265) {
+        std::fprintf(stderr, "fail: x264 must not advertise H.265\n");
         std::exit(1);
     }
     const sve::EncoderCapabilities hevc =
-        sve::resolve_backends(sve::Encoder::Cpu, {})[0].get().GetCapabilities(
-            sve::Codec::H265);
+        sve::resolve_backends(sve::Encoder::X265, {}, sve::Codec::H265)[0]
+            .get().GetCapabilities(sve::Codec::H265);
     if (!hevc.qp_map || hevc.qp_map_block_width != 32) {
-        std::fprintf(stderr, "fail: Cpu H.265 must advertise qp_map 32x32\n");
+        std::fprintf(stderr, "fail: x265 must advertise qp_map 32x32\n");
         std::exit(1);
     }
     if (hevc.native_bitrate) {
