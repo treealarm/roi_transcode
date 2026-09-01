@@ -12,7 +12,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <span>
 #include <stdexcept>
+#include <string_view>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -199,38 +201,78 @@ const char* backend_name(Backend e)
     return "?";
 }
 
+namespace {
+
+/// The library ships no default order any more (§8.4), so the application supplies one.
+/// This is the order measured on the hardware this project runs on: Quick Sync first
+/// because it is several times faster here, VA-API second because it reaches the same
+/// integrated GPU when the oneVPL dispatcher finds no runtime, the software encoders last
+/// because they always work. NVENC is absent on purpose -- the FFmpeg wrapper for it does
+/// not read region-of-interest side data, so a stream chosen automatically would quietly
+/// carry no adaptive quality at all.
+constexpr Backend kAutoOrder[] = {
+    Backend::IntelOneVpl, Backend::Vaapi, Backend::X264, Backend::X265};
+
+/// "cpu" is Auto over exactly the two software backends. That is not a workaround for the
+/// split but the thing itself: whichever of the two cannot produce the codec is skipped
+/// with its reason logged, which is what the one combined backend used to do silently
+/// inside itself.
+constexpr Backend kCpuOrder[] = {Backend::X264, Backend::X265};
+
+struct NamedBackend {
+    std::string_view name;
+    Backend kind;
+    /// The preference order the name stands for. Empty for the names that mean one backend
+    /// outright -- there is nothing to choose between, and Auto is not what was asked for.
+    std::span<const Backend> order;
+};
+
+/// Every spelling accepted, in the order the refusal message lists them. One table rather
+/// than a chain of comparisons beside a hand-written list, because the two drifted: the
+/// message named neither the direct backends nor "qsvdirect", and a caller who typed one
+/// correctly was told it did not exist.
+constexpr NamedBackend kNamedBackends[] = {
+    {"auto", Backend::Auto, kAutoOrder},
+    {"cpu", Backend::Auto, kCpuOrder},
+    {"qsv", Backend::IntelOneVpl, {}},
+    {"vaapi", Backend::Vaapi, {}},
+    {"nvenc", Backend::NvidiaNvenc, {}},
+    {"x264", Backend::X264, {}},
+    {"x265", Backend::X265, {}},
+    {"x264direct", Backend::X264Direct, {}},
+    {"x265direct", Backend::X265Direct, {}},
+    {"onevpldirect", Backend::IntelOneVplDirect, {}},
+    {"qsvdirect", Backend::IntelOneVplDirect, {}},
+};
+
+} // namespace
+
+std::string backend_choice_names()
+{
+    std::string out;
+    for (const NamedBackend& known : kNamedBackends) {
+        if (!out.empty()) {
+            out += '|';
+        }
+        out.append(known.name);
+    }
+    return out;
+}
+
 BackendChoice backend_choice_from_name(const char* name)
 {
     const std::string_view s = name != nullptr ? name : "";
-    if (s == "qsv")   return {Backend::IntelOneVpl, {}};
-    if (s == "vaapi") return {Backend::Vaapi, {}};
-    if (s == "nvenc") return {Backend::NvidiaNvenc, {}};
-    if (s == "x264")  return {Backend::X264, {}};
-    if (s == "x265")  return {Backend::X265, {}};
-    if (s == "x264direct") return {Backend::X264Direct, {}};
-    if (s == "x265direct") return {Backend::X265Direct, {}};
-    if (s == "onevpldirect" || s == "qsvdirect")
-        return {Backend::IntelOneVplDirect, {}};
-    // "cpu" is Auto over exactly the two software backends. That is not a workaround for
-    // the split but the thing itself: whichever of the two cannot produce the codec is
-    // skipped with its reason logged, which is what the one combined backend used to do
-    // silently inside itself.
-    if (s == "cpu") {
-        return {Backend::Auto, BackendSelection{{Backend::X264, Backend::X265}, false}};
-    }
-    // The library ships no default order any more (§8.4), so the application supplies one.
-    // This is the order measured on the hardware this project runs on: Quick Sync first
-    // because it is several times faster here, VA-API second because it reaches the same
-    // integrated GPU when the oneVPL dispatcher finds no runtime, the software encoders
-    // last because they always work. NVENC is absent on purpose -- the FFmpeg wrapper for
-    // it does not read region-of-interest side data, so a stream chosen automatically
-    // would quietly carry no adaptive quality at all.
-    if (s == "auto") {
-        return {Backend::Auto, BackendSelection{
-            {Backend::IntelOneVpl, Backend::Vaapi, Backend::X264, Backend::X265}, false}};
+    for (const NamedBackend& known : kNamedBackends) {
+        if (s != known.name) {
+            continue;
+        }
+        BackendChoice choice;
+        choice.kind = known.kind;
+        choice.selection.preferred.assign(known.order.begin(), known.order.end());
+        return choice;
     }
     throw std::invalid_argument(
-        "unknown encoder '" + std::string(s) + "' (auto|qsv|vaapi|nvenc|x264|x265|cpu)");
+        "unknown encoder '" + std::string(s) + "' (" + backend_choice_names() + ")");
 }
 
 const char* codec_profile_name(CodecProfile p)

@@ -13,6 +13,7 @@
 // is how a caller says "hardware or nothing", and putting them last is how they say
 // "hardware if you have it".
 
+#include <string>
 #include <vector>
 
 namespace sve {
@@ -91,9 +92,19 @@ struct BackendChoice {
     BackendSelection selection;
 };
 
-/// "auto", "qsv", "vaapi", "nvenc", "x264", "x265", or "cpu" for the two software encoders
-/// together. Unknown text throws std::invalid_argument rather than defaulting: a misspelled
-/// backend quietly becoming a different one is the substitution §8.4 exists to prevent.
+/// Every name backend_choice_from_name accepts, joined by '|' in the order it lists them.
+///
+/// It exists so that an application's help text and this parser's own refusal cannot drift
+/// apart from what the parser does. They had: the list was written by hand in three places
+/// -- the refusal, this header's comment, and the command line's usage text -- and all
+/// three still named the state of things before §5.4 and §5.2 added the direct backends,
+/// so `--encoder x264direct` worked while every list said it did not exist.
+std::string backend_choice_names();
+
+/// One of the names backend_choice_names() lists: a backend's own name, "cpu" for the two
+/// software encoders together, or "auto" for the order measured on this project's hardware.
+/// Unknown text throws std::invalid_argument rather than defaulting: a misspelled backend
+/// quietly becoming a different one is the substitution §8.4 exists to prevent.
 BackendChoice backend_choice_from_name(const char* name);
 
 } // namespace sve

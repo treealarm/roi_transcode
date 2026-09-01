@@ -9,6 +9,8 @@
 
 #include <atomic>
 #include <cstddef>
+#include <stdexcept>
+#include <string_view>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -229,6 +231,39 @@ int main()
     if (grid.cols != 2 || grid.rows != 2 || rects.size() != 1) {
         std::fprintf(stderr, "public_api_test: unexpected geometry\n");
         return 1;
+    }
+
+    // Every backend has a name that gets back to it. The table of names is what both the
+    // parser and every help text now read, so the failure this guards against is an
+    // enumerator added without a spelling -- which is how the list went stale before.
+    for (const sve::Backend kind : {sve::Backend::IntelOneVpl, sve::Backend::Vaapi,
+             sve::Backend::NvidiaNvenc, sve::Backend::X264, sve::Backend::X265,
+             sve::Backend::X264Direct, sve::Backend::X265Direct,
+             sve::Backend::IntelOneVplDirect}) {
+        if (sve::backend_choice_from_name(sve::backend_name(kind)).kind != kind) {
+            std::fprintf(stderr, "public_api_test: %s does not round-trip through its name\n",
+                sve::backend_name(kind));
+            return 1;
+        }
+    }
+
+    // And the refusal names them all. It used to name seven of eleven, so asking for
+    // x264direct with a typo was answered with a list that denied x264direct existed.
+    const std::string names = sve::backend_choice_names();
+    try {
+        sve::backend_choice_from_name("no-such-encoder");
+        std::fprintf(stderr, "public_api_test: an unknown backend name was accepted\n");
+        return 1;
+    } catch (const std::invalid_argument& ex) {
+        const std::string_view what = ex.what();
+        for (const char* name : {"x264direct", "x265direct", "onevpldirect", "cpu", "auto"}) {
+            if (names.find(name) == std::string::npos
+                || what.find(name) == std::string_view::npos) {
+                std::fprintf(stderr, "public_api_test: %s is missing from '%s'\n",
+                    name, ex.what());
+                return 1;
+            }
+        }
     }
 
     std::puts("public_api_test ok");

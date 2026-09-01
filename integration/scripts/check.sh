@@ -41,9 +41,17 @@ PX=448; PY=288; PW=384; PH=144
 BGX=40; BGY=40
 
 fails=0
-pass() { printf '  ok    %s\n' "$1"; }
+oks=0
+skips=0
+steps=0
+pass() { printf '  ok    %s\n' "$1"; oks=$((oks + 1)); }
 fail() { printf '  FAIL  %s\n' "$1"; fails=$((fails + 1)); }
-step() { printf '\n== %s ==\n' "$1"; }
+# A step that did not run is not a step that passed. It is counted and named in the last
+# line for that reason: this script skips a whole block when the fixtures for it cannot be
+# built, and "all checks passed" on its own has said that after never running the
+# moving-object assertions at all.
+skip() { printf '  skip  %s\n' "$1"; skips=$((skips + 1)); }
+step() { printf '\n== %s ==\n' "$1"; steps=$((steps + 1)); }
 
 # --- assertions -------------------------------------------------------------
 
@@ -303,7 +311,7 @@ if [[ "${RUN_H265_MATRIX:-0}" == "1" ]]; then
         fail "CPU H.265 matrix failed (see ${WORK}/h265_matrix)"
     fi
 else
-    printf '  skip  set RUN_H265_MATRIX=1 to run CPU H.265 guard matrix\n'
+    skip "set RUN_H265_MATRIX=1 to run CPU H.265 guard matrix"
 fi
 
 step "frame mode agrees with file mode"
@@ -437,7 +445,7 @@ if [[ -e /dev/dri/renderD128 ]]; then
             fi
         else
             step "native oneVPL backend (§5.2)"
-            printf '  skip  onevpldirect is not in this build or has no device\n'
+            skip "onevpldirect is not in this build or has no device"
         fi
 
         # The iHD driver takes four ROI regions for H.264 and eight for H.265. Both Intel
@@ -468,10 +476,10 @@ if [[ -e /dev/dri/renderD128 ]]; then
             fi
         done
     else
-        printf '  skip  Intel runtime not fetched (integration/scripts/fetch-intel-qsv.sh)\n'
+        skip "Intel runtime not fetched (integration/scripts/fetch-intel-qsv.sh)"
     fi
 else
-    printf '  skip  no /dev/dri, hardware backends unavailable\n'
+    skip "no /dev/dri, hardware backends unavailable"
 fi
 
 step "synthetic scenes and their ground truth"
@@ -566,7 +574,7 @@ PY
             fail "the ROI did not follow the moving box (oneVPL block map)"
         fi
     else
-        printf '  skip  onevpldirect is not in this build or has no device\n'
+        skip "onevpldirect is not in this build or has no device"
     fi
 
     # §16, which until 2026-09-01 was never checked at all -- and could not be, because it
@@ -623,13 +631,13 @@ PY
                 fail "x265direct crashed or failed on regions that come and go (rc=$?)"
             fi
         else
-            printf '  skip  could not build the 36 s fixture\n'
+            skip "could not build the 36 s fixture"
         fi
     else
-        printf '  skip  crowded scene not generated, §16 needs >=30 s (its own rule)\n'
+        skip "crowded scene not generated, §16 needs >=30 s (its own rule)"
     fi
 else
-    printf '  skip  scenes not generated (benchmarks/synthetic/make-scenes.py)\n'
+    skip "scenes not generated (benchmarks/synthetic/make-scenes.py)"
 fi
 
 step "roi lag metrics are observable on tracked ROI"
@@ -665,7 +673,7 @@ PY
         fail "tracked moving scene failed on session path"
     fi
 else
-    printf '  skip  moving scene not generated (benchmarks/synthetic/make-scenes.py)\n'
+    skip "moving scene not generated (benchmarks/synthetic/make-scenes.py)"
 fi
 
 step "roi lag acceptance on a real clip (optional)"
@@ -770,7 +778,7 @@ PY
         fi
     fi
 else
-    printf '  skip  real clip fixtures missing (set REAL_LAG_CLIP/REAL_LAG_ROI or run integration/scripts/prepare-real-lag-fixture.sh)\n'
+    skip "real clip fixtures missing (set REAL_LAG_CLIP/REAL_LAG_ROI or run integration/scripts/prepare-real-lag-fixture.sh)"
 fi
 
 step "adaptive encoding puts the quality where it was asked for"
@@ -838,7 +846,7 @@ PY
     printf 'moving,adaptive,roi_psnr,%s\nmoving,baseline,roi_psnr,%s\n' \
         "$a_roi" "$b_roi" >> "${EVAL}/metrics.csv"
 else
-    printf '  skip  roi_metrics or the synthetic scenes are missing\n'
+    skip "roi_metrics or the synthetic scenes are missing"
 fi
 
 step "the area budget spends protection where the frame can afford it"
@@ -906,7 +914,7 @@ print(*o['bbox'])" "${crowd}/truth.json")
         fail "the crowded scene failed to encode"
     fi
 else
-    printf '  skip  crowded scene not generated (benchmarks/synthetic/make-scenes.py)\n'
+    skip "crowded scene not generated (benchmarks/synthetic/make-scenes.py)"
 fi
 
 # §20 and §44, and the first place either can be shown with a number rather than asserted.
@@ -1003,9 +1011,9 @@ fi
 # printed rather than hidden -- the same hazard CLAUDE.md records for the synthetic scenes.
 step "python bindings (§58)"
 if ! python3 -c "import pybind11, numpy, pytest" >/dev/null 2>&1; then
-    printf '  skip  python bindings need pybind11, numpy and pytest\n'
+    skip "python bindings need pybind11, numpy and pytest"
 elif ! python3-config --includes >/dev/null 2>&1; then
-    printf '  skip  python bindings need the CPython development headers\n'
+    skip "python bindings need the CPython development headers"
 else
     PYBUILD="${WORK}/python-build"
     if cmake -S "$ROOT" -B "$PYBUILD" -G Ninja \
@@ -1069,7 +1077,7 @@ assert sve.available_backends(), 'no backends in the wheel'
                 tail -10 "${WORK}/wheel.log" | sed 's/^/      /' >&2
             fi
         else
-            printf '  skip  wheel test needs build and scikit-build-core\n'
+            skip "wheel test needs build and scikit-build-core"
         fi
     else
         fail "python extension build"
@@ -1103,8 +1111,10 @@ if [[ -n "${KEEP:-}" ]]; then
     printf 'encodes kept in %s\n' "$WORK"
 fi
 if [[ $fails -eq 0 ]]; then
-    printf 'all checks passed; rows appended to %s\n' "$CSV"
+    printf 'all checks passed: %d ok, %d skipped, %d steps; rows appended to %s\n' \
+        "$oks" "$skips" "$steps" "$CSV"
     exit 0
 fi
-printf '%d check(s) failed\n' "$fails"
+printf '%d check(s) failed: %d ok, %d skipped, %d steps\n' \
+    "$fails" "$oks" "$skips" "$steps"
 exit 1

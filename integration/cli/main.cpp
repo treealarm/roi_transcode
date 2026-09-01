@@ -9,28 +9,41 @@
 namespace {
 void usage()
 {
+    // The backend names come from the parser rather than from a list written here. They
+    // were written here once, and went stale the day §5.4 and §5.2 added the direct
+    // backends: --encoder x264direct worked and the usage text denied it existed.
     std::fprintf(stderr,
         "Usage: roi-transcode --in CLIP --roi roi.json --out OUT.mp4\n"
-        "         [--encoder auto|qsv|vaapi|nvenc|x264|x265|cpu] [--codec h264|h265|source]\n"
-        "         [--crf 28] [--gop N] [--preset balanced]\n"
+        "         [--encoder %s]\n"
+        "         [--codec h264|h265|source] [--crf 28] [--gop N] [--preset balanced]\n"
         "         [--target-bitrate BPS] [--bitrate-overshoot F] [--sidecar]\n"
         "\n"
-        "ROI transcoder, H.264 by default. Target is Intel Quick Sync.\n"
+        "ROI transcoder, H.264 by default.\n"
         "--codec source keeps whatever the input already is, which is what an\n"
         "archive needs: one HLS playlist stitches many clips and browsers handle a\n"
         "codec change mid-playlist badly.\n"
-        "--target-bitrate: CPU H.264 opens CBR+filler (ROI redistributes coded\n"
-        "quality; mux bitrate matches). CPU H.265 and HW stay on CQP/CRF + outer\n"
-        "BitrateBudget loop.\n"
+        "\n"
+        "The names ending in 'direct' reach the encoder's own API instead of going\n"
+        "through libavcodec (TZ §5.2, §5.4), and that is where per-block quality\n"
+        "lives: x264direct and x265direct carry per-block quantiser offsets,\n"
+        "onevpldirect carries an mfxExtMBQP map. qsv and vaapi reach the same Intel\n"
+        "GPU through libavcodec, where a region is a rectangle and nothing finer.\n"
+        "'cpu' is x264 and x265 together, whichever can produce the codec; 'auto'\n"
+        "is the order measured on this project's hardware.\n"
+        "\n"
+        "--target-bitrate: x264direct and x265direct honour it themselves with\n"
+        "ABR+VBV and keep the block map, because offsets compose with rate control.\n"
+        "onevpldirect switches to VBR and trades the map for rectangles, because\n"
+        "mfxExtMBQP carries absolute quantisers and needs CQP. The libavcodec x264\n"
+        "path opens CBR+filler. The rest ride the outer BitrateBudget loop.\n"
+        "--bitrate-overshoot is the allowed average overshoot fraction (default 0.1\n"
+        "when a target is set).\n"
+        "\n"
         "--sidecar writes <output_basename>.svemeta.ndjson beside the output (TZ §19.3):\n"
         "one JSON line per emitted packet, carrying the objects that frame was submitted\n"
         "with. Independent of SEI -- it is what carries the metadata when the bitstream\n"
-        "cannot, and its lines follow emission order including B-frame reordering.\n"
-        "--bitrate-overshoot is the allowed average overshoot\n"
-        "fraction (default 0.1 when a target is set).\n"
-        "QSV maps AVRegionOfInterest to mfxExtEncoderROI (CQP + low_power).\n"
-        "Linux VAAPI is the same iHD EncSliceLP path if hevc_qsv fails.\n"
-        "libx265 is the CPU fallback (needs aq-mode).\n");
+        "cannot, and its lines follow emission order including B-frame reordering.\n",
+        sve::backend_choice_names().c_str());
 }
 
 sve::Codec parse_codec(const char* s)

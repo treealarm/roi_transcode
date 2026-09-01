@@ -128,6 +128,19 @@ build release-only — vcpkg's `VCPKG_BUILD_TYPE` env var is a no-op, it only wo
 inside a triplet file. Consumers must still pass `-DCMAKE_BUILD_TYPE=Release` on their own
 configure step to select the release libs.
 
+## Nothing gets rebuilt while the acceptance run is in flight
+
+`check.sh` runs the binaries in `build/` and `build/integration/` as it finds them, and it
+takes tens of minutes. Building in that window replaces those files underneath it: ninja
+unlinks and relinks, and every step that starts mid-link dies with `rc=126`, "cannot execute
+binary file", which reads as nine unrelated failures. Editing `check.sh` itself is worse,
+because bash reads the script incrementally — the edit lands in front of the interpreter and
+the run stops on a syntax error at a line that was correct when it started.
+
+Either way the whole run is lost, because a poisoned step cannot be told from a real one and
+the honest move is to discard all of it and start again. So: wait for it, or work in a
+separate build directory.
+
 ## A stale build directory looks like a source error
 
 Local builds configure against `/mnt/wdblue/vcpkg` in classic mode and link ffmpeg through
@@ -148,6 +161,7 @@ produces them with `integration/scripts/fetch-intel-qsv.sh` (once, no sudo) and
 The two are not handled alike, and the difference is worth knowing before trusting a green
 run: a missing `synth.mp4` is generated and a failure there stops `check.sh` outright,
 while `make-scenes.py` is called with `|| true` and the whole synthetic-scene block is then
-skipped in silence. So on a machine that cannot build the scenes, `check.sh` still says
-"all checks passed" having never run the moving-object assertions. Read the step count, not
-just the last line.
+skipped. So on a machine that cannot build the scenes, the moving-object assertions never
+run at all. The last line says so since 2026-09-01 — `all checks passed: N ok, M skipped,
+S steps` — and the number to read before trusting a green run is M, not the words in front
+of it.
