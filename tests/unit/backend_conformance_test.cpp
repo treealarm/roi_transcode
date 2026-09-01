@@ -464,6 +464,7 @@ int main()
         {Backend::X265, "x265"},
         {Backend::X265Direct, "x265direct"},
         {Backend::IntelOneVpl, "onevpl"},
+        {Backend::IntelOneVplDirect, "onevpldirect"},
         {Backend::Vaapi, "vaapi"},
         {Backend::NvidiaNvenc, "nvenc"},
     };

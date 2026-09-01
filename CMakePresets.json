@@ -24,6 +24,8 @@
         "SVE_BUILD_INTEGRATION": "ON",
         "$comment-reference-backends": "SVE_BUILD_BACKEND_FFMPEG is OFF by default so that a default build is the dependency graph §5.5 draws. The development loop and check.sh need the libavcodec backends -- QSV, VA-API and the reference x264/x265 backend-compare.sh measures against -- so the preset turns them on.",
         "SVE_BUILD_BACKEND_FFMPEG": "ON",
+        "$comment-onevpl": "§5.2's native backend. Off by default because it needs the oneVPL SDK, on here because this machine has it and acceptance should exercise it.",
+        "SVE_BUILD_BACKEND_ONEVPL": "ON",
         "$comment": "Manifest mode off deliberately: this preset reuses the tree already installed in VCPKG_ROOT, which is what makes a reconfigure take a second instead of rebuilding gRPC. The manifest presets are what a fresh checkout and the acceptance criteria use.",
         "VCPKG_MANIFEST_MODE": "OFF"
       }

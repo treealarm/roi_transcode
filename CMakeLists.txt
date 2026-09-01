@@ -42,6 +42,9 @@ option(SVE_INSTALL           "Install the C++ package (headers, libs, pkg-config
 # linux-dev preset turns them on so the development loop and check.sh keep their coverage.
 option(SVE_BUILD_BACKEND_X264   "Build the direct libx264 backend component"      ON)
 option(SVE_BUILD_BACKEND_X265   "Build the direct libx265 backend component"      ON)
+# §5.2's native OneVplBackend. Off by default because it needs the oneVPL SDK, and §26.4
+# says a component whose SDK is absent must not be required to build.
+option(SVE_BUILD_BACKEND_ONEVPL "Build the native Intel oneVPL backend component"  OFF)
 option(SVE_BUILD_BACKEND_FFMPEG "Build the libavcodec-backed backends (reference)" OFF)
 option(SVE_BUILD_FFMPEG_INTEROP "Build the AVFrame interop adapter (§8.5)"        ON)
 option(SVE_BUILD_EXAMPLES       "Build transcode_file and Session (§52)"          ON)
@@ -52,6 +55,9 @@ if(SVE_BUILD_BACKEND_X264)
 endif()
 if(SVE_BUILD_BACKEND_X265)
     string(APPEND SVE_REGISTER_CALLS "    if (const Status s = RegisterX265Backend(registry); !s.ok()) return s;\n")
+endif()
+if(SVE_BUILD_BACKEND_ONEVPL)
+    string(APPEND SVE_REGISTER_CALLS "    if (const Status s = RegisterOneVplBackend(registry); !s.ok()) return s;\n")
 endif()
 if(SVE_BUILD_BACKEND_FFMPEG)
     string(APPEND SVE_REGISTER_CALLS "    if (const Status s = RegisterFfmpegBackends(registry); !s.ok()) return s;\n")
@@ -188,6 +194,34 @@ if(SVE_BUILD_BACKEND_X265)
 endif()
 
 # ---------------------------------------------------------------------------
+# sve_backend_onevpl -- §5.2, §5.5
+#
+# Intel oneVPL through its own API. The first component here that reaches vendor silicon
+# without libavcodec, which is the whole of what §5.2 asks for.
+# ---------------------------------------------------------------------------
+if(SVE_BUILD_BACKEND_ONEVPL)
+    pkg_check_modules(VPL vpl)
+    if(NOT VPL_FOUND)
+        find_path(VPL_INCLUDE_DIR vpl/mfxvideo.h)
+        find_library(VPL_LIBRARY NAMES vpl)
+        if(VPL_INCLUDE_DIR AND VPL_LIBRARY)
+            set(VPL_INCLUDE_DIRS "${VPL_INCLUDE_DIR}")
+            set(VPL_LIBRARIES "${VPL_LIBRARY}")
+            set(VPL_FOUND TRUE)
+        endif()
+    endif()
+    if(NOT VPL_FOUND)
+        message(FATAL_ERROR "SVE_BUILD_BACKEND_ONEVPL needs the oneVPL SDK (libvpl)")
+    endif()
+    add_library(sve_backend_onevpl src/backend/onevpl_native/onevpl_native_backend.cpp)
+    sve_add_backend_component(sve_backend_onevpl)
+    target_include_directories(sve_backend_onevpl SYSTEM PRIVATE ${VPL_INCLUDE_DIRS})
+    target_link_directories(sve_backend_onevpl PUBLIC $<BUILD_INTERFACE:${VPL_LIBRARY_DIRS}>)
+    target_link_libraries(sve_backend_onevpl PUBLIC ${VPL_LIBRARIES})
+    add_library(sve::backend_onevpl_static ALIAS sve_backend_onevpl)
+endif()
+
+# ---------------------------------------------------------------------------
 # sve_ffmpeg_interop -- §8.5, and the only FFmpeg §5.5's graph allows
 #
 # Turns an AVFrame into a Frame and nothing else. libavutil alone: it does not encode, so
@@ -297,7 +331,7 @@ target_compile_options(sve_deployment PRIVATE ${SVE_WARNINGS})
 # add_subdirectory() users -- ta_vms among them -- do not have to learn the component list.
 add_library(sve_all INTERFACE)
 target_link_libraries(sve_all INTERFACE sve $<TARGET_OBJECTS:sve_deployment>)
-foreach(component sve_backend_x264 sve_backend_x265 sve_backend_ffmpeg
+foreach(component sve_backend_x264 sve_backend_x265 sve_backend_onevpl sve_backend_ffmpeg
                   sve_ffmpeg_interop sve_examples)
     if(TARGET ${component})
         target_link_libraries(sve_all INTERFACE ${component})
@@ -339,7 +373,7 @@ if(SVE_INSTALL)
 
 set(SVE_INSTALL_TARGETS sve sve_all)
 set(SVE_INSTALLED_COMPONENTS "")
-foreach(component sve_backend_x264 sve_backend_x265 sve_backend_ffmpeg
+foreach(component sve_backend_x264 sve_backend_x265 sve_backend_onevpl sve_backend_ffmpeg
                   sve_ffmpeg_interop sve_examples)
     if(TARGET ${component})
         list(APPEND SVE_INSTALL_TARGETS ${component})

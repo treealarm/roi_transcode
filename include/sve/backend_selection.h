@@ -51,6 +51,16 @@ enum class Backend {
     /// libx265 through its own API -- TZ v4.1 §5.4. Alongside X265 for the same reason
     /// X264Direct sits alongside X264: a comparison needs both sides.
     X265Direct,
+    /// Intel oneVPL through its own API -- TZ v4.2 §5.2's OneVplBackend, the native one.
+    ///
+    /// Named Direct alongside IntelOneVpl for the same reason X264Direct sits alongside
+    /// X264: while both exist, a comparison needs both sides, and backend-compare.sh is
+    /// what says whether the native path holds the zone as well.
+    ///
+    /// The naming is transitional and backwards from §8.2, which gives the plain name to
+    /// the native backend -- our IntelOneVpl is the libavcodec one, and §5.5 does not list
+    /// it at all. The two collapse into one when the libavcodec encoders go.
+    IntelOneVplDirect,
 };
 
 

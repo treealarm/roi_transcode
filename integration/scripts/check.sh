@@ -358,6 +358,22 @@ if [[ -e /dev/dri/renderD128 ]]; then
         step "the ROI mechanism does what it claims (QSV, CQP, H.264)"
         ENC=auto CODEC=h264 mechanism_checks qsv_h264 yes
 
+        # §5.2's native backend, on the same assertions as the libavcodec QSV path above.
+        # `yes` for cqp: it opens CQP, so per-region offsets are independent per block and
+        # equality of the background is a fair thing to assert.
+        if "${BUILD}/roi-transcode" --in "$SRC" --roi "${ROOT}/testdata/synth_roi.json" \
+            --out "${WORK}/onevpl_probe.mp4" --encoder onevpldirect --codec h264 \
+            --crf 28 --gop 1 >"${WORK}/onevpl_probe.log" 2>&1; then
+            step "the ROI mechanism does what it claims (oneVPL direct, CQP, H.264)"
+            ENC=onevpldirect CODEC=h264 mechanism_checks onevpl_h264 yes
+
+            step "the ROI mechanism does what it claims (oneVPL direct, CQP, HEVC)"
+            ENC=onevpldirect CODEC=h265 mechanism_checks onevpl_h265 yes
+        else
+            step "native oneVPL backend (§5.2)"
+            printf '  skip  onevpldirect is not in this build or has no device\n'
+        fi
+
         # The iHD driver takes four ROI regions for H.264 and eight for H.265. Both Intel
         # backends used to declare eight for both, and on the oneVPL path the surplus was
         # forwarded rather than trimmed -- iHD then overran a fixed-size array and the
