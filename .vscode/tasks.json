@@ -74,6 +74,36 @@
       "problemMatcher": []
     },
     {
+      "label": "build python extension (Debug)",
+      "detail": "Configures build-python-debug and builds the extension with symbols, so breakpoints in the bindings actually bind. Its own directory because a Python extension is a shared object and the libavcodec-backed components cannot go into one here -- see python/CMakeLists.txt.",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "-S", ".", "-B", "build-python-debug", "-G", "Ninja",
+        "-DCMAKE_TOOLCHAIN_FILE=${env:VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "-DVCPKG_MANIFEST_MODE=OFF", "-DCMAKE_BUILD_TYPE=Debug",
+        "-DSVE_BUILD_PYTHON=ON", "-DSVE_BUILD_TESTS=OFF", "-DSVE_BUILD_TOOLS=OFF",
+        "-DSVE_BUILD_INTEGRATION=OFF", "-DSVE_BUILD_BACKEND_FFMPEG=OFF",
+        "-DSVE_BUILD_EXAMPLES=OFF",
+        "&&", "cmake", "--build", "build-python-debug", "-j", "8"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": { "VCPKG_ROOT": "/mnt/wdblue/vcpkg" },
+        "shell": { "executable": "/bin/bash", "args": ["-c"] }
+      },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "stop services",
+      "detail": "Stops whatever this repository started -- the bench, and anything else holding one of its ports. Kills by listening port, never by process name: pkill matches whole command lines and would kill the shell running it.",
+      "type": "shell",
+      "command": "./integration/scripts/stop-services.sh",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent", "panel": "shared", "close": true }
+    },
+    {
       "label": "capabilities (§23)",
       "type": "shell",
       "command": "./build/sve-capabilities",
