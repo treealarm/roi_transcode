@@ -1006,6 +1006,18 @@ else
     fail "sidecar encode"; sed 's/^/      /' "${WORK}/sidecar.log" >&2
 fi
 
+# §26.4's three delivery profiles. Its own script for the same reason the dependency scan
+# has one: it configures builds of its own from scratch, which is not something to do inside
+# a step that is otherwise reusing this build tree.
+step "backend packaging profiles build and differ as §26.4 says"
+if pkgout=$("${ROOT}/integration/scripts/packaging-check.sh" "${WORK}/packaging" 2>&1); then
+    printf '%s\n' "$pkgout" | grep -E '^  ok' | sed 's/^/  /'
+    pass "$(printf '%s\n' "$pkgout" | tail -1)"
+else
+    printf '%s\n' "$pkgout" | grep -E '^  FAIL' | sed 's/^/  /' >&2
+    fail "backend packaging profiles (§26.4)"
+fi
+
 step "dependency scan: the core declares and links nothing it must not"
 if depscan=$("${ROOT}/integration/scripts/dependency-scan.sh" "${WORK}/depscan" 2>&1); then
     printf '%s\n' "$depscan" | grep -E '^  (ok|skip)' | sed 's/^/  /'

@@ -40,6 +40,31 @@ option(SVE_INSTALL           "Install the C++ package (headers, libs, pkg-config
 # that only converts frames. The libavcodec-backed encoders are not in that graph at all --
 # they stay as the reference backend-compare.sh measures the direct paths against, and the
 # linux-dev preset turns them on so the development loop and check.sh keep their coverage.
+# §26.4's deployment profile. STATIC is the default and the only one that changes nothing:
+# DYNAMIC and BOTH additionally build each shippable component a second time as a shared
+# module, from the same sources, exporting the one C entry point §26.4 names.
+#
+# The plugin does not link the core, and that is the arrangement rather than an oversight.
+# A module carrying its own copy of libsve would carry its own copy of every function-local
+# static in it -- default_backend_registry() among them -- so the registry a plugin
+# registered into would not be the registry the process asks. Its references to the core
+# stay undefined and bind to the host at load time, which is what ENABLE_EXPORTS (-rdynamic)
+# on an executable is for. That keeps the core static, as it is for ta_vms, and makes
+# exporting one's own symbols a property of an application that wants plugins rather than a
+# change forced on every consumer of the library.
+set(SVE_BACKEND_PACKAGING "STATIC" CACHE STRING
+    "How backend components are delivered: STATIC, DYNAMIC or BOTH (TZ v4.2 §26.4)")
+set_property(CACHE SVE_BACKEND_PACKAGING PROPERTY STRINGS STATIC DYNAMIC BOTH)
+if(NOT SVE_BACKEND_PACKAGING MATCHES "^(STATIC|DYNAMIC|BOTH)$")
+    message(FATAL_ERROR
+        "SVE_BACKEND_PACKAGING must be STATIC, DYNAMIC or BOTH, not '${SVE_BACKEND_PACKAGING}'")
+endif()
+if(SVE_BACKEND_PACKAGING STREQUAL "STATIC")
+    set(SVE_BUILD_PLUGINS OFF)
+else()
+    set(SVE_BUILD_PLUGINS ON)
+endif()
+
 option(SVE_BUILD_BACKEND_X264   "Build the direct libx264 backend component"      ON)
 option(SVE_BUILD_BACKEND_X265   "Build the direct libx265 backend component"      ON)
 # §5.2's native OneVplBackend. Off by default because it needs the oneVPL SDK, and §26.4
@@ -49,16 +74,30 @@ option(SVE_BUILD_BACKEND_FFMPEG "Build the libavcodec-backed backends (reference
 option(SVE_BUILD_FFMPEG_INTEROP "Build the AVFrame interop adapter (§8.5)"        ON)
 option(SVE_BUILD_EXAMPLES       "Build transcode_file and Session (§52)"          ON)
 
+# Which components the deployment registers by linking them, as opposed to loading them.
+# Under DYNAMIC the shippable ones are delivered as plugins and this list is empty of them:
+# registering them here as well would make DYNAMIC indistinguishable from STATIC, and the
+# parity that §26.4 asks CI to check would be a comparison of a thing with itself.
+#
+# BOTH does register them and builds the plugins too, which is the configuration where a
+# deployment can walk into §26.4's duplicate case on purpose and be refused.
+set(SVE_STATIC_REGISTRATION ON)
+if(SVE_BACKEND_PACKAGING STREQUAL "DYNAMIC")
+    set(SVE_STATIC_REGISTRATION OFF)
+endif()
+
 set(SVE_REGISTER_CALLS "")
-if(SVE_BUILD_BACKEND_X264)
+if(SVE_BUILD_BACKEND_X264 AND SVE_STATIC_REGISTRATION)
     string(APPEND SVE_REGISTER_CALLS "    if (const Status s = RegisterX264Backend(registry); !s.ok()) return s;\n")
 endif()
-if(SVE_BUILD_BACKEND_X265)
+if(SVE_BUILD_BACKEND_X265 AND SVE_STATIC_REGISTRATION)
     string(APPEND SVE_REGISTER_CALLS "    if (const Status s = RegisterX265Backend(registry); !s.ok()) return s;\n")
 endif()
-if(SVE_BUILD_BACKEND_ONEVPL)
+if(SVE_BUILD_BACKEND_ONEVPL AND SVE_STATIC_REGISTRATION)
     string(APPEND SVE_REGISTER_CALLS "    if (const Status s = RegisterOneVplBackend(registry); !s.ok()) return s;\n")
 endif()
+# Always static, whatever the profile: the libavcodec reference group is not shipped as a
+# plugin and §5.5 does not list it in the dependency graph at all.
 if(SVE_BUILD_BACKEND_FFMPEG)
     string(APPEND SVE_REGISTER_CALLS "    if (const Status s = RegisterFfmpegBackends(registry); !s.ok()) return s;\n")
 endif()
@@ -172,6 +211,47 @@ function(sve_add_backend_component name)
     set_target_properties(${name} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endfunction()
 
+# The same component, delivered the other way -- §26.4's dynamic plugin packaging.
+#
+# Same source file, and that is the requirement rather than a convenience: "static и dynamic
+# варианты одного backend используют одну реализацию и один SveBackendPluginDescriptorV1".
+# What differs is one compile definition, which is what admits the exported entry point.
+# That entry point cannot be in the static build: §26.4 fixes its name, so two static
+# components carrying it would put two definitions of one symbol on a deployment's link
+# line and it would not link at all.
+#
+# Hidden visibility so that the module exports that one symbol and nothing else. The core's
+# symbols are left undefined here on purpose -- see SVE_BACKEND_PACKAGING above.
+function(sve_add_backend_plugin base source)
+    if(NOT SVE_BUILD_PLUGINS)
+        return()
+    endif()
+    set(plugin ${base}_plugin)
+    add_library(${plugin} MODULE ${source})
+    target_include_directories(${plugin}
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
+    target_compile_options(${plugin} PRIVATE ${SVE_WARNINGS})
+    target_compile_definitions(${plugin}
+        PRIVATE SVE_BACKEND_AS_PLUGIN _CRT_SECURE_NO_WARNINGS)
+    set_target_properties(${plugin} PROPERTIES
+        OUTPUT_NAME "${base}"
+        PREFIX "lib"
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+        POSITION_INDEPENDENT_CODE ON)
+    # Hidden visibility covers what we compile; the codec library arrives from a static
+    # archive already compiled and default-visible, and without this the x265 module
+    # exported 1318 symbols instead of one. See cmake/backend_plugin.map.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_options(${plugin} PRIVATE
+            "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/backend_plugin.map")
+        set_property(TARGET ${plugin} APPEND PROPERTY LINK_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/backend_plugin.map")
+    endif()
+endfunction()
+
 # ---------------------------------------------------------------------------
 # sve_backend_x264 / sve_backend_x265 -- §5.4, §5.5
 #
@@ -185,6 +265,13 @@ if(SVE_BUILD_BACKEND_X264)
     target_link_directories(sve_backend_x264 PUBLIC $<BUILD_INTERFACE:${X264_LIBRARY_DIRS}>)
     target_link_libraries(sve_backend_x264 PUBLIC ${X264_LIBRARIES})
     add_library(sve::backend_x264_static ALIAS sve_backend_x264)
+
+    sve_add_backend_plugin(sve_backend_x264 src/backend/x264/x264_backend.cpp)
+    if(TARGET sve_backend_x264_plugin)
+        target_include_directories(sve_backend_x264_plugin SYSTEM PRIVATE ${X264_INCLUDE_DIRS})
+        target_link_directories(sve_backend_x264_plugin PRIVATE ${X264_LIBRARY_DIRS})
+        target_link_libraries(sve_backend_x264_plugin PRIVATE ${X264_LIBRARIES})
+    endif()
 endif()
 
 if(SVE_BUILD_BACKEND_X265)
@@ -194,6 +281,13 @@ if(SVE_BUILD_BACKEND_X265)
     target_link_directories(sve_backend_x265 PUBLIC $<BUILD_INTERFACE:${X265_LIBRARY_DIRS}>)
     target_link_libraries(sve_backend_x265 PUBLIC ${X265_LIBRARIES})
     add_library(sve::backend_x265_static ALIAS sve_backend_x265)
+
+    sve_add_backend_plugin(sve_backend_x265 src/backend/x265/x265_backend.cpp)
+    if(TARGET sve_backend_x265_plugin)
+        target_include_directories(sve_backend_x265_plugin SYSTEM PRIVATE ${X265_INCLUDE_DIRS})
+        target_link_directories(sve_backend_x265_plugin PRIVATE ${X265_LIBRARY_DIRS})
+        target_link_libraries(sve_backend_x265_plugin PRIVATE ${X265_LIBRARIES})
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -222,6 +316,13 @@ if(SVE_BUILD_BACKEND_ONEVPL)
     target_link_directories(sve_backend_onevpl PUBLIC $<BUILD_INTERFACE:${VPL_LIBRARY_DIRS}>)
     target_link_libraries(sve_backend_onevpl PUBLIC ${VPL_LIBRARIES})
     add_library(sve::backend_onevpl_static ALIAS sve_backend_onevpl)
+
+    sve_add_backend_plugin(sve_backend_onevpl src/backend/onevpl_native/onevpl_native_backend.cpp)
+    if(TARGET sve_backend_onevpl_plugin)
+        target_include_directories(sve_backend_onevpl_plugin SYSTEM PRIVATE ${VPL_INCLUDE_DIRS})
+        target_link_directories(sve_backend_onevpl_plugin PRIVATE ${VPL_LIBRARY_DIRS})
+        target_link_libraries(sve_backend_onevpl_plugin PRIVATE ${VPL_LIBRARIES})
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -334,8 +435,14 @@ target_compile_options(sve_deployment PRIVATE ${SVE_WARNINGS})
 # add_subdirectory() users -- ta_vms among them -- do not have to learn the component list.
 add_library(sve_all INTERFACE)
 target_link_libraries(sve_all INTERFACE sve $<TARGET_OBJECTS:sve_deployment>)
-foreach(component sve_backend_x264 sve_backend_x265 sve_backend_onevpl sve_backend_ffmpeg
-                  sve_ffmpeg_interop sve_examples)
+set(SVE_ALL_COMPONENTS sve_backend_ffmpeg sve_ffmpeg_interop sve_examples)
+if(SVE_STATIC_REGISTRATION)
+    # Under DYNAMIC these are not linked in at all: their backends arrive through the
+    # loader, and an archive whose registration function nobody calls would only be dead
+    # weight on every consumer's link line.
+    list(APPEND SVE_ALL_COMPONENTS sve_backend_x264 sve_backend_x265 sve_backend_onevpl)
+endif()
+foreach(component ${SVE_ALL_COMPONENTS})
     if(TARGET ${component})
         target_link_libraries(sve_all INTERFACE ${component})
     endif()

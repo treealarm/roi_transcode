@@ -1023,4 +1023,21 @@ Status RegisterOneVplBackend(BackendRegistry& registry) noexcept
     return registry.Register(kDescriptor);
 }
 
+#ifdef SVE_BACKEND_AS_PLUGIN
+/// §26.4's dynamic delivery: one exported symbol, and it returns the very descriptor the
+/// static registration above hands the registry. Compiled only into the module build,
+/// because §26.4 fixes the symbol's name -- two static components carrying it would put two
+/// definitions of one name on a deployment's link line.
+///
+/// extern "C" for the linkage, not for the types: what comes back is still the C++
+/// descriptor, and noexcept is on the declaration because an exception leaving here would
+/// unwind through a frame in the core that cannot see this module's types.
+extern "C" SVE_BACKEND_EXPORT
+const SveBackendPluginDescriptorV1* sve_backend_plugin_v1() noexcept
+{
+    return &kDescriptor;
+}
+#endif
+
+
 } // namespace sve
