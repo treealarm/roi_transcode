@@ -1339,7 +1339,11 @@ def main() -> int:
         return 1
     socketserver.ThreadingTCPServer.allow_reuse_address = True
     with socketserver.ThreadingTCPServer(("127.0.0.1", PORT), Handler) as srv:
-        print(f"bench on http://127.0.0.1:{PORT}   (runs in {WORK})")
+        # Flushed explicitly: Python buffers stdout whenever it is not a terminal, and an
+        # editor watching for this line to open a browser would wait for the buffer rather
+        # than for the server. Correct however it is launched, which a PYTHONUNBUFFERED in
+        # one launch configuration is not.
+        print(f"bench on http://127.0.0.1:{PORT}   (runs in {WORK})", flush=True)
         try:
             srv.serve_forever()
         except KeyboardInterrupt:

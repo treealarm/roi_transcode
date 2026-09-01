@@ -34,13 +34,21 @@
       "request": "launch",
       "program": "${workspaceFolder}/integration/bench/serve.py",
       "cwd": "${workspaceFolder}",
-      "env": { "BUILD": "${workspaceFolder}/build/integration" },
-      "console": "integratedTerminal",
+      "env": {
+        "BUILD": "${workspaceFolder}/build/integration",
+        // Unbuffered, or the startup line sits in a pipe buffer and the pattern below has
+        // nothing to match until the server is stopped.
+        "PYTHONUNBUFFERED": "1"
+      },
+      // internalConsole, not integratedTerminal: serverReadyAction watches what comes
+      // through the debug adapter, and the terminal bypasses it. With the terminal the
+      // browser never opens and nothing says why.
+      "console": "internalConsole",
       "justMyCode": true,
       // The bench prints its URL on startup; this waits for that line and opens it, so
       // the frontend appears without anyone copying a port number.
       "serverReadyAction": {
-        "pattern": "bench on (https?://\\\\S+)",
+        "pattern": "bench on (https?://\\S+)",
         "uriFormat": "%s",
         "action": "openExternally"
       },
