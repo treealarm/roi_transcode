@@ -113,7 +113,14 @@ if [[ ! -f "$SRC" ]]; then
 fi
 
 step "unit tests"
-for t in object_normalizer_test object_geometry_test geometry_test public_api_test; do
+# concurrency_test is here rather than only in ctest because it is the one test whose
+# subject is a claim this file makes elsewhere: that separate encoders on separate threads
+# are the supported way to use the library. It runs eight of them released at one instant
+# and requires byte-identical output from each. Its real teeth are ThreadSanitizer --
+# integration/scripts/tsan-check.sh, kept out of here because it needs its own instrumented
+# build tree and costs an order of magnitude in time.
+for t in object_normalizer_test object_geometry_test geometry_test public_api_test \
+         concurrency_test; do
     if [[ -x "${LIBBUILD}/${t}" ]]; then
         if "${LIBBUILD}/${t}" >/dev/null 2>&1; then pass "$t"; else fail "$t"; fi
     else

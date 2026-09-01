@@ -469,6 +469,16 @@ if(SVE_BUILD_TESTS)
     target_compile_options(geometry_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME geometry COMMAND geometry_test)
 
+    # Two encoders at once, and the shared first-use state underneath them. Links sve_all
+    # rather than sve: what it checks is that the *registry* and the backend singletons
+    # behind it are safe to reach simultaneously, and a build with no backends registered
+    # would pass it by having nothing to contend over.
+    find_package(Threads REQUIRED)
+    add_executable(concurrency_test tests/unit/concurrency_test.cpp)
+    target_link_libraries(concurrency_test PRIVATE sve_all Threads::Threads)
+    target_compile_options(concurrency_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME concurrency COMMAND concurrency_test)
+
     # cbor_test compiles the encoder directly rather than linking the library: it checks a
     # format against RFC 8949's own vectors, and has no business needing FFmpeg to do it.
     add_executable(cbor_test tests/unit/cbor_test.cpp src/metadata/cbor.cpp)

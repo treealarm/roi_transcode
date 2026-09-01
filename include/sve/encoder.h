@@ -18,6 +18,20 @@
 // One submitted frame produces nought to many packets: an encoder is free to buffer for
 // lookahead or B-frames and to emit in decode order later. Nothing here assumes a packet
 // belongs to the frame that was just submitted.
+//
+// **Threads.** One encoder is driven by one thread at a time. There is no lock inside it
+// and none is planned while the facade stays thin (Р7 in docs/STATUS.md): the state behind
+// submit and receive is plain, and two threads in it at once is a data race rather than a
+// slow path. §24 describes a pipeline as "SubmitFrame from one thread, ReceivePacket from
+// another"; that is the shape of the model it is explaining, not a promise made here.
+//
+// Separate encoders on separate threads are supported and are the intended way to use this
+// library concurrently -- a service transcoding several clips at once gives each its own.
+// They share the backends, which is safe because a backend owns nothing: it is a stateless
+// immortal singleton and every encode's state lives in its own BackendSession. That claim
+// is checked rather than asserted -- tests/unit/concurrency_test.cpp runs eight encoders
+// released at the same instant and requires byte-identical output from each, and
+// integration/scripts/tsan-check.sh runs it under ThreadSanitizer.
 
 #include "sve/backend_selection.h"
 #include "sve/capabilities.h"
