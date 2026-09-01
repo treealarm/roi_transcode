@@ -95,6 +95,9 @@ public:
     bool key = false;
     bool has_packet = false;
     bool draining = false;
+    /// Set when a flush call came back with no picture at all, which is x265's own signal
+    /// that the pipeline is empty.
+    bool flush_done = false;
 };
 
 X265Session& x265_session(BackendSession& session)
@@ -258,14 +261,21 @@ public:
         if (!s.draining) {
             return Status::Again();
         }
-        const Status pulled = encode_one(s, nullptr);
-        if (!pulled.ok()) {
-            return pulled;
+        // x265's flush protocol is "call until it stops returning pictures", so the end is
+        // a call that produced none -- not a call that produced no packet. Those are
+        // different: a picture can come back carrying no NALs, and reading that as the end
+        // would cut the stream short with frames still inside. s.flush_done is set only by
+        // the first, which is the condition the header actually documents.
+        while (!s.flush_done) {
+            const Status pulled = encode_one(s, nullptr);
+            if (!pulled.ok()) {
+                return pulled;
+            }
+            if (s.has_packet) {
+                return ReceivePacket(session);
+            }
         }
-        if (!s.has_packet) {
-            return Status::EndOfStream();
-        }
-        return ReceivePacket(session);
+        return Status::EndOfStream();
     }
 
     Status Flush(BackendSession& session) const override
@@ -449,7 +459,13 @@ private:
                 s.held.erase(it);
             }
         }
-        if (got == 0 || count == 0) {
+        if (got == 0) {
+            if (pic_in == nullptr) {
+                s.flush_done = true;
+            }
+            return Status::Ok();
+        }
+        if (count == 0) {
             return Status::Ok();
         }
 

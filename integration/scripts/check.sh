@@ -218,6 +218,31 @@ ENC=x265direct CODEC=h265 mechanism_checks x265direct no
 #
 # So the assertion is not about quality here. It is that the run completes and every frame
 # arrives, on a fixture where the metadata channel is not a constant.
+# A short clip with one GOP over all of it, so nothing leaves the encoder until Flush and
+# the drain has to hand back every buffered frame.
+#
+# This is the case that broke: x264direct on a 52-frame cut at --gop 50 wrote a 261-byte
+# file with no pictures in it and exited 0. A flush call that returns no bytes does not
+# mean the encoder is empty, and the drain was reading it that way. Neither the full
+# 300-frame clip nor backend_conformance_test reproduces it -- both happen to get frames
+# out before the flush -- so the short cut is the test.
+step "direct backends drain what they buffered"
+DRAIN_SRC="${WORK}/drain_src.mp4"
+ffmpeg -hide_banner -loglevel error -y -i "$SRC" -t 2 -c copy "$DRAIN_SRC"
+drain_frames=$(count_packets "$DRAIN_SRC")
+for _spec in "x264direct h264" "x265direct h265"; do
+    set -- $_spec
+    _enc="$1"; _codec="$2"
+    if "${BUILD}/roi-transcode" --in "$DRAIN_SRC" --roi "${ROOT}/testdata/roi.json" \
+        --out "${WORK}/drain_${_enc}.mp4" --encoder "$_enc" --codec "$_codec" \
+        --crf 28 --gop 50 >"${WORK}/drain_${_enc}.log" 2>&1; then
+        assert_eq "[${_enc}] every buffered frame comes out on flush" \
+            "$(count_packets "${WORK}/drain_${_enc}.mp4")" "$drain_frames"
+    else
+        fail "[${_enc}] short-clip encode (rc=$?)"
+    fi
+done
+
 step "direct backends survive metadata that changes size"
 for _spec in "x264direct h264" "x265direct h265"; do
     set -- $_spec

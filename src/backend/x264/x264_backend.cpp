@@ -349,19 +349,23 @@ public:
         if (!s.draining) {
             return Status::Again();
         }
-        if (x264_encoder_delayed_frames(s.enc) == 0) {
-            return Status::EndOfStream();
+        // Drain until a packet appears or x264 says it is holding nothing, and not one
+        // call further. A flush call that returns no bytes does not mean the encoder is
+        // empty -- x264 hands back its delayed frames over as many calls as it likes, and
+        // the first of those can be a quiet one. Treating that first quiet call as
+        // end-of-stream threw away every buffered frame: a 52-frame clip at --gop 50 muxed
+        // to a 261-byte file with no pictures in it, and rc was 0. Below --gop 26 the
+        // first flush call happened to return bytes, which is why it looked like it worked.
+        while (x264_encoder_delayed_frames(s.enc) > 0) {
+            const Status s2 = encode_one(s, nullptr);
+            if (!s2.ok()) {
+                return s2;
+            }
+            if (s.has_packet) {
+                return ReceivePacket(session);
+            }
         }
-        // One delayed frame per call, so the caller's drain loop stays the same loop it
-        // uses while feeding: pull until Again or EndOfStream.
-        const Status s2 = encode_one(s, nullptr);
-        if (!s2.ok()) {
-            return s2;
-        }
-        if (!s.has_packet) {
-            return Status::EndOfStream();
-        }
-        return ReceivePacket(session);
+        return Status::EndOfStream();
     }
 
     Status Flush(BackendSession& session) const override

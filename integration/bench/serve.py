@@ -95,6 +95,19 @@ def probe(path: Path, entries: str, stream: bool = True) -> str:
     return run(cmd).stdout.strip()
 
 
+def as_number(text: str, default: float = 0.0) -> float:
+    """ffprobe answers "N/A" as readily as it answers a number.
+
+    Every field this asks for is optional in some container, and float("N/A") is a
+    ValueError that surfaces far from the probe that caused it -- as a failed run with a
+    message about string conversion, which is what it did.
+    """
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return default
+
+
 def frame_count(path: Path) -> int:
     """nb_read_packets is only filled in when ffprobe is told to count.
 
@@ -138,16 +151,54 @@ def source_info(path: Path) -> dict:
         "fps_text": fps_text,
         "fps": round(fps, 3),
         "frames": frames,
-        "duration": float(probe(path, "format=duration", stream=False) or 0.0),
+        "duration": as_number(probe(path, "format=duration", stream=False)),
         "keyframes": len(keys),
         # Average, not a promise: a clip with scene cuts has no single GOP, and rounding
         # this to one number is what the field is for -- a starting point, not a claim.
         "gop": round(frames / len(keys)) if keys and frames else 0,
         "bytes": path.stat().st_size,
+        "bit_rate": int(as_number(probe(path, "format=bit_rate", stream=False))),
+        "settings": encoder_settings(path),
     }
     with LOCK:
         SOURCES[key] = info
     return info
+
+
+def encoder_settings(path: Path) -> dict:
+    """What the clip was encoded with, read out of the bitstream rather than guessed.
+
+    CRF is an encoder-side decision and no container field carries it -- but both x264 and
+    x265 write their whole option string into a user-data SEI, and that string is still
+    there after muxing. So for anything either of them produced, "the same settings as the
+    source" is a fact that can be read rather than a number to be matched by eye.
+
+    Only the knobs this bench has are picked out. Anything else is left alone, and a clip
+    from some other encoder simply yields nothing.
+    """
+    try:
+        blob = path.read_bytes()[:1 << 20]
+    except OSError:
+        return {}
+    for marker in (b"x264 - core", b"x265 [info]:"):
+        at = blob.find(marker)
+        if at < 0:
+            continue
+        text = blob[at:at + 2048].decode("latin-1")
+        out: dict = {}
+        for key, field in (("crf", "crf"), ("keyint", "gop"), ("bframes", "bframes")):
+            for token in text.split():
+                if token.startswith(key + "="):
+                    value = token.split("=", 1)[1].rstrip(",;")
+                    try:
+                        out[field] = float(value) if key == "crf" else int(value)
+                    except ValueError:
+                        pass
+                    break
+        if out:
+            out["encoder"] = "x264" if marker.startswith(b"x264") else "x265"
+            return out
+    return {}
 
 
 def fixtures() -> list[dict]:
@@ -447,7 +498,7 @@ def encode_job(job_id: str, p: dict) -> None:
             "width": width, "height": height,
             "codec": probe(out_path, "stream=codec_name"),
             "fps_text": probe(out_path, "stream=r_frame_rate"),
-            "duration": float(probe(out_path, "format=duration", stream=False) or 0.0),
+            "duration": as_number(probe(out_path, "format=duration", stream=False)),
             "zone": zone, "bg": bg, "log": log,
             "track": track_of(doc), "hold_sec": doc.get("hold_sec", 0.25),
             "fps": info["fps"],
@@ -592,6 +643,9 @@ PAGE = r"""<!doctype html>
                 letter-spacing:0; }
   #toolbar { display:flex; gap:18px; align-items:center; }
   button.mini { width:32px; margin:0; padding:5px 0; font-size:12px; }
+  button.wide { margin-top:8px; padding:6px; font-weight:500; background:var(--bg);
+                color:var(--fg); }
+  .matchnote { font-size:11px; opacity:.6; margin:4px 0 0; }
   .inline { margin:0; gap:6px; }
   .inline select { width:auto; }
   .frame { position:relative; max-width:100%; max-height:100%; background:#0004;
@@ -641,6 +695,8 @@ PAGE = r"""<!doctype html>
     the file's contents, never its path, and the encoder needs the path.">?</i></span>
     <input type="text" id="source" value="testdata/synth.mp4"></label>
   <div id="srcinfo">&mdash;</div>
+  <button id="match" class="wide" disabled>Match source settings</button>
+  <p class="matchnote" id="matchnote"></p>
 
   <h2>Run</h2>
   <label><span>segment, s<i class="q" data-tip="How much of the clip to encode. Cut by
@@ -877,8 +933,35 @@ async function loadSource() {
     $("seconds").max = Math.max(1, Math.ceil(i.duration));
     for (const el of [$("lframe"), $("rframe")])
       el.style.aspectRatio = i.width + " / " + i.height;
+    const set = i.settings || {};
+    $("match").disabled = !(set.crf || set.gop);
+    $("matchnote").textContent = set.crf || set.gop
+      ? `read from the bitstream: ${set.encoder || "?"}` +
+        (set.crf ? `, crf ${set.crf}` : "") + (set.gop ? `, keyint ${set.gop}` : "")
+      : "this clip carries no encoder settings to copy";
   } catch (e) { $("srcinfo").textContent = String(e); }
 }
+
+// "Encode it the way it already was", so input against output is one comparison rather
+// than two settings arguing. crf is not a container field and cannot be probed -- but x264
+// and x265 both write their whole option string into a user-data SEI, and it survives
+// muxing, so for anything either produced this copies a fact rather than a guess.
+//
+// The codec is deliberately left alone. Matching it too would silently switch h265 runs to
+// h264 on an h264 source, which is a bigger decision than "line the settings up".
+$("match").addEventListener("click", () => {
+  const set = (srcInfo && srcInfo.settings) || {};
+  const applied = [];
+  if (set.gop) { $("gop").value = set.gop; $("gop_v").value = set.gop; applied.push("gop " + set.gop); }
+  if (set.crf) {
+    const crf = Math.round(set.crf);
+    $("crf").value = crf; $("crf_v").value = crf; applied.push("crf " + crf);
+  }
+  $("target_bitrate").value = 0;
+  $("matchnote").textContent = applied.length
+    ? "applied " + applied.join(", ") + " — codec left as chosen"
+    : "nothing to apply";
+});
 $("source").addEventListener("change", loadSource);
 loadSource();
 
