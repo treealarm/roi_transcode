@@ -26,6 +26,10 @@ target_compile_options(roi_json PRIVATE ${SVE_WARNINGS})
 # Command-line adapters
 # ---------------------------------------------------------------------------
 add_executable(roi-transcode cli/main.cpp)
+# A program that loads backend plugins has to export its own symbols: the plugins carry no
+# copy of the core, so their references to it bind here at load time (§26.4, and the
+# packaging arrangement recorded in STATUS.md). ENABLE_EXPORTS is -rdynamic.
+set_target_properties(roi-transcode PROPERTIES ENABLE_EXPORTS ON)
 target_link_libraries(roi-transcode PRIVATE sve_all roi_json)
 target_compile_definitions(roi-transcode PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_compile_options(roi-transcode PRIVATE ${SVE_WARNINGS})

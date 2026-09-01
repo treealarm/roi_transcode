@@ -157,8 +157,10 @@ add_library(sve
     src/backend/common/backend_registry.cpp
     src/core/backend_selection.cpp
     src/core/codec_profile.cpp
+    src/core/backend_loader.cpp
     src/core/logging.cpp
     src/core/memory_type.cpp
+    src/core/shared_library.cpp
     src/core/policy.cpp
     src/core/pixel_format.cpp
     src/core/preset.cpp
@@ -195,6 +197,16 @@ set_target_properties(sve PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}
     POSITION_INDEPENDENT_CODE ON)
+
+# Where the loader looks when it is not told where to look -- §26.4's install-relative and
+# system-configured directories. They come from the install layout rather than from a
+# constant in the source, because the layout is CMake's to decide and a second copy of it
+# would be exactly the meaningful number that drifts. GNUInstallDirs is included above.
+target_compile_definitions(sve PRIVATE
+    SVE_PLUGIN_SYSTEM_DIR="${CMAKE_INSTALL_FULL_LIBDIR}/sve/backends"
+    SVE_PLUGIN_RELATIVE_DIR="../${CMAKE_INSTALL_LIBDIR}/sve/backends")
+# dlopen. Empty on the platforms that have it in libc, which is what this variable is for.
+target_link_libraries(sve PRIVATE ${CMAKE_DL_LIBS})
 add_library(sve::sve ALIAS sve)
 
 # A component links the core and is linked by the deployment, never the other way round.
@@ -268,6 +280,8 @@ if(SVE_BUILD_BACKEND_X264)
 
     sve_add_backend_plugin(sve_backend_x264 src/backend/x264/x264_backend.cpp)
     if(TARGET sve_backend_x264_plugin)
+        install(TARGETS sve_backend_x264_plugin
+                LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/sve/backends)
         target_include_directories(sve_backend_x264_plugin SYSTEM PRIVATE ${X264_INCLUDE_DIRS})
         target_link_directories(sve_backend_x264_plugin PRIVATE ${X264_LIBRARY_DIRS})
         target_link_libraries(sve_backend_x264_plugin PRIVATE ${X264_LIBRARIES})
@@ -284,6 +298,8 @@ if(SVE_BUILD_BACKEND_X265)
 
     sve_add_backend_plugin(sve_backend_x265 src/backend/x265/x265_backend.cpp)
     if(TARGET sve_backend_x265_plugin)
+        install(TARGETS sve_backend_x265_plugin
+                LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/sve/backends)
         target_include_directories(sve_backend_x265_plugin SYSTEM PRIVATE ${X265_INCLUDE_DIRS})
         target_link_directories(sve_backend_x265_plugin PRIVATE ${X265_LIBRARY_DIRS})
         target_link_libraries(sve_backend_x265_plugin PRIVATE ${X265_LIBRARIES})
@@ -319,6 +335,8 @@ if(SVE_BUILD_BACKEND_ONEVPL)
 
     sve_add_backend_plugin(sve_backend_onevpl src/backend/onevpl_native/onevpl_native_backend.cpp)
     if(TARGET sve_backend_onevpl_plugin)
+        install(TARGETS sve_backend_onevpl_plugin
+                LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/sve/backends)
         target_include_directories(sve_backend_onevpl_plugin SYSTEM PRIVATE ${VPL_INCLUDE_DIRS})
         target_link_directories(sve_backend_onevpl_plugin PRIVATE ${VPL_LIBRARY_DIRS})
         target_link_libraries(sve_backend_onevpl_plugin PRIVATE ${VPL_LIBRARIES})
@@ -584,6 +602,57 @@ if(SVE_BUILD_TESTS)
     # behind it are safe to reach simultaneously, and a build with no backends registered
     # would pass it by having nothing to contend over.
     find_package(Threads REQUIRED)
+    # Four modules out of one source -- tests/plugins/test_plugin.cpp says what separates
+    # them. Each lands in its own directory so a test can state exactly what is in scope,
+    # which is also how §26.4's search order gets checked: the same identifier in two
+    # directories, and the first one has to win.
+    function(sve_add_test_plugin dir output)
+        set(target test_plugin_${dir})
+        add_library(${target} MODULE tests/plugins/test_plugin.cpp)
+        target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+        target_compile_options(${target} PRIVATE ${SVE_WARNINGS})
+        target_compile_definitions(${target} PRIVATE ${ARGN})
+        set_target_properties(${target} PROPERTIES
+            OUTPUT_NAME "${output}"
+            PREFIX "lib"
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-plugins/${dir}"
+            CXX_VISIBILITY_PRESET hidden
+            VISIBILITY_INLINES_HIDDEN ON
+            POSITION_INDEPENDENT_CODE ON)
+        # Not on the module that deliberately has no entry point: a version script naming a
+        # symbol the module does not define is an error to some linkers and a warning to
+        # others, and hidden visibility already leaves that one exporting nothing.
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT dir STREQUAL "no_entry")
+            target_link_options(${target} PRIVATE
+                "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/backend_plugin.map")
+        endif()
+    endfunction()
+
+    sve_add_test_plugin(good     sve_backend_test          SVE_TEST_PLUGIN_GOOD)
+    sve_add_test_plugin(dup      sve_backend_test_dup      SVE_TEST_PLUGIN_DUP)
+    sve_add_test_plugin(bad_abi  sve_backend_test_bad_abi  SVE_TEST_PLUGIN_BAD_ABI)
+    sve_add_test_plugin(no_entry sve_backend_test_no_entry SVE_TEST_PLUGIN_NO_ENTRY)
+
+    add_executable(plugin_loader_test tests/unit/plugin_loader_test.cpp)
+    # sve_all rather than the core alone, and the link error that says why is worth keeping
+    # in mind: BackendRegistry lives in the core, but default_backend_registry() fills
+    # itself from RegisterDeploymentBackends, which by §26.4's own rule is on the
+    # deployment's side of the line and not in the core. Anything that touches the registry
+    # needs the deployment. The test builds registries of its own regardless.
+    target_link_libraries(plugin_loader_test PRIVATE sve_all)
+    target_compile_options(plugin_loader_test PRIVATE ${SVE_WARNINGS})
+    target_compile_definitions(plugin_loader_test PRIVATE
+        SVE_TEST_PLUGIN_DIR="${CMAKE_CURRENT_BINARY_DIR}/test-plugins")
+    # The arrangement of §26.4 in this project, stated where it is used: a plugin carries no
+    # copy of the core, so its references to the core bind to the program that loaded it,
+    # and that only works if the program exports its own symbols. ENABLE_EXPORTS is
+    # -rdynamic. Without it dlopen fails outright -- loudly, which is the design, and this
+    # test is where the requirement on a host is written down.
+    set_target_properties(plugin_loader_test PROPERTIES ENABLE_EXPORTS ON)
+    add_dependencies(plugin_loader_test
+        test_plugin_good test_plugin_dup test_plugin_bad_abi test_plugin_no_entry)
+    add_test(NAME plugin_loader COMMAND plugin_loader_test)
+
     # §26.4's descriptor checks. Links sve_all because the descriptors it builds acquire a
     # real backend, which means the deployment registry has to have one.
     add_executable(backend_plugin_test tests/unit/backend_plugin_test.cpp)

@@ -45,6 +45,7 @@
 //   s.submit(frame, regions);
 //   sve::Report r = s.finish();
 
+#include "sve/backend_loader.h"
 #include "sve/backend_registry.h"
 #include "sve/capabilities.h"
 #include "sve/codec_parameters.h"

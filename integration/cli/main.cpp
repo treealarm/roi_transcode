@@ -1,10 +1,15 @@
+#include "sve/backend_loader.h"
+#include "sve/backend_registry.h"
 #include "sve/sve.h"
 #include "roi_json.h"
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <system_error>
+#include <vector>
 
 namespace {
 void usage()
@@ -17,6 +22,7 @@ void usage()
         "         [--encoder %s]\n"
         "         [--codec h264|h265|source] [--crf 28] [--gop N] [--preset balanced]\n"
         "         [--target-bitrate BPS] [--bitrate-overshoot F] [--sidecar]\n"
+        "         [--plugin-dir DIR]...\n"
         "\n"
         "ROI transcoder, H.264 by default.\n"
         "--codec source keeps whatever the input already is, which is what an\n"
@@ -38,6 +44,12 @@ void usage()
         "path opens CBR+filler. The rest ride the outer BitrateBudget loop.\n"
         "--bitrate-overshoot is the allowed average overshoot fraction (default 0.1\n"
         "when a target is set).\n"
+        "\n"
+        "--plugin-dir names a directory of backend plugins to load before encoding, and\n"
+        "may be repeated. Whatever this build linked is registered already; §26.4's own\n"
+        "directories -- beside the program, then the configured system one -- are searched\n"
+        "after any given here. A plugin that is refused says so on stderr; a directory with\n"
+        "no plugins in it is not an error.\n"
         "\n"
         "--sidecar writes <output_basename>.svemeta.ndjson beside the output (TZ §19.3):\n"
         "one JSON line per emitted packet, carrying the objects that frame was submitted\n"
@@ -62,6 +74,7 @@ int main(int argc, char** argv)
     std::string output_path;
     RoiJson roi_doc;
     bool have_roi = false;
+    std::vector<std::filesystem::path> plugin_dirs;
     sve::Settings settings;
     // The library ships no default backend order since 4.1 (§8.4), so this application
     // states its own -- the same one it used when the default lived in the library.
@@ -107,6 +120,8 @@ int main(int argc, char** argv)
             } else if (std::strcmp(a, "--bitrate-overshoot") == 0) {
                 settings.rate_control.max_average_overshoot =
                     std::stof(need("--bitrate-overshoot"));
+            } else if (std::strcmp(a, "--plugin-dir") == 0) {
+                plugin_dirs.emplace_back(need("--plugin-dir"));
             } else if (std::strcmp(a, "--sidecar") == 0) {
                 settings.metadata.sidecar = sve::SidecarFormat::NDJSON;
             } else if (std::strcmp(a, "-h") == 0
@@ -121,6 +136,33 @@ int main(int argc, char** argv)
             usage();
             return 2;
         }
+        // §26.4's dynamic half. What this build linked is registered already; this adds
+        // what the deployment shipped as modules, and says out loud what it refused --
+        // §50's rule is that a plugin quietly not loading is the worst of the outcomes,
+        // because the encode then succeeds with the wrong backend and nothing says so.
+        {
+            // A directory the user named and that is not there is worth saying out loud,
+            // even though the library treats an absent directory as nothing to load: the
+            // library cannot tell a configured default from a typed argument, and this can.
+            for (const std::filesystem::path& dir : plugin_dirs) {
+                std::error_code ec;
+                if (!std::filesystem::is_directory(dir, ec)) {
+                    std::fprintf(stderr, "plugin directory not found: %s\n",
+                        dir.string().c_str());
+                }
+            }
+            sve::PluginSearch search;
+            search.paths = plugin_dirs;
+            const sve::PluginLoadReport report =
+                sve::LoadBackendPlugins(sve::default_backend_registry(), search);
+            for (const std::string& line : report.rejected) {
+                std::fprintf(stderr, "plugin refused: %s\n", line.c_str());
+            }
+            for (const sve::Backend kind : report.loaded) {
+                std::fprintf(stderr, "plugin loaded: %s\n", sve::backend_name(kind));
+            }
+        }
+
         settings.quality = roi_doc.quality;
         sve::transcode_file(input_path, output_path, roi_doc.boxes, settings);
     } catch (const std::exception& ex) {

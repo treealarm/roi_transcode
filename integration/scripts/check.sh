@@ -127,8 +127,12 @@ step "unit tests"
 # and requires byte-identical output from each. Its real teeth are ThreadSanitizer --
 # integration/scripts/tsan-check.sh, kept out of here because it needs its own instrumented
 # build tree and costs an order of magnitude in time.
+# backend_plugin_test and plugin_loader_test are here for the same reason concurrency_test
+# is: the packaging step below makes claims about §26.4, and these are where the claims are
+# checked one at a time -- what a descriptor may say, and what happens to a plugin that
+# should not load.
 for t in object_normalizer_test object_geometry_test geometry_test public_api_test \
-         concurrency_test; do
+         concurrency_test backend_plugin_test plugin_loader_test; do
     if [[ -x "${LIBBUILD}/${t}" ]]; then
         if "${LIBBUILD}/${t}" >/dev/null 2>&1; then pass "$t"; else fail "$t"; fi
     else
@@ -1016,6 +1020,45 @@ if pkgout=$("${ROOT}/integration/scripts/packaging-check.sh" "${WORK}/packaging"
 else
     printf '%s\n' "$pkgout" | grep -E '^  FAIL' | sed 's/^/  /' >&2
     fail "backend packaging profiles (§26.4)"
+fi
+
+# The whole chain in one command, which the unit test cannot do: a real program, built the
+# way an application that hosts plugins has to be built, loading real modules off a real
+# directory. The three refusals are the three §26.4 names, and each has to arrive with its
+# reason -- a plugin that quietly fails to load is worse than one that fails loudly, because
+# the encode then succeeds on a backend nobody chose.
+step "the CLI loads backend plugins and says why it refuses one (§26.4)"
+PLUGINS="${LIBBUILD}/test-plugins"
+if [[ -d "${PLUGINS}/bad_abi" ]]; then
+    "${BUILD}/roi-transcode" --in "$SRC" --roi "${ROOT}/testdata/synth_roi.json" \
+        --out "${WORK}/plugins.mp4" --encoder x264direct --codec h264 --crf 32 --gop 1 \
+        --plugin-dir "${PLUGINS}/bad_abi" --plugin-dir "${PLUGINS}/no_entry" \
+        --plugin-dir "${PLUGINS}/good" > "${WORK}/plugins.log" 2>&1
+    if [[ -s "${WORK}/plugins.mp4" ]]; then
+        pass "an encode runs with plugin directories on the command line"
+    else
+        fail "the encode with plugin directories produced nothing"
+    fi
+    if grep -q 'abi version 1001 does not match' "${WORK}/plugins.log"; then
+        pass "a plugin from another abi is refused by version"
+    else
+        fail "the bad-abi plugin was not refused by version"
+    fi
+    if grep -q 'undefined symbol: sve_backend_plugin_v1' "${WORK}/plugins.log"; then
+        pass "a module with no entry point is refused by name"
+    else
+        fail "the module with no entry point was not refused by name"
+    fi
+    # This build links the libavcodec reference group, which registers nvenc statically, and
+    # the test plugin claims the same identifier. That is §26.4's static-versus-dynamic
+    # conflict happening for real rather than in a fixture.
+    if grep -q 'already registered' "${WORK}/plugins.log"; then
+        pass "a plugin colliding with a linked-in backend is refused as a duplicate"
+    else
+        fail "the duplicate identifier was not refused"
+    fi
+else
+    skip "test plugins not built (SVE_BUILD_TESTS=OFF)"
 fi
 
 step "dependency scan: the core declares and links nothing it must not"
