@@ -26,7 +26,13 @@
 // And the condition without which none of it does anything: "Adaptive quantization must be
 // enabled to use this feature." aq_mode is set here for that reason and no other.
 
-#include "backend/common/backend_common.h"
+// The public interface and nothing else. This used to include backend_common.h, which
+// exists for the libavcodec backends and pulls libavcodec in behind it -- invisible while
+// everything was one target, and the first thing the §5.5 split refused to compile. All
+// this backend ever needed from it was BackendSession, which sve/encoder_backend.h
+// declares.
+#include "sve/backend_registry.h"
+#include "sve/encoder_backend.h"
 #include "preset.h"
 
 #include <algorithm>
@@ -450,6 +456,13 @@ const IEncoderBackend& x264_direct_backend()
 {
     static const X264Backend instance;
     return instance;
+}
+
+/// §26.4's static registration for this component. Explicit, so the core never names it
+/// and a build without libx264 simply does not call this.
+Status RegisterX264Backend(BackendRegistry& registry) noexcept
+{
+    return registry.Register(x264_direct_backend());
 }
 
 } // namespace sve

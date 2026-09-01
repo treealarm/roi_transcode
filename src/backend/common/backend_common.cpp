@@ -1,4 +1,5 @@
 #include "backend/common/backend_common.h"
+#include "sve/backend_registry.h"
 
 #include "backend/common/av_frame_buffer.h"
 #include "backend/common/av_pixel_format.h"
@@ -15,19 +16,6 @@ extern "C" {
 }
 
 namespace sve {
-
-// The deleters, compiled here on purpose: this is the library's side of the ABI, and so
-// the library's allocator is the one that frees what it allocated. Inlining these into the
-// caller is exactly what must not happen.
-void SessionDeleter::operator()(BackendSession* session) const noexcept
-{
-    delete session;
-}
-
-void FrameBufferDeleter::operator()(IFrameBuffer* buffer) const noexcept
-{
-    delete buffer;
-}
 
 LibavSession& libav(BackendSession& session)
 {
@@ -500,6 +488,28 @@ Status LibavBackend::Flush(BackendSession& session) const
     const int r = avcodec_send_frame(s.enc.p, nullptr);
     if (r < 0 && r != AVERROR_EOF) {
         return Status::Error("flush encoder");
+    }
+    return Status::Ok();
+}
+
+const IEncoderBackend& onevpl_backend();
+const IEncoderBackend& vaapi_backend();
+const IEncoderBackend& nvenc_backend();
+const IEncoderBackend& x264_backend();
+const IEncoderBackend& x265_backend();
+
+/// The libavcodec-backed group, registered together because that is how they are built:
+/// they share LibavBackend and one CMake option. §5.5 does not list them in its dependency
+/// graph at all -- they are kept as the reference the direct backends are compared against,
+/// which is why the option is off by default.
+Status RegisterFfmpegBackends(BackendRegistry& registry) noexcept
+{
+    for (const IEncoderBackend* backend : {&x264_backend(), &x265_backend(),
+                                           &onevpl_backend(), &vaapi_backend(),
+                                           &nvenc_backend()}) {
+        if (const Status s = registry.Register(*backend); !s.ok()) {
+            return s;
+        }
     }
     return Status::Ok();
 }

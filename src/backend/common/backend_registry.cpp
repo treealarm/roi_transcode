@@ -14,6 +14,7 @@
 // separate backends -- one that cannot produce what was asked for is skipped here, with
 // its reason recorded, rather than opened and found wanting.
 
+#include "sve/backend_registry.h"
 #include "sve/backend_selection.h"
 #include "sve/encoder_backend.h"
 
@@ -24,37 +25,61 @@
 
 namespace sve {
 
-const IEncoderBackend& onevpl_backend();
-const IEncoderBackend& vaapi_backend();
-const IEncoderBackend& nvenc_backend();
-const IEncoderBackend& x264_backend();
-const IEncoderBackend& x265_backend();
-const IEncoderBackend& x264_direct_backend();
-const IEncoderBackend& x265_direct_backend();
+Status BackendRegistry::Register(const IEncoderBackend& backend) noexcept
+{
+    const Backend kind = backend.kind();
+    for (const IEncoderBackend* seen : m_backends) {
+        if (seen->kind() == kind) {
+            // §26.4: a duplicate identifier is refused, never silently overridden. The
+            // same backend registered twice is a deployment that linked a component and
+            // loaded its plugin, and picking a winner there would be picking at random.
+            return Status::InvalidArgument(
+                std::format("backend {} is already registered", backend_name(kind)));
+        }
+    }
+    m_backends.push_back(&backend);
+    return Status::Ok();
+}
+
+const IEncoderBackend* BackendRegistry::Find(Backend kind) const noexcept
+{
+    for (const IEncoderBackend* seen : m_backends) {
+        if (seen->kind() == kind) {
+            return seen;
+        }
+    }
+    return nullptr;
+}
+
+std::vector<Backend> BackendRegistry::kinds() const
+{
+    std::vector<Backend> out;
+    out.reserve(m_backends.size());
+    for (const IEncoderBackend* seen : m_backends) {
+        out.push_back(seen->kind());
+    }
+    return out;
+}
+
+BackendRegistry& default_backend_registry()
+{
+    // Filled once, on first use, from whatever the build generated. Not a global
+    // constructor: those are what §26.4 forbids relying on, and the ordering between one
+    // in the core and one in a component is exactly the thing nobody can pin down.
+    static BackendRegistry registry = [] {
+        BackendRegistry fresh;
+        (void)RegisterDeploymentBackends(fresh);
+        return fresh;
+    }();
+    return registry;
+}
 
 namespace {
 
 const IEncoderBackend* backend_for(Backend kind)
 {
-    switch (kind) {
-    case Backend::IntelOneVpl:   return &onevpl_backend();
-    case Backend::Vaapi: return &vaapi_backend();
-    case Backend::NvidiaNvenc: return &nvenc_backend();
-    case Backend::X264:  return &x264_backend();
-    case Backend::X265:  return &x265_backend();
-    case Backend::X264Direct: return &x264_direct_backend();
-    case Backend::X265Direct: return &x265_direct_backend();
-    case Backend::Auto:  break;
-    }
-    return nullptr;
+    return default_backend_registry().Find(kind);
 }
-
-/// Every backend this build has, in the order Auto would consider them if nothing was
-/// excluded. Used only to honour allow_unlisted -- it is not a default preference order,
-/// which 4.1 removed on purpose.
-constexpr Backend kAllBackends[] = {
-    Backend::IntelOneVpl, Backend::Vaapi, Backend::NvidiaNvenc, Backend::X264,
-    Backend::X265, Backend::X264Direct, Backend::X265Direct};
 
 } // namespace
 
@@ -124,8 +149,10 @@ std::vector<BackendRef> resolve_backends(Backend requested, const BackendSelecti
     }
     if (selection.allow_unlisted) {
         // The listed ones first, then whatever else this build has -- "unlisted allowed"
-        // is a permission to keep going, not a licence to reorder.
-        for (const Backend kind : kAllBackends) {
+        // is a permission to keep going, not a licence to reorder. "Whatever else" is now
+        // what was registered rather than a constant list, which is the point: a build
+        // without a component must not offer it.
+        for (const Backend kind : default_backend_registry().kinds()) {
             append(kind);
         }
     }

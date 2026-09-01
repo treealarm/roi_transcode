@@ -19,19 +19,19 @@ find_package(nlohmann_json CONFIG REQUIRED)
 # ---------------------------------------------------------------------------
 add_library(roi_json STATIC json/roi_json.cpp)
 target_include_directories(roi_json PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/json)
-target_link_libraries(roi_json PUBLIC sve PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(roi_json PUBLIC sve_all PRIVATE nlohmann_json::nlohmann_json)
 target_compile_options(roi_json PRIVATE ${SVE_WARNINGS})
 
 # ---------------------------------------------------------------------------
 # Command-line adapters
 # ---------------------------------------------------------------------------
 add_executable(roi-transcode cli/main.cpp)
-target_link_libraries(roi-transcode PRIVATE sve roi_json)
+target_link_libraries(roi-transcode PRIVATE sve_all roi_json)
 target_compile_definitions(roi-transcode PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_compile_options(roi-transcode PRIVATE ${SVE_WARNINGS})
 
 add_executable(roi-frame-push cli/frame_push.cpp)
-target_link_libraries(roi-frame-push PRIVATE sve roi_json)
+target_link_libraries(roi-frame-push PRIVATE sve_all roi_json)
 target_compile_definitions(roi-frame-push PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_compile_options(roi-frame-push PRIVATE ${SVE_WARNINGS})
 

@@ -39,7 +39,13 @@
 // returns 1 when a picture came out and 0 while the pipeline is filling. Reading it as a
 // size would treat every output as a one-byte packet.
 
-#include "backend/common/backend_common.h"
+// The public interface and nothing else. This used to include backend_common.h, which
+// exists for the libavcodec backends and pulls libavcodec in behind it -- invisible while
+// everything was one target, and the first thing the §5.5 split refused to compile. All
+// this backend ever needed from it was BackendSession, which sve/encoder_backend.h
+// declares.
+#include "sve/backend_registry.h"
+#include "sve/encoder_backend.h"
 #include "preset.h"
 
 #include <algorithm>
@@ -506,6 +512,12 @@ const IEncoderBackend& x265_direct_backend()
 {
     static const X265Backend instance;
     return instance;
+}
+
+/// §26.4's static registration for this component. See RegisterX264Backend.
+Status RegisterX265Backend(BackendRegistry& registry) noexcept
+{
+    return registry.Register(x265_direct_backend());
 }
 
 } // namespace sve
