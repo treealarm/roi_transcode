@@ -462,11 +462,22 @@ PAGE = r"""<!doctype html>
   #log { white-space:pre-wrap; font:11px/1.4 ui-monospace,monospace; max-height:100px;
          overflow:auto; opacity:.65; border-top:1px solid var(--line); padding-top:8px; }
   #err { color:#c0392b; font-weight:600; white-space:pre-wrap; }
-  .hint { font-size:11px; opacity:.55; margin:2px 0 0; }
+  /* A marker rather than a paragraph. The explanations are worth having and worth reading
+     once; leaving them open cost more sidebar than the controls did. */
+  .q { display:inline-flex; align-items:center; justify-content:center; width:13px;
+       height:13px; margin-left:5px; border:1px solid var(--line); border-radius:50%;
+       font-size:9px; font-style:normal; opacity:.55; cursor:help; vertical-align:middle; }
+  .q:hover { opacity:1; border-color:var(--accent); color:var(--accent); }
+  /* Fixed, and driven from script, because the sidebar scrolls: a tooltip positioned
+     inside it is clipped by its own overflow, and this one has to sit outside. */
+  #tip { position:fixed; z-index:9; max-width:320px; padding:8px 10px; border-radius:6px;
+         background:var(--fg); color:var(--bg); font-size:11.5px; line-height:1.45;
+         box-shadow:0 4px 16px #0005; pointer-events:none; display:none; }
   .legend { display:flex; gap:14px; font-size:11px; opacity:.7; }
   .legend i { display:inline-block; width:20px; height:0; border-top:2px solid; margin-right:5px;
               vertical-align:middle; }
 </style>
+<div id="tip"></div>
 <div id="side">
   <h1>ROI encoder bench</h1>
 
@@ -475,20 +486,29 @@ PAGE = r"""<!doctype html>
   <div id="srcinfo">&mdash;</div>
 
   <h2>Run</h2>
-  <label><span>segment, s</span><input type="range" id="seconds" min="0.5" max="12"
+  <label><span>segment, s<i class="q" data-tip="How much of the clip to encode. Cut by
+    stream copy from frame 0 and used as both the encoder input and the reference, so a
+    shorter run does not tilt the comparison -- it only makes a knob change cost seconds
+    instead of a minute.">?</i></span><input type="range" id="seconds" min="0.5" max="12"
     step="0.5" value="2"><output class="val" id="seconds_v">2</output></label>
-  <p class="hint">Cut by stream copy from frame 0 and used as both the encoder input and the
-     reference, so a shorter run does not tilt the comparison.</p>
-  <label><span>metrics</span><input type="checkbox" id="metrics" checked></label>
-  <label><span>burn frame numbers</span><input type="checkbox" id="number_frames"></label>
-  <p class="hint">Stamps the frame number into the source before encoding, so it travels
-     through the codec. Both panes showing the same number is what proves they are the same
-     picture. The fixtures are left alone: check.sh measures the background in the corner
-     and the clip is built so it does not crawl.</p>
-  <label><span>live</span><input type="checkbox" id="live"></label>
+  <label><span>metrics<i class="q" data-tip="SSIM and PSNR over the zone and over a
+    background corner, across the whole segment. Two extra ffmpeg passes; turn it off when
+    you only want to look.">?</i></span><input type="checkbox" id="metrics" checked></label>
+  <label><span>burn frame numbers<i class="q" data-tip="Stamps the frame number into the
+    source before encoding, losslessly, so it travels through the codec. Both panes showing
+    the same number is what proves they are the same picture rather than a promise that
+    they are. The fixtures are left alone: check.sh measures the background in the corner
+    the number would land in, and the clip is built so the background does not
+    crawl.">?</i></span><input type="checkbox" id="number_frames"></label>
+  <label><span>live<i class="q" data-tip="Re-run 600 ms after a knob stops moving. The
+    pause is the point: a slider fires on every pixel of travel, and an encode per pixel
+    would queue for minutes.">?</i></span><input type="checkbox" id="live"></label>
 
   <h2>Encoding</h2>
-  <label><span>backend</span><select id="encoder">
+  <label><span>backend<i class="q" data-tip="x264direct and x265direct drive libx264 and
+    libx265 through their own APIs (§5.4). x264/x265 are the same codecs through libavcodec,
+    kept as the reference the direct paths are compared against.">?</i></span>
+    <select id="encoder">
     <option>cpu</option><option>x264</option><option>x264direct</option>
     <option>x265</option><option selected>x265direct</option><option>qsv</option>
     <option>vaapi</option><option>auto</option></select></label>
@@ -496,19 +516,23 @@ PAGE = r"""<!doctype html>
     <option>h264</option><option selected>h265</option></select></label>
   <label><span>crf</span><input type="range" id="crf" min="10" max="45" value="32">
     <output class="val" id="crf_v">32</output></label>
-  <label><span>gop</span><input type="range" id="gop" min="1" max="120" value="15">
+  <label><span>gop<i class="q" data-tip="Keyframe interval in frames. The source's own is
+    measured and shown under Source above -- no container field carries it.">?</i></span>
+    <input type="range" id="gop" min="1" max="120" value="15">
     <output class="val" id="gop_v">15</output></label>
-  <p class="hint" id="gophint"></p>
   <label><span>target bps</span><input type="number" id="target_bitrate" value="0"
     step="100000" min="0"></label>
 
   <h2>ROI source</h2>
-  <label><span>roi/boxes json</span><input type="text" id="roi_file" value=""
-    placeholder="(synthetic box)"></label>
-  <p class="hint">Either sidecar shape: samples[] as the CLI reads, or frames[] as
-     boxes-to-ass.py writes. Empty means the single box below.</p>
+  <label><span>roi/boxes json<i class="q" data-tip="Load a real track, so the box moves
+    with the object and the overlay follows the frame slider. Either sidecar shape is
+    accepted: samples[] as roi_json.cpp reads it, or frames[] as boxes-to-ass.py writes it.
+    Empty means the single synthetic box below.">?</i></span><input type="text" id="roi_file"
+    value="" placeholder="(synthetic box)"></label>
   <div id="roiinfo"></div>
-  <label><span>override quality</span><input type="checkbox" id="override_quality" checked></label>
+  <label><span>override quality<i class="q" data-tip="Keep the loaded file's geometry but
+    apply the qp knobs below on top. Off means the document is used exactly as it is on
+    disk.">?</i></span><input type="checkbox" id="override_quality" checked></label>
 
   <h2>ROI quality</h2>
   <label><span>kind</span><select id="kind">
@@ -517,7 +541,10 @@ PAGE = r"""<!doctype html>
     <output class="val" id="qp_delta_v">-8</output></label>
   <label><span>background +qp</span><input type="range" id="background_qp_delta" min="0"
     max="30" value="22"><output class="val" id="background_qp_delta_v">22</output></label>
-  <label><span>pad_norm</span><input type="range" id="pad_norm" min="0" max="0.2"
+  <label><span>pad_norm<i class="q" data-tip="The halo around each box, as a fraction of
+    the frame on each axis. It carries half the boost, and the sweep recorded in STATUS.md
+    found it buys about ten times what raising the boost itself does.">?</i></span>
+    <input type="range" id="pad_norm" min="0" max="0.2"
     step="0.005" value="0.02"><output class="val" id="pad_norm_v">0.02</output></label>
   <label><span>hold_sec</span><input type="range" id="hold_sec" min="0.1" max="20"
     step="0.1" value="20"><output class="val" id="hold_sec_v">20</output></label>
@@ -537,10 +564,16 @@ PAGE = r"""<!doctype html>
 
 <div id="main">
   <div id="toolbar">
-    <label class="inline"><span>zoom</span><select id="zoom">
+    <label class="inline"><span>zoom<i class="q" data-tip="A 1280-wide frame squeezed into
+      a 600-wide pane is downscaled, and downscaling removes exactly the ringing and
+      blocking worth looking at. At 100% the pixels are the encoder's own. Panes scroll
+      together.">?</i></span><select id="zoom">
       <option value="fit">fit</option><option value="1">100%</option>
       <option value="2">200%</option><option value="4">400%</option></select></label>
-    <label class="inline"><span>right pane</span><select id="view">
+    <label class="inline"><span>right pane<i class="q" data-tip="Difference subtracts the
+      two frames and multiplies. Loss at a sane CRF is a few levels per pixel: real,
+      measurable and invisible next to the picture it sits on. The background lights up and
+      a protected zone stays dark.">?</i></span><select id="view">
       <option value="out">ROI encoded</option>
       <option value="diff">difference &times;N</option></select></label>
     <label class="inline" id="gainwrap" hidden><span>&times;</span>
@@ -621,6 +654,26 @@ for (const k of ["bbox_x","bbox_y","bbox_w","bbox_h","pad_norm"])
   $(k).addEventListener("input", () => drawBox(Number($("frame").value) || 0));
 drawBox(0);
 
+// One tooltip element, positioned per hover. Text is normalized because the markup wraps
+// these strings across lines to stay readable in the source.
+const tip = $("tip");
+document.addEventListener("mouseover", e => {
+  const q = e.target.closest("[data-tip]");
+  if (!q) return;
+  tip.textContent = q.dataset.tip.replace(/\s+/g, " ").trim();
+  tip.style.display = "block";
+  const r = q.getBoundingClientRect();
+  const box = tip.getBoundingClientRect();
+  let x = r.right + 10, y = r.top - 4;
+  if (x + box.width > innerWidth - 8) x = Math.max(8, r.left - box.width - 10);
+  if (y + box.height > innerHeight - 8) y = Math.max(8, innerHeight - box.height - 8);
+  tip.style.left = x + "px";
+  tip.style.top = y + "px";
+});
+document.addEventListener("mouseout", e => {
+  if (e.target.closest("[data-tip]")) tip.style.display = "none";
+});
+
 function params() {
   const p = {source: $("source").value, encoder: $("encoder").value, codec: $("codec").value,
              kind: $("kind").value, target_bitrate: Number($("target_bitrate").value),
@@ -642,7 +695,6 @@ async function loadSource() {
       `<b>${i.codec}</b> ${i.width}&times;${i.height}, <b>${i.fps_text}</b> fps<br>` +
       `${i.frames} frames, ${i.duration.toFixed(2)} s, ${fmtBytes(i.bytes)}<br>` +
       `${i.keyframes} keyframes &rarr; GOP &asymp; <b>${i.gop}</b>`;
-    $("gophint").textContent = "source GOP ≈ " + i.gop;
     $("seconds").max = Math.max(1, Math.ceil(i.duration));
     for (const el of [$("lframe"), $("rframe")])
       el.style.aspectRatio = i.width + " / " + i.height;
