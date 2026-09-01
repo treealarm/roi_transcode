@@ -680,8 +680,11 @@ PAGE = r"""<!doctype html>
     <option>h264</option><option selected>h265</option></select></label>
   <label><span>crf</span><input type="range" id="crf" min="10" max="45" value="32">
     <output class="val" id="crf_v">32</output></label>
-  <label><span>gop<i class="q" data-tip="Keyframe interval in frames. The source's own is
-    measured and shown under Source above -- no container field carries it.">?</i></span>
+  <label><span>gop<i class="q" data-tip="Keyframe interval in frames. The source's own is measured and
+    shown under Source above; no container field carries it. It dominates the output size
+    on a near-static clip -- at crf 32 with no ROI at all, synth.mp4 comes out at 162% of
+    its input at GOP 15 and 86% at GOP 50, purely because of how many keyframes there
+    are.">?</i></span>
     <input type="range" id="gop" min="1" max="120" value="15">
     <output class="val" id="gop_v">15</output></label>
   <label><span>target bps</span><input type="number" id="target_bitrate" value="0"
@@ -915,8 +918,9 @@ function showStats(i) {
   const num = v => v === null || v === undefined ? "—" : Number(v).toFixed(6);
   const ratio = i.clip_bytes ? (100 * i.bytes / i.clip_bytes).toFixed(1) + "%" : "—";
   const rows = [
-    ["input segment", fmtBytes(i.clip_bytes)],
-    ["output", fmtBytes(i.bytes) + " (" + ratio + " of input)"],
+    ["input segment", fmtBytes(i.clip_bytes) + " · " + i.clip_frames + " frames"],
+    ["output", fmtBytes(i.bytes)],
+    ["vs input", ratio + " — but the input has its own crf and GOP; compare with flat"],
     ["frames", i.frames + " of " + i.clip_frames],
     ["format", i.codec + " " + i.fps_text + " fps, " + i.duration.toFixed(2) + " s"],
     ["SSIM zone", num(i.ssim_zone)],
@@ -1020,9 +1024,14 @@ $("gain").addEventListener("input", () => {
 function showSizes(i) {
   const l = $("lsize"), r = $("rsize");
   if (l) l.textContent = `${i.width}×${i.height} · ${fmtBytes(i.clip_bytes)}`;
+  // Bytes, and a percentage only against the flat baseline. The percentage against the
+  // input used to sit here and it measured the wrong thing: the input has its own crf and
+  // its own GOP, so on synth.mp4 -- crf 16, GOP 50 -- encoding at the bench default GOP 15
+  // reads 162% with the ROI switched off entirely. That number is the GOP difference, and
+  // reading it as "ROI made the file bigger" is the mistake it invites.
   if (r) r.textContent = $("view").value === "diff" ? ""
     : `${i.width}×${i.height} · ${fmtBytes(i.bytes)}` +
-      (i.clip_bytes ? ` · ${(100 * i.bytes / i.clip_bytes).toFixed(0)}%` : "");
+      (i.flat_bytes ? ` · ${(100 * (i.bytes - i.flat_bytes) / i.flat_bytes).toFixed(0)}% vs flat` : "");
 }
 
 function busy(on, text) {
