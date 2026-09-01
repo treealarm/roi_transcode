@@ -143,14 +143,31 @@ void BitrateBudget::recompute()
 
     if (avg_bps > avg_hi) {
         step_up();
-    } else if (m_debt_bits > 0.0) {
-        // Still owing bits: do not relax. If we cannot clear the debt inside the recovery
-        // window at the current undershoot rate, climb further.
+    } else if (m_debt_bits > 0.0 && avg_bps >= avg_lo) {
+        // Still owing bits, and not yet giving them back: if the debt cannot be cleared
+        // inside the recovery window at the current undershoot rate, climb further.
+        //
+        // The second half of that condition -- avg_bps >= avg_lo -- is what stops a
+        // ratchet, and it was missing until 2026-09-01. Every I-frame adds a large surplus
+        // to the debt, because the debt is fed per packet and an I-frame's own rate is many
+        // times the stream's. On any real GOP that debt is re-created faster than an
+        // undershoot can repay it inside a one-second recovery window, so the test
+        // "(debt / repay_rate) > recovery_sec" was permanently true and the ladder climbed
+        // to its ceiling and stayed. Measured on a 36 s crowd scene at a 2 Mbps target:
+        // seconds of 5.9 Mbps followed by twelve consecutive seconds of nothing at all,
+        // because background_extra 30 with roi_soften 20 puts the whole frame at QP 51.
+        //
+        // Climbing while already below the band cannot help: being below the band *is*
+        // repaying, at the fastest rate this mechanism has. What it does instead is
+        // overshoot downwards, which is the profile above.
         const double repay_rate = std::max(0.0, target - avg_bps);
         if (repay_rate <= 1.0 || (m_debt_bits / repay_rate) > m_recovery_sec) {
             step_up();
         }
     } else if (avg_bps < avg_lo) {
+        // Release is gated on being below the band rather than on the debt being clear, for
+        // the same reason: a debt that a bursty stream re-creates every GOP would otherwise
+        // hold the ladder at its ceiling for the whole encode.
         step_down();
     }
 }

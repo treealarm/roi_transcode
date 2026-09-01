@@ -85,6 +85,54 @@ void undershoot_releases_only_after_debt_is_paid()
         "extras fall once the debt is gone");
 }
 
+/// After a burst, a stream that has gone quiet must be let go in bounded time.
+///
+/// This is the case the four tests around it cannot see. They feed uniform streams, and the
+/// defect needs the sequence a real clip has: a hot opening -- every encode has one, the
+/// controller cannot know what the content costs until packets arrive -- followed by the
+/// suppression it caused.
+///
+/// The recovery debt is fed per packet, so four seconds at three times the target leaves
+/// sixteen megabits owing, and an undershoot repays it at the target rate: eight seconds,
+/// against a one-second recovery window. The escalation test "(debt / repay_rate) >
+/// recovery_sec" was therefore true for all eight of them, and the ladder was pinned at its
+/// ceiling -- background_extra 30 with roi_soften 20, which is the whole frame at QP 51,
+/// object included -- while the stream underneath was producing nothing at all.
+///
+/// Measured on the real 36 s clip this came from: twelve consecutive seconds of silence
+/// against a 2 Mbps target. Measured here: 22.00 s to let go before the fix, 15.28 s after.
+/// The bound below sits between them, so this fails outright if the escalation comes back.
+///
+/// What it does not claim: 15 s is still slow, and most of it is the ladder itself walking
+/// fifty steps at one per 0.25 s. That is tuning, and it is open -- see срез Q.
+void a_quiet_stream_is_released_in_bounded_time()
+{
+    sve::RateControlPolicy policy;
+    policy.target_bitrate = 2'000'000;
+    policy.recovery_window_ms = 1000;
+    sve::BitrateBudget b(policy);
+
+    constexpr double dt = 1.0 / 25.0;
+    for (int32_t i = 0; i < 100; ++i) {
+        b.observe(30'000, dt);            // 4 s at 6 Mbps -- three times the target
+    }
+    check_eq(b.background_extra(), 30, "precondition: the burst pins the background");
+    check(b.roi_soften() > 0, "precondition: and reaches the ROI too");
+    check(b.debt_bits() > 0.0, "precondition: the burst leaves a debt");
+
+    double released_at = 0.0;
+    for (int32_t i = 0; i < 25 * 60; ++i) {
+        b.observe(200, dt);               // ~40 kbps: two percent of the target
+        if (b.background_extra() == 0 && b.roi_soften() == 0) {
+            released_at = (i + 1) * dt;
+            break;
+        }
+    }
+    check(released_at > 0.0, "the ladder comes back down at all");
+    check(released_at < 18.0,
+        "and does so without waiting out a debt no undershoot can repay in one second");
+}
+
 void peak_overshoot_climbs_inside_a_wide_average_deadband()
 {
     sve::RateControlPolicy policy;
@@ -143,6 +191,7 @@ int main()
     inactive_without_a_target();
     overshoot_crushes_background_before_roi();
     undershoot_releases_only_after_debt_is_paid();
+    a_quiet_stream_is_released_in_bounded_time();
     peak_overshoot_climbs_inside_a_wide_average_deadband();
     apply_and_soften_respect_critical_objects();
 
