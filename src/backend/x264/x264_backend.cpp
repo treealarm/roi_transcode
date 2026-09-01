@@ -336,6 +336,14 @@ public:
             out.dts = s.dts;
             out.key_frame = s.key;
             out.codec = Codec::H264;
+            // The unit s.pts is counted in, and the muxer has nothing else to go on:
+            // EncodedPacket::time_base defaults to 1/1, so leaving it unset does not fail
+            // loudly -- it silently declares one tick per second. That is what both direct
+            // backends did until 2026-08-31, and a 25 fps clip muxed out as 300 seconds
+            // instead of 12. The libavcodec path has always set this (backend_common.cpp);
+            // packet_sink.h states the contract, that a packet carries its own time base.
+            out.time_base = Rational{static_cast<int32_t>(s.param.i_timebase_num),
+                static_cast<int32_t>(s.param.i_timebase_den)};
             return out;
         }
         if (!s.draining) {

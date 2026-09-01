@@ -228,6 +228,16 @@ for _spec in "x264direct h264" "x265direct h265"; do
         pass "[${_enc}] encodes varying metadata without dying"
         assert_eq "[${_enc}] frame count kept" \
             "$(count_packets "${WORK}/varmeta_${_enc}.mp4")" "$src_frames"
+        # Duration, not just the count -- and they are different questions. A packet
+        # carries its own time base (packet_sink.h), both direct backends left it at the
+        # 1/1 default until 2026-08-31, and the result was 300 frames muxed as 300 seconds
+        # instead of 12. Every frame was present and every count assertion passed.
+        assert_eq "[${_enc}] duration kept" \
+            "$(probe format=duration "${WORK}/varmeta_${_enc}.mp4")" \
+            "$(probe format=duration "$SRC")"
+        assert_eq "[${_enc}] frame rate kept" \
+            "$(probe stream=r_frame_rate "${WORK}/varmeta_${_enc}.mp4")" \
+            "$(probe stream=r_frame_rate "$SRC")"
     else
         fail "[${_enc}] encode with varying metadata (rc=$?)"
         sed 's/^/      /' "${WORK}/varmeta_${_enc}.log" >&2
