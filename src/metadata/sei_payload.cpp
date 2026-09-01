@@ -11,6 +11,14 @@ namespace sve {
 
 namespace {
 
+/// Ceiling on what a decoded object count may reserve.
+///
+/// Not a limit on how many objects a payload may carry -- the loop below reads them all.
+/// It bounds the *speculative allocation* made from a length field that arrived over the
+/// wire: a corrupt or hostile SEI claiming four billion objects would otherwise have us
+/// reserve for four billion before reading the first one.
+constexpr uint64_t kMaxDecodedObjects = 4096;
+
 // "sve-roimeta\0\0\0\1" -- stable id for this schema, not a random UUID.
 constexpr uint8_t kUuid[16] = {
     's', 'v', 'e', '-', 'r', 'o', 'i', 'm', 'e', 't', 'a', 0, 0, 0, 1};
@@ -221,7 +229,7 @@ bool decode_sei_payload(std::span<const uint8_t> bytes, SeiFrame& out_frame)
     }
     // The count is the writer's claim; the reader still has to find that many objects in
     // the bytes it actually holds, and read_object is what enforces that.
-    out_frame.objects.reserve(static_cast<std::size_t>(std::min<uint64_t>(count, 4096)));
+    out_frame.objects.reserve(static_cast<std::size_t>(std::min<uint64_t>(count, kMaxDecodedObjects)));
     for (uint64_t i = 0; i < count; ++i) {
         SeiObject o;
         if (!read_object(r, o)) {

@@ -56,9 +56,30 @@ mfxU32 codec_id(Codec codec)
 /// read past the array.
 constexpr int kMbqpBlock = 16;
 
-mfxU16 align16(int32_t value)
+/// The grid the Intel encoder works on. Surfaces are allocated to it and mfxExtEncoderROI
+/// rectangles are snapped to it: an unaligned rectangle is not refused, it is rounded
+/// somewhere we did not choose, and the measurement then answers a question nobody asked.
+/// The same 16 as kMbqpBlock above, and for the same underlying reason -- it is the
+/// macroblock -- but kept separate because one is a surface constraint and the other is the
+/// size of a map cell, and the day HEVC's BlockSize becomes observable they part.
+constexpr int32_t kRoiAlign = 16;
+
+/// What mfxExtEncoderROI can physically carry: its ROI[] member is a fixed array of 256.
+/// Distinct from intel_max_roi_regions(), which is how many the *driver* accepts and is far
+/// smaller -- but the structure's own bound has to be honoured too, because exceeding it
+/// writes past the end of a member rather than being refused.
+constexpr std::size_t kMfxRoiCapacity = 256;
+
+/// Rounded up to the encoder's grid.
+mfxU16 align_up(int32_t value)
 {
-    return static_cast<mfxU16>((value + 15) & ~15);
+    return static_cast<mfxU16>((value + kRoiAlign - 1) & ~(kRoiAlign - 1));
+}
+
+/// Rounded down to it.
+mfxU32 align_down(int32_t value)
+{
+    return static_cast<mfxU32>(std::max(0, value) & ~(kRoiAlign - 1));
 }
 
 /// The parameter set this backend opens an encoder with.
@@ -96,7 +117,7 @@ void fill_encode_params(mfxVideoParam& p, Codec codec, int32_t width, int32_t he
     // loop the offsets are advice the controller may spend elsewhere -- and the block map
     // this backend now sends is stronger than advice, being absolute quantisers.
     p.mfx.RateControlMethod = MFX_RATECONTROL_CQP;
-    const auto qp = static_cast<mfxU16>(std::clamp(crf, 1, 51));
+    const auto qp = static_cast<mfxU16>(std::clamp(crf, kMinCodedQp, kMaxQp));
     p.mfx.QPI = qp;
     p.mfx.QPP = qp;
     p.mfx.QPB = qp;
@@ -107,8 +128,8 @@ void fill_encode_params(mfxVideoParam& p, Codec codec, int32_t width, int32_t he
     fi.PicStruct = MFX_PICSTRUCT_PROGRESSIVE;
     fi.FrameRateExtN = static_cast<mfxU32>(std::max(frame_rate.num, 1));
     fi.FrameRateExtD = static_cast<mfxU32>(std::max(frame_rate.den, 1));
-    fi.Width = align16(width);
-    fi.Height = align16(height);
+    fi.Width = align_up(width);
+    fi.Height = align_up(height);
     fi.CropX = 0;
     fi.CropY = 0;
     fi.CropW = static_cast<mfxU16>(width);
@@ -492,7 +513,7 @@ public:
         // From the open encoder rather than from what was asked, because the map is written
         // relative to the quantiser it will actually use and VPL may have corrected it.
         s->base_qp = opened.mfx.QPI > 0 ? opened.mfx.QPI
-                                        : std::clamp(config.crf, 1, 51);
+                                        : std::clamp(config.crf, kMinCodedQp, kMaxQp);
 
         if (const Status st = allocate(*s); !st.ok()) {
             return st;
@@ -869,7 +890,7 @@ private:
         // Reset to the frame's own quantiser rather than to zero: a cell no region covers
         // means "the encoder's own decision", and in a map of absolute values that is the
         // base QP. Zero would be lossless, which is the bug above in miniature.
-        const auto base = static_cast<int8_t>(std::clamp(s.base_qp, 1, 51));
+        const auto base = static_cast<int8_t>(std::clamp(s.base_qp, kMinCodedQp, kMaxQp));
         std::fill(slot.mbqp_cells.begin(), slot.mbqp_cells.end(), base);
         // Painted as deltas into a scratch grid, then added to the base. Two passes over
         // 3600 cells rather than teaching the shared painter about a base it has no
@@ -878,7 +899,7 @@ private:
         QpDeltaMapBuilder().paint(s.width, s.height, kMbqpBlock, regions, s.mbqp_scratch);
         for (std::size_t i = 0; i < cells; ++i) {
             slot.mbqp_cells[i] = static_cast<int8_t>(
-                std::clamp(s.base_qp + s.mbqp_scratch[i], 1, 51));
+                std::clamp(s.base_qp + s.mbqp_scratch[i], kMinCodedQp, kMaxQp));
         }
 
         slot.mbqp.Header.BufferId = MFX_EXTBUFF_MBQP;
@@ -926,19 +947,17 @@ private:
         // conventions agree and the object beats the background rectangle underneath it.
         const int limit = intel_max_roi_regions(s.codec);
         const std::size_t take = std::min<std::size_t>(regions.size(),
-            std::min<std::size_t>(static_cast<std::size_t>(limit), 256));
+            std::min<std::size_t>(static_cast<std::size_t>(limit), kMfxRoiCapacity));
         slot.roi.NumROI = static_cast<mfxU16>(take);
         for (std::size_t i = 0; i < take; ++i) {
             const Rect& r = regions[i];
-            // Aligned down and up to the 16-pixel grid the hardware works on. Passing an
-            // unaligned rectangle is not refused, it is rounded somewhere we did not
-            // choose, and then the measurement says something we did not ask.
-            slot.roi.ROI[i].Left = static_cast<mfxU32>(std::max(0, r.left) & ~15);
-            slot.roi.ROI[i].Top = static_cast<mfxU32>(std::max(0, r.top) & ~15);
-            slot.roi.ROI[i].Right = static_cast<mfxU32>((std::max(0, r.right) + 15) & ~15);
-            slot.roi.ROI[i].Bottom = static_cast<mfxU32>((std::max(0, r.bottom) + 15) & ~15);
+            // Aligned outwards to the grid the hardware works on -- see kRoiAlign.
+            slot.roi.ROI[i].Left = align_down(r.left);
+            slot.roi.ROI[i].Top = align_down(r.top);
+            slot.roi.ROI[i].Right = align_up(std::max(0, r.right));
+            slot.roi.ROI[i].Bottom = align_up(std::max(0, r.bottom));
             // Same sign as ours: §5.2 says negative raises quality, and so does qp_delta.
-            slot.roi.ROI[i].DeltaQP = static_cast<mfxI16>(std::clamp(r.qp_delta, -51, 51));
+            slot.roi.ROI[i].DeltaQP = static_cast<mfxI16>(std::clamp(r.qp_delta, kMinQpDelta, kMaxQpDelta));
         }
         slot.ext[0] = &slot.roi.Header;
         slot.ctrl.ExtParam = slot.ext;

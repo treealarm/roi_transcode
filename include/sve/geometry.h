@@ -28,6 +28,12 @@ struct QpDeltaMap {
     std::vector<int8_t> deltas;
 };
 
+/// The strongest value an 8-bit mask can carry, and the size of the space it lives in.
+/// Named because both numbers appear away from the mask itself -- in the mapping that turns
+/// a mask value into a QP delta, where a bare 256 reads as a buffer size.
+inline constexpr int32_t kMaskMax = 255;
+inline constexpr int32_t kMaskValues = kMaskMax + 1;
+
 // 8-bit region-of-interest mask at any resolution: 0 is background, 255 is
 // maximum quality. It is sampled onto the frame, so it need not match its size.
 struct Mask {

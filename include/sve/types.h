@@ -14,6 +14,26 @@
 
 namespace sve {
 
+// The quantiser range, named once because it is asserted in fourteen places and because a
+// bare 51 says nothing about which of the several things it could be.
+//
+// H.264 (ITU-T H.264 §7.4.2.1.1) and HEVC (ITU-T H.265 §7.4.3.2) both quantise 8-bit video
+// on 0..51, and every backend here clamps to it: libx264's quant_offsets, libx265's
+// quantOffsets, mfxExtEncoderROI::DeltaQP and mfxExtMBQP all take numbers on this scale.
+// Ten-bit HEVC extends the range downwards (-12..51) and nothing here relies on that yet;
+// when something does, this is the one place it changes.
+inline constexpr int32_t kMaxQp = 51;
+/// The lowest quantiser this library will *ask* for. Zero is legal in both codecs and means
+/// lossless, which is never what a region asks for and is what a zero-filled buffer looks
+/// like -- iHD reading a per-block map of zeroes as QP 0 is how срез O found the mode it
+/// was really in (docs/STATUS.md). So a coded quantiser starts at one.
+inline constexpr int32_t kMinCodedQp = 1;
+
+/// A quality offset, in whole quantiser steps. Negative raises quality (TZ §5.2), so the
+/// range is symmetric: at most the whole scale in either direction.
+inline constexpr int32_t kMaxQpDelta = kMaxQp;
+inline constexpr int32_t kMinQpDelta = -kMaxQp;
+
 // A ratio, for frame rates and time bases. Spelled out here rather than borrowed from
 // FFmpeg so the public headers carry no libavutil types -- see encoder_backend.h.
 struct Rational {

@@ -56,6 +56,13 @@ preferences:
   there is a concrete requirement.
 - **DRY:** avoid duplicated business logic and duplicated protocol/format conversions;
   extract shared helpers when two paths must stay behaviorally identical.
+- **No magic constants.** A number that carries meaning gets a name and a definition —
+  `constexpr` with a `k`-prefixed name at the narrowest scope that covers its uses, and a
+  comment saying where the value comes from. The rule is about meaning, not about digits:
+  `+ 1`, `/ 2` and an index of `0` stay as they are, while a quantiser range, an alignment,
+  a block size or a protocol limit does not. A meaningful number that appears in two places
+  is also a DRY violation — it must be one definition, because the day one copy changes and
+  the other does not is not visible in review.
 
 Built with **C++20**. Prefer modern C++20 techniques and standard library facilities over
 legacy patterns whenever the result is clearer and safer (`std::span`, ranges, RAII,

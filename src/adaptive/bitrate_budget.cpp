@@ -20,6 +20,14 @@ constexpr double kAvgWindowSec = 2.0;
 constexpr double kPeakWindowSec = 1.0;
 constexpr double kAvgStepSec = 0.25;
 constexpr double kPeakStepSec = 0.10;
+constexpr double kMsPerSec = 1000.0;
+/// How far past the ceiling turns one rung of the ladder into several. A mild miss walks;
+/// a large one (typical when ROI offsets fight a rate controller) jumps, because walking
+/// a thirty-rung ladder at 0.25 s a rung is fifteen seconds of being wrong.
+constexpr double kJumpRatio = 1.5;
+constexpr double kStrideRatio = 1.2;
+constexpr int32_t kJumpSteps = 4;
+constexpr int32_t kStrideSteps = 2;
 
 } // namespace
 
@@ -36,7 +44,7 @@ BitrateBudget::BitrateBudget(const RateControlPolicy& policy)
         ? policy.max_peak_overshoot
         : 0.2f;
     m_recovery_sec = policy.recovery_window_ms > 0
-        ? static_cast<double>(policy.recovery_window_ms) / 1000.0
+        ? static_cast<double>(policy.recovery_window_ms) / kMsPerSec
         : 1.0;
 }
 
@@ -58,10 +66,10 @@ void BitrateBudget::step_up()
         const double avg_bps =
             (static_cast<double>(m_avg_bytes) * 8.0) / m_avg_sec;
         const double ratio = avg_bps / static_cast<double>(m_target_bps);
-        if (ratio > 1.5) {
-            steps = 4;
-        } else if (ratio > 1.2) {
-            steps = 2;
+        if (ratio > kJumpRatio) {
+            steps = kJumpSteps;
+        } else if (ratio > kStrideRatio) {
+            steps = kStrideSteps;
         }
     }
     for (int32_t i = 0; i < steps; ++i) {
@@ -177,7 +185,7 @@ Quality BitrateBudget::apply(const Quality& base) const
     Quality out = base;
     if (m_background_extra != 0) {
         out.background_qp_delta = std::clamp(
-            out.background_qp_delta + m_background_extra, -51, 51);
+            out.background_qp_delta + m_background_extra, kMinQpDelta, kMaxQpDelta);
     }
     return out;
 }

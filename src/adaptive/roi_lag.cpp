@@ -6,6 +6,26 @@
 
 namespace sve {
 
+namespace {
+
+// TZ §49's ROI-lag acceptance thresholds, which are the specification's numbers and not
+// ours. §14 gives the method, §49 is named there as the single normative source of the
+// values -- so they are transcribed here once, with that provenance, rather than sitting as
+// four bare literals inside a return statement where nobody can tell a threshold from a
+// tuning constant.
+constexpr double kP95 = 0.95;
+constexpr double kP99 = 0.99;
+constexpr double kMaxP95LagFrames = 3.0;
+constexpr double kMaxP95LagMs = 100.0;
+constexpr double kMaxP99LagFrames = 6.0;
+constexpr double kMaxP99LagMs = 200.0;
+/// A sample whose overlap with the true box has fallen this far is not late, it is wrong,
+/// and averaging it into a lag percentile would report a miss as a small delay.
+constexpr float kMinLagIou = 0.50f;
+constexpr double kMsPerSec = 1000.0;
+
+} // namespace
+
 float box_iou(const Box& a, const Box& b)
 {
     const float ax2 = a.x + a.width;
@@ -35,7 +55,7 @@ RoiLagSample measure_roi_lag(const Box& applied, const Box& target, int32_t lag_
     RoiLagSample s;
     s.iou = box_iou(applied, target);
     s.lag_frames = std::max(lag_frames, 0);
-    s.lag_ms = static_cast<double>(s.lag_frames) * std::max(producer_interval_sec, 0.0) * 1000.0;
+    s.lag_ms = static_cast<double>(s.lag_frames) * std::max(producer_interval_sec, 0.0) * kMsPerSec;
     return s;
 }
 
@@ -66,14 +86,16 @@ bool roi_lag_acceptance(const std::vector<RoiLagSample>& samples)
     frames.reserve(samples.size());
     ms.reserve(samples.size());
     for (const RoiLagSample& s : samples) {
-        if (s.iou < 0.50f) {
+        if (s.iou < kMinLagIou) {
             return false;
         }
         frames.push_back(static_cast<double>(s.lag_frames));
         ms.push_back(s.lag_ms);
     }
-    return percentile(frames, 0.95) <= 3.0 && percentile(ms, 0.95) <= 100.0
-        && percentile(frames, 0.99) <= 6.0 && percentile(ms, 0.99) <= 200.0;
+    return percentile(frames, kP95) <= kMaxP95LagFrames
+        && percentile(ms, kP95) <= kMaxP95LagMs
+        && percentile(frames, kP99) <= kMaxP99LagFrames
+        && percentile(ms, kP99) <= kMaxP99LagMs;
 }
 
 float center_distance_diag(const Box& a, const Box& b)
@@ -107,10 +129,10 @@ void fill_lag_report(const std::vector<RoiLagSample>& samples, Report& report)
         ms.push_back(s.lag_ms);
     }
     report.roi_lag_min_iou = min_iou;
-    report.roi_lag_p95_frames = percentile(frames, 0.95);
-    report.roi_lag_p99_frames = percentile(frames, 0.99);
-    report.roi_lag_p95_ms = percentile(ms, 0.95);
-    report.roi_lag_p99_ms = percentile(ms, 0.99);
+    report.roi_lag_p95_frames = percentile(frames, kP95);
+    report.roi_lag_p99_frames = percentile(frames, kP99);
+    report.roi_lag_p95_ms = percentile(ms, kP95);
+    report.roi_lag_p99_ms = percentile(ms, kP99);
     report.roi_lag_acceptance = roi_lag_acceptance(samples);
 }
 

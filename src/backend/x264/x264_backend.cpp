@@ -88,12 +88,15 @@ X264Session& x264_session(BackendSession& session)
     return static_cast<X264Session&>(session);
 }
 
+/// One macroblock, in pixels. H.264's own unit and the grid quant_offsets is indexed on.
+constexpr int kMacroblock = 16;
+
 /// The macroblock grid, on x264's terms: "width and height are rounded up to the nearest
 /// 16". Derived rather than remembered, because a session that computed it once and a
 /// caller that reconfigured would disagree exactly where it hurts.
 constexpr int mb_count(int pixels)
 {
-    return (pixels + 15) / 16;
+    return (pixels + kMacroblock - 1) / kMacroblock;
 }
 
 /// Regions to one float per macroblock, in QP units.
@@ -124,10 +127,10 @@ float* build_quant_offsets(int width, int height, std::span<const Rect> regions)
     // everything anyway.
     for (auto it = regions.rbegin(); it != regions.rend(); ++it) {
         const Rect& r = *it;
-        const int x0 = std::clamp(r.left / 16, 0, mbw - 1);
-        const int x1 = std::clamp((r.right + 15) / 16, 0, mbw);
-        const int y0 = std::clamp(r.top / 16, 0, mbh - 1);
-        const int y1 = std::clamp((r.bottom + 15) / 16, 0, mbh);
+        const int x0 = std::clamp(r.left / kMacroblock, 0, mbw - 1);
+        const int x1 = std::clamp(mb_count(r.right), 0, mbw);
+        const int y0 = std::clamp(r.top / kMacroblock, 0, mbh - 1);
+        const int y1 = std::clamp(mb_count(r.bottom), 0, mbh);
         const float offset = static_cast<float>(r.qp_delta);
         for (int y = y0; y < y1; ++y) {
             float* row = offsets + static_cast<std::size_t>(y) * static_cast<std::size_t>(mbw);

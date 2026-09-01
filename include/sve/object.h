@@ -65,7 +65,7 @@ BoundingBox bounding_box_of(const Geometry& geometry);
 /// and returns false. Does not clear pixels outside the outline -- the caller zeros the
 /// buffer when a fresh mask is wanted.
 bool rasterize_polygon(const Polygon& polygon, uint8_t* out, int32_t width, int32_t height,
-    uint8_t value = 255);
+    uint8_t value = static_cast<uint8_t>(kMaskMax));
 
 /// Square dilation of a binary mask in place. `radius` is in pixels; 0 is a no-op. Used to
 /// grow a polygon by Quality::pad before it is sampled onto the block grid.

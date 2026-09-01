@@ -21,7 +21,7 @@ int delta_for_value(int value, const MaskMapping& mapping)
 {
     const int levels = std::max(mapping.levels, 2);
     const int bucket =
-        std::clamp(value * levels / 256, 0, levels - 1);
+        std::clamp(value * levels / kMaskValues, 0, levels - 1);
     const double pos = static_cast<double>(bucket) / (levels - 1);
     const double d = mapping.qp_delta_at_0
         + (mapping.qp_delta_at_255 - mapping.qp_delta_at_0) * pos;
@@ -69,7 +69,7 @@ QpDeltaMap qp_map_from_mask(const Mask& mask, const MaskMapping& mapping,
             }
             const int delta = delta_for_value(peak, mapping);
             m.deltas[static_cast<size_t>(by) * m.cols + bx] =
-                static_cast<int8_t>(std::clamp(delta, -51, 51));
+                static_cast<int8_t>(std::clamp(delta, kMinQpDelta, kMaxQpDelta));
         }
     }
     return m;
@@ -109,7 +109,7 @@ void QpDeltaMapBuilder::paint(int width, int height, int block,
         if (r.right <= r.left || r.bottom <= r.top) {
             continue;
         }
-        const int8_t qp = static_cast<int8_t>(std::clamp(r.qp_delta, -51, 51));
+        const int8_t qp = static_cast<int8_t>(std::clamp(r.qp_delta, kMinQpDelta, kMaxQpDelta));
         const int c0 = std::clamp(r.left / block, 0, cols - 1);
         const int c1 = std::clamp((r.right - 1) / block, 0, cols - 1);
         const int r0 = std::clamp(r.top / block, 0, rows - 1);

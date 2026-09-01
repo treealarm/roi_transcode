@@ -145,8 +145,8 @@ void attach_roi(AVFrame* frame, std::span<const Rect> regions)
         roi[i].bottom = regions[i].bottom;
         roi[i].left = regions[i].left;
         roi[i].right = regions[i].right;
-        const int qp = std::clamp(regions[i].qp_delta, -51, 51);
-        roi[i].qoffset = AVRational{qp, 51};
+        const int qp = std::clamp(regions[i].qp_delta, kMinQpDelta, kMaxQpDelta);
+        roi[i].qoffset = AVRational{qp, kMaxQp};
     }
 }
 

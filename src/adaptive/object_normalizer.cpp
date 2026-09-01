@@ -12,6 +12,15 @@
 
 namespace sve {
 
+/// The region budget used when neither the caller nor the backend names one.
+///
+/// 256 because that is the largest number any backend here can carry -- mfxExtEncoderROI's
+/// ROI[] is a fixed array of that size, and no other backend takes fewer *by structure*
+/// (the drivers take far fewer, and say so through EncoderCapabilities::max_roi_regions).
+/// So it is a ceiling that never truncates anything a backend could have used, which is
+/// what "no budget was given" should mean.
+constexpr int32_t kDefaultRegionBudget = 256;
+
 namespace {
 
 int clamp_i(int v, int lo, int hi)
@@ -176,7 +185,7 @@ void paint_aabb_on_qp_map(QpDeltaMap& map, const Rect& r)
     if (!rect_valid(r) || map.block <= 0) {
         return;
     }
-    const int8_t qp = static_cast<int8_t>(std::clamp(r.qp_delta, -51, 51));
+    const int8_t qp = static_cast<int8_t>(std::clamp(r.qp_delta, kMinQpDelta, kMaxQpDelta));
     const int c0 = std::clamp(r.left / map.block, 0, map.cols - 1);
     const int c1 = std::clamp((r.right - 1) / map.block, 0, map.cols - 1);
     const int r0 = std::clamp(r.top / map.block, 0, map.rows - 1);
@@ -226,7 +235,7 @@ std::vector<Rect> build_shaped(int width, int height,
     map.height = height;
     map.cols = (width + block - 1) / block;
     map.rows = (height + block - 1) / block;
-    const int8_t bg = static_cast<int8_t>(std::clamp(quality.background_qp_delta, -51, 51));
+    const int8_t bg = static_cast<int8_t>(std::clamp(quality.background_qp_delta, kMinQpDelta, kMaxQpDelta));
     map.deltas.assign(static_cast<size_t>(map.cols) * map.rows, bg);
 
     std::vector<uint8_t> scratch(static_cast<size_t>(width) * height);
@@ -274,10 +283,11 @@ std::vector<Rect> build_shaped(int width, int height,
         const Detection* dp = a.dp;
         if (dp->polygon.size() >= 3 && (dp->pad_x > 0 || dp->pad_y > 0)) {
             std::memset(scratch.data(), 0, scratch.size());
-            rasterize_polygon(Polygon{dp->polygon}, scratch.data(), width, height, 255);
+            rasterize_polygon(Polygon{dp->polygon}, scratch.data(), width, height,
+                static_cast<uint8_t>(kMaskMax));
             dilate_mask(scratch.data(), width, height, std::max(dp->pad_x, dp->pad_y));
             paint_mask_on_qp_map(map, scratch.data(), width, height,
-                static_cast<int8_t>(std::clamp(a.pad_delta, -51, 51)));
+                static_cast<int8_t>(std::clamp(a.pad_delta, kMinQpDelta, kMaxQpDelta)));
         } else if (dp->polygon.size() < 3) {
             Rect pad{
                 .top = dp->y1 - dp->pad_y,
@@ -297,9 +307,10 @@ std::vector<Rect> build_shaped(int width, int height,
         const Detection* dp = a.dp;
         if (dp->polygon.size() >= 3) {
             std::memset(scratch.data(), 0, scratch.size());
-            rasterize_polygon(Polygon{dp->polygon}, scratch.data(), width, height, 255);
+            rasterize_polygon(Polygon{dp->polygon}, scratch.data(), width, height,
+                static_cast<uint8_t>(kMaskMax));
             paint_mask_on_qp_map(map, scratch.data(), width, height,
-                static_cast<int8_t>(std::clamp(a.body_delta, -51, 51)));
+                static_cast<int8_t>(std::clamp(a.body_delta, kMinQpDelta, kMaxQpDelta)));
         } else {
             Rect obj{
                 .top = dp->y1,
@@ -315,7 +326,7 @@ std::vector<Rect> build_shaped(int width, int height,
 
     const int32_t limit = map_region_limit >= 0
         ? map_region_limit
-        : (quality.max_regions > 0 ? quality.max_regions : 256);
+        : (quality.max_regions > 0 ? quality.max_regions : kDefaultRegionBudget);
     return rects_from_qp_map(map, limit, nullptr);
 }
 

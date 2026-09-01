@@ -152,7 +152,7 @@ int32_t qp_from_importance(float importance, const ImportancePolicy& policy)
         + (static_cast<float>(policy.qp_at_one) - static_cast<float>(policy.qp_at_zero)) * i;
     // The encoder's own range. Clamped rather than trusted: the endpoints are configurable,
     // and a caller who sets them wide should get a saturated answer, not a wrapped one.
-    return std::clamp(static_cast<int32_t>(std::lround(qp)), -51, 51);
+    return std::clamp(static_cast<int32_t>(std::lround(qp)), kMinQpDelta, kMaxQpDelta);
 }
 
 } // namespace sve
