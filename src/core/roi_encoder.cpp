@@ -34,8 +34,8 @@ const char* RoiEncoder::label() const
     case Backend::X265:
         return "libx265 (CPU, per-block quantOffsets)";
     case Backend::IntelOneVplDirect:
-        return h264 ? "h264 (Intel oneVPL, direct API, mfxExtEncoderROI)"
-                    : "hevc (Intel oneVPL, direct API, mfxExtEncoderROI)";
+        return h264 ? "h264 (Intel oneVPL, direct API, mfxExtMBQP)"
+                    : "hevc (Intel oneVPL, direct API, mfxExtMBQP)";
     default:
         return h264 ? "libx264 (CPU)" : "libx265 (CPU)";
     }

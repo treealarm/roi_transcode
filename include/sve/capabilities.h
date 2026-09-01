@@ -38,9 +38,14 @@ struct EncoderCapabilities {
     /// A per-block importance hint rather than a quantiser offset -- Intel's emphasis map,
     /// and one of the fields §7.2 lists and §23 reports.
     ///
-    /// False on every backend today, and that is the answer rather than a placeholder: it
-    /// reaches the hardware through mfxExtMBQP's neighbourhood, and libavcodec exposes
-    /// none of that. A native oneVPL backend (§5.2) is where this could become true.
+    /// False on every backend, and since 2026-09-01 that is a measured answer rather than a
+    /// placeholder. It was written here as something mfxExtMBQP's neighbourhood would
+    /// deliver once a native oneVPL backend existed. That backend exists and sends
+    /// mfxExtMBQP, and the neighbourhood is not there: the word "emphasis" does not occur
+    /// anywhere in the pinned oneVPL headers, and mfxExtMBQP's three modes are all
+    /// quantisers -- a QP, a QP delta, or a per-block choice between the two. What that
+    /// backend delivers is the block map, which is qp_map below. Reporting emphasis_map for
+    /// it would be renaming a feature rather than having one.
     bool emphasis_map = false;
 
     /// Regions may change between frames without reopening the encoder.

@@ -369,6 +369,42 @@ if [[ -e /dev/dri/renderD128 ]]; then
 
             step "the ROI mechanism does what it claims (oneVPL direct, CQP, HEVC)"
             ENC=onevpldirect CODEC=h265 mechanism_checks onevpl_h265 yes
+            # §2.2: block-level quality, and the one assertion that separates it from a
+            # rectangle list. testdata/synth_manyroi.json holds six well-separated regions;
+            # the iHD driver takes four rectangles on H.264, so on the rectangle path the
+            # last two are truncated and stay in the crushed background. Through
+            # mfxExtMBQP there is no rectangle budget to run out of and all six are the
+            # same region.
+            #
+            # Asserted as the spread between the best-served and the worst-served of the
+            # six, which is what "all six, equally" means and what a truncation destroys.
+            # Measured 2026-09-01 on iHD 25.2: 0.00014 through the map, 0.01081 on the
+            # rectangle path -- so the threshold below has two orders of magnitude of room
+            # and still fails outright if the budget ever comes back.
+            step "the block map serves every region, not the first four (§2.2)"
+            if "${BUILD}/roi-transcode" --in "$SRC" \
+                --roi "${ROOT}/testdata/synth_manyroi.json" \
+                --out "${WORK}/mbqp_manyroi.mp4" --encoder onevpldirect --codec h264 \
+                --crf 28 --gop 1 >"${WORK}/mbqp_manyroi.log" 2>&1; then
+                # More regions than the driver takes as rectangles: the budget really is
+                # gone upstream, rather than the map quietly carrying a truncated list.
+                _rects=$(grep -oE 'ROI: [0-9]+ rects' "${WORK}/mbqp_manyroi.log" \
+                    | head -1 | grep -oE '[0-9]+')
+                assert_gt "the map carries more regions than H.264 takes as rectangles" \
+                    "${_rects:-0}" "4"
+                _lo=1; _hi=0
+                for _xy in "64 57" "537 57" "998 57" "64 518" "537 518" "998 518"; do
+                    # shellcheck disable=SC2086
+                    set -- $_xy
+                    _v=$(ssim "${WORK}/mbqp_manyroi.mp4" "$1" "$2" 204 86)
+                    _lo=$(awk "BEGIN{print ($_v < $_lo) ? $_v : $_lo}")
+                    _hi=$(awk "BEGIN{print ($_v > $_hi) ? $_v : $_hi}")
+                done
+                assert_lt "all six regions come out alike" \
+                    "$(awk "BEGIN{printf \"%.6f\", $_hi - $_lo}")" "0.002"
+            else
+                fail "the block map run did not complete"
+            fi
         else
             step "native oneVPL backend (§5.2)"
             printf '  skip  onevpldirect is not in this build or has no device\n'
@@ -449,29 +485,58 @@ PY
     # H.264 the whole time: the flag was an alias for the single CPU backend, and --codec
     # was left at its H.264 default. Now that x264 and x265 are separate backends the name
     # has to match what runs, which is what makes this the same test it always was.
-    if "${BUILD}/roi-transcode" --in "${SCENES}/moving/source.mp4" \
-        --roi "${SCENES}/moving/roi.json" --out "${WORK}/moving.mp4" \
-        --encoder x264 --crf 28 --gop 1 >/dev/null 2>&1; then
-        moving_ok=1
+    # Three points along the box's path: at each one the box's own patch must come out
+    # better than a fixed patch of background. Echoes 1 when it does everywhere.
+    moving_roi_follows() { # encoded-file
+        local out="$1" ok=1
         for probe in "1.0 128 288" "6.0 550 288" "11.0 972 288"; do
             set -- $probe
             zone=$(ffmpeg -hide_banner -ss "$1" -i "${SCENES}/moving/source.mp4" \
-                -ss "$1" -i "${WORK}/moving.mp4" -filter_complex \
+                -ss "$1" -i "$out" -filter_complex \
                 "[0:v]crop=384:144:$2:$3[a];[1:v]crop=384:144:$2:$3[b];[a][b]ssim" \
                 -f null - 2>&1 | grep -oE 'All:[0-9.]+' | head -1 | cut -d: -f2)
             back=$(ffmpeg -hide_banner -ss "$1" -i "${SCENES}/moving/source.mp4" \
-                -ss "$1" -i "${WORK}/moving.mp4" -filter_complex \
+                -ss "$1" -i "$out" -filter_complex \
                 "[0:v]crop=384:144:40:40[a];[1:v]crop=384:144:40:40[b];[a][b]ssim" \
                 -f null - 2>&1 | grep -oE 'All:[0-9.]+' | head -1 | cut -d: -f2)
-            awk "BEGIN{exit !(${zone:-0} > ${back:-1})}" || moving_ok=0
+            awk "BEGIN{exit !(${zone:-0} > ${back:-1})}" || ok=0
         done
-        if [[ $moving_ok -eq 1 ]]; then
+        printf '%s' "$ok"
+    }
+
+    if "${BUILD}/roi-transcode" --in "${SCENES}/moving/source.mp4" \
+        --roi "${SCENES}/moving/roi.json" --out "${WORK}/moving.mp4" \
+        --encoder x264 --crf 28 --gop 1 >/dev/null 2>&1; then
+        if [[ "$(moving_roi_follows "${WORK}/moving.mp4")" == 1 ]]; then
             pass "the ROI follows a moving box"
         else
             fail "the ROI did not follow the moving box"
         fi
     else
         fail "moving scene failed to encode"
+    fi
+
+    # The same box through the native oneVPL backend, and it is here for a reason the x264
+    # line above does not carry: this is the only step in the file where the ROI *changes
+    # between frames* on hardware. The block map and the ROI rectangles are handed to VPL
+    # through buffers the runtime reads after EncodeFrameAsync returns (measured, срез O),
+    # so a single set of them shared by every frame in flight is one frame overwriting
+    # another frame's regions -- and a static fixture cannot see that, because every frame's
+    # map is identical. All the other Intel steps use hold_sec 20.
+    #
+    # Weak teeth, said plainly: a shared buffer displaces the region by a few pixels per
+    # frame, which barely moves SSIM over a 384x144 patch. It is what the harness can
+    # measure at second granularity, and it is strictly more than the static fixtures see.
+    if "${BUILD}/roi-transcode" --in "${SCENES}/moving/source.mp4" \
+        --roi "${SCENES}/moving/roi.json" --out "${WORK}/moving_vpl.mp4" \
+        --encoder onevpldirect --codec h264 --crf 28 --gop 1 >/dev/null 2>&1; then
+        if [[ "$(moving_roi_follows "${WORK}/moving_vpl.mp4")" == 1 ]]; then
+            pass "the ROI follows a moving box (oneVPL block map)"
+        else
+            fail "the ROI did not follow the moving box (oneVPL block map)"
+        fi
+    else
+        printf '  skip  onevpldirect is not in this build or has no device\n'
     fi
 else
     printf '  skip  scenes not generated (benchmarks/synthetic/make-scenes.py)\n'

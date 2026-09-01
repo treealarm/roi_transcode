@@ -40,8 +40,8 @@ QpDeltaMap qp_map_from_mask(const Mask& mask, const MaskMapping& mapping,
     m.block = block;
     m.width = frame_width;
     m.height = frame_height;
-    m.cols = (frame_width + block - 1) / block;
-    m.rows = (frame_height + block - 1) / block;
+    m.cols = qp_map_cols(frame_width, block);
+    m.rows = qp_map_rows(frame_height, block);
     m.deltas.assign(static_cast<size_t>(m.cols) * static_cast<size_t>(m.rows), 0);
 
     const int stride = mask.stride > 0 ? mask.stride : mask.width;
@@ -77,10 +77,7 @@ QpDeltaMap qp_map_from_mask(const Mask& mask, const MaskMapping& mapping,
 
 
 QpDeltaMap QpDeltaMapBuilder::build(
-    int width,
-    int height,
-    int block,
-    const std::vector<Rect>& rects) const
+    int width, int height, int block, std::span<const Rect> rects) const
 {
     QpDeltaMap m;
     if (width <= 0 || height <= 0 || block <= 0) {
@@ -89,28 +86,40 @@ QpDeltaMap QpDeltaMapBuilder::build(
     m.block = block;
     m.width = width;
     m.height = height;
-    m.cols = (width + block - 1) / block;
-    m.rows = (height + block - 1) / block;
+    m.cols = qp_map_cols(width, block);
+    m.rows = qp_map_rows(height, block);
     m.deltas.assign(static_cast<size_t>(m.cols) * static_cast<size_t>(m.rows), 0);
+    paint(width, height, block, rects, m.deltas);
+    return m;
+}
 
-    // Paint last→first so index 0 overwrites (Intel/FFmpeg: first region wins).
+void QpDeltaMapBuilder::paint(int width, int height, int block,
+    std::span<const Rect> rects, std::span<int8_t> out) const
+{
+    const int cols = qp_map_cols(width, block);
+    const int rows = qp_map_rows(height, block);
+    if (cols <= 0 || rows <= 0
+        || out.size() < static_cast<size_t>(cols) * static_cast<size_t>(rows)) {
+        return;
+    }
+
+    // Paint last-to-first so index 0 overwrites (Intel/FFmpeg: first region wins).
     for (int i = static_cast<int>(rects.size()) - 1; i >= 0; --i) {
         const Rect& r = rects[static_cast<size_t>(i)];
         if (r.right <= r.left || r.bottom <= r.top) {
             continue;
         }
         const int8_t qp = static_cast<int8_t>(std::clamp(r.qp_delta, -51, 51));
-        const int c0 = std::clamp(r.left / block, 0, m.cols - 1);
-        const int c1 = std::clamp((r.right - 1) / block, 0, m.cols - 1);
-        const int r0 = std::clamp(r.top / block, 0, m.rows - 1);
-        const int r1 = std::clamp((r.bottom - 1) / block, 0, m.rows - 1);
+        const int c0 = std::clamp(r.left / block, 0, cols - 1);
+        const int c1 = std::clamp((r.right - 1) / block, 0, cols - 1);
+        const int r0 = std::clamp(r.top / block, 0, rows - 1);
+        const int r1 = std::clamp((r.bottom - 1) / block, 0, rows - 1);
         for (int y = r0; y <= r1; ++y) {
             for (int x = c0; x <= c1; ++x) {
-                m.deltas[static_cast<size_t>(y * m.cols + x)] = qp;
+                out[static_cast<size_t>(y * cols + x)] = qp;
             }
         }
     }
-    return m;
 }
 
 } // namespace sve
