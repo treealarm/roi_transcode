@@ -35,6 +35,14 @@ struct EncoderCapabilities {
     /// exposes CTU control without a general block map; none do yet.
     bool ctu_qp = false;
 
+    /// A per-block importance hint rather than a quantiser offset -- Intel's emphasis map,
+    /// and one of the fields §7.2 lists and §23 reports.
+    ///
+    /// False on every backend today, and that is the answer rather than a placeholder: it
+    /// reaches the hardware through mfxExtMBQP's neighbourhood, and libavcodec exposes
+    /// none of that. A native oneVPL backend (§5.2) is where this could become true.
+    bool emphasis_map = false;
+
     /// Regions may change between frames without reopening the encoder.
     bool runtime_roi_update = false;
 

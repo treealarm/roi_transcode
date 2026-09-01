@@ -747,6 +747,46 @@ fi
 # describes packet N, and the only way to get that wrong without it being obvious is
 # B-frame reordering, where emission order is not submission order. Records written when a
 # frame was handed in would pass a count and fail this.
+# §23. Not just "it runs": the report has to agree with what the library actually does, and
+# the Intel region limit is the sharpest place to check that. It is four for H.264 and
+# eight for H.265 -- measured on this hardware, not read from a table (see STATUS.md) --
+# and a report that flattened it to one number would be wrong about one of them. That
+# difference is the reason this tool reports per codec at all, so it is what the step
+# asserts.
+step "sve-capabilities reports what the library can actually do"
+CAPS_BIN="${LIBBUILD}/sve-capabilities"
+if [[ ! -x "$CAPS_BIN" ]]; then
+    fail "sve-capabilities not built (SVE_BUILD_TOOLS=ON)"
+elif ! "$CAPS_BIN" --json > "${WORK}/caps.json" 2>"${WORK}/caps.log"; then
+    fail "sve-capabilities --json"; sed 's/^/      /' "${WORK}/caps.log" >&2
+else
+    if python3 -c "
+import json, sys
+doc = json.load(open('${WORK}/caps.json'))
+names = [b['backend'] for b in doc['backends']]
+# The direct backends of §5.4 are in every build; their absence would mean the registry
+# lost them rather than that the report is wrong.
+assert 'x264direct' in names and 'x265direct' in names, names
+for b in doc['backends']:
+    for codec in b['codecs']:
+        assert codec in b['capabilities'], (b['backend'], codec)
+    if b['backend'] in ('qsv', 'vaapi') and set(b['codecs']) == {'h264', 'h265'}:
+        h264 = b['capabilities']['h264']['max_roi_regions']
+        h265 = b['capabilities']['h265']['max_roi_regions']
+        assert (h264, h265) == (4, 8), (b['backend'], h264, h265)
+" 2>"${WORK}/caps_check.log"; then
+        pass "report is well formed and per-codec limits are the measured ones"
+    else
+        fail "sve-capabilities report disagrees with the library"
+        sed 's/^/      /' "${WORK}/caps_check.log" >&2
+    fi
+    printf '  info  backends: %s\n' \
+        "$(python3 -c "
+import json
+doc = json.load(open('${WORK}/caps.json'))
+print(', '.join(b['backend'] + ('' if b['available'] else '(none)') for b in doc['backends']))")"
+fi
+
 step "sidecar records correspond to emitted packets"
 if "${BUILD}/roi-transcode" --in "$SRC" --roi "${ROOT}/testdata/roi.json" \
     --out "${WORK}/sidecar.mp4" --encoder x265direct --codec h265 --crf 30 --gop 15 \

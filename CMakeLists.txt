@@ -18,6 +18,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(SVE_BUILD_TESTS       "Build the unit tests"                       ON)
 option(SVE_BUILD_INTEGRATION "Build the ta_vms gRPC service, CLI and tools" OFF)
+# §23 names both the directory and the switch. Separate from SVE_BUILD_INTEGRATION because
+# the specification does describe this one: sve-capabilities is part of the deliverable,
+# where the CLI and the scripts are not.
+option(SVE_BUILD_TOOLS       "Build sve-capabilities (§23)"               ON)
 
 # Each backend is an independent optional component (TZ v4.2 §5.5), and the core names none
 # of them: what a build has is generated below into RegisterDeploymentBackends, which is the
@@ -291,6 +295,21 @@ foreach(component sve_backend_x264 sve_backend_x265 sve_backend_ffmpeg
         target_link_libraries(sve_all INTERFACE ${component})
     endif()
 endforeach()
+
+# ---------------------------------------------------------------------------
+# tools -- §23
+#
+# Linked against sve_all rather than sve alone: the report is about which backends this
+# build has, so it needs them present. It compiles against include/ and nothing else, which
+# is the other half of what §23 asks -- a tool that had to reach into src/ would be
+# describing a library nobody else can use.
+# ---------------------------------------------------------------------------
+if(SVE_BUILD_TOOLS)
+    add_executable(sve-capabilities tools/sve_capabilities.cpp)
+    target_link_libraries(sve-capabilities PRIVATE sve_all)
+    target_compile_options(sve-capabilities PRIVATE ${SVE_WARNINGS})
+    install(TARGETS sve-capabilities RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 
 # ---------------------------------------------------------------------------
 # Install and export -- §26.3
