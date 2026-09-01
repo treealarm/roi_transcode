@@ -140,6 +140,40 @@ def clip_of(src: Path, seconds: float, total: float) -> Path:
     return dest
 
 
+def numbered_clip(clip: Path) -> Path:
+    """The same clip with its frame number burned into the picture.
+
+    The point is not a caption. The number is drawn into the source before encoding, so it
+    goes through the encoder and comes out the other side, and two panes showing the same
+    number is evidence that they are the same picture rather than a promise that they are.
+    Frames are selected by index precisely so they line up, and until now nothing on the
+    page could show whether that had worked.
+
+    Deliberately not baked into testdata/synth.mp4 by make-synth.sh. Three reasons, any one
+    of them enough: check.sh samples the background at (40,40) in a 384x144 patch, so a
+    number in the frame would sit inside a measured region; the fixture is built so the
+    background does not crawl -- its own comments record the fight to keep P-frames
+    skipping -- and a digit that changes every frame is exactly the moving detail that
+    stops them; and every measurement recorded in STATUS.md was taken against that file.
+    Done here instead, it costs the fixtures nothing and works on any clip, synthetic or
+    real.
+
+    Re-encoded losslessly (-qp 0), so what the ROI encoder sees is the source plus the
+    number and nothing else lost on the way in.
+    """
+    dest = clip.with_name(clip.stem + "_n.mp4")
+    if dest.exists():
+        return dest
+    # Bottom left: out of the way of a centred ROI box, and out of the top-left corner the
+    # rest of this project measures its background in.
+    text = ("drawtext=text='%{n}':fontsize=44:fontcolor=white:borderw=2:bordercolor=black"
+            ":box=1:boxcolor=black@0.55:x=14:y=h-th-14")
+    proc = run(["ffmpeg", "-hide_banner", "-v", "error", "-y", "-i", str(clip),
+                "-vf", text, "-c:v", "libx264", "-qp", "0", "-preset", "ultrafast",
+                "-pix_fmt", "yuv420p", str(dest)])
+    return dest if proc.returncode == 0 and dest.exists() else clip
+
+
 def metric(kind: str, src: Path, enc: Path, crop: tuple[int, int, int, int]) -> float | None:
     x, y, w, h = crop
     filt = f"[0:v]crop={w}:{h}:{x}:{y}[a];[1:v]crop={w}:{h}:{x}:{y}[b];[a][b]{kind}"
@@ -266,6 +300,12 @@ def encode_job(job_id: str, p: dict) -> None:
 
         stage("cutting segment")
         clip = clip_of(src, float(p.get("seconds") or 0), info["duration"])
+        if p.get("number_frames"):
+            stage("numbering frames")
+            # Used as both the encoder's input and the reference it is measured against,
+            # so the number is in both panes and neither side is compared against a
+            # picture the other never saw.
+            clip = numbered_clip(clip)
 
         run_id = job_id
         rundir = WORK / run_id
@@ -340,6 +380,32 @@ def extract(path: Path, index: int, dest: Path) -> bool:
     return proc.returncode == 0 and dest.exists()
 
 
+def difference(entry: dict, index: int, gain: int) -> Path | None:
+    """The two frames subtracted and amplified, because the eye is bad at small deltas.
+
+    Compression loss at a sane CRF is a few levels per pixel: real, measurable, and
+    invisible next to the picture it sits on. Subtracting and multiplying turns "I cannot
+    see a difference" into a map of where the difference actually is -- which is usually
+    the answer to whether the encoder spent the bits where it was told to.
+    """
+    src = entry["dir"] / "frames" / f"src_{index}.png"
+    out = entry["dir"] / "frames" / f"out_{index}.png"
+    if not extract(entry["src"], index, src) or not extract(entry["out"], index, out):
+        return None
+    dest = entry["dir"] / "frames" / f"diff_{index}_{gain}.png"
+    if dest.exists():
+        return dest
+    proc = run(["ffmpeg", "-hide_banner", "-v", "error", "-y", "-i", str(src), "-i", str(out),
+                "-filter_complex",
+                # lutyuv rather than eq: eq's contrast stretches around mid-grey, which
+                # pushes a difference near zero further towards black -- the amplifier has
+                # to be a multiplier from zero, not a contrast curve.
+                f"[0:v][1:v]blend=all_mode=difference,format=gray,"
+                f"lutyuv=y=clip(val*{gain}\\,0\\,255)",
+                str(dest)])
+    return dest if proc.returncode == 0 and dest.exists() else None
+
+
 PAGE = r"""<!doctype html>
 <meta charset="utf-8">
 <title>SVE bench</title>
@@ -372,6 +438,13 @@ PAGE = r"""<!doctype html>
   .pane h3 { font-size:11px; text-transform:uppercase; letter-spacing:.08em; opacity:.6;
              margin:0 0 5px; }
   .shot { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; }
+  .shot.zoomed { display:block; overflow:auto; }
+  .shot.zoomed .frame { max-width:none; max-height:none; }
+  .pane h3 em { font-style:normal; opacity:.6; font-weight:400; text-transform:none;
+                letter-spacing:0; }
+  #toolbar { display:flex; gap:18px; align-items:center; }
+  .inline { margin:0; gap:6px; }
+  .inline select { width:auto; }
   .frame { position:relative; max-width:100%; max-height:100%; background:#0004;
            border:1px solid var(--line); border-radius:6px; overflow:hidden; }
   .frame img { display:block; width:100%; height:100%; object-fit:contain; }
@@ -407,6 +480,11 @@ PAGE = r"""<!doctype html>
   <p class="hint">Cut by stream copy from frame 0 and used as both the encoder input and the
      reference, so a shorter run does not tilt the comparison.</p>
   <label><span>metrics</span><input type="checkbox" id="metrics" checked></label>
+  <label><span>burn frame numbers</span><input type="checkbox" id="number_frames"></label>
+  <p class="hint">Stamps the frame number into the source before encoding, so it travels
+     through the codec. Both panes showing the same number is what proves they are the same
+     picture. The fixtures are left alone: check.sh measures the background in the corner
+     and the clip is built so it does not crawl.</p>
   <label><span>live</span><input type="checkbox" id="live"></label>
 
   <h2>Encoding</h2>
@@ -416,8 +494,8 @@ PAGE = r"""<!doctype html>
     <option>vaapi</option><option>auto</option></select></label>
   <label><span>codec</span><select id="codec">
     <option>h264</option><option selected>h265</option></select></label>
-  <label><span>crf</span><input type="range" id="crf" min="10" max="45" value="28">
-    <output class="val" id="crf_v">28</output></label>
+  <label><span>crf</span><input type="range" id="crf" min="10" max="45" value="32">
+    <output class="val" id="crf_v">32</output></label>
   <label><span>gop</span><input type="range" id="gop" min="1" max="120" value="15">
     <output class="val" id="gop_v">15</output></label>
   <p class="hint" id="gophint"></p>
@@ -438,7 +516,7 @@ PAGE = r"""<!doctype html>
   <label><span>qp_delta</span><input type="range" id="qp_delta" min="-20" max="0" value="-8">
     <output class="val" id="qp_delta_v">-8</output></label>
   <label><span>background +qp</span><input type="range" id="background_qp_delta" min="0"
-    max="30" value="12"><output class="val" id="background_qp_delta_v">12</output></label>
+    max="30" value="22"><output class="val" id="background_qp_delta_v">22</output></label>
   <label><span>pad_norm</span><input type="range" id="pad_norm" min="0" max="0.2"
     step="0.005" value="0.02"><output class="val" id="pad_norm_v">0.02</output></label>
   <label><span>hold_sec</span><input type="range" id="hold_sec" min="0.1" max="20"
@@ -458,11 +536,23 @@ PAGE = r"""<!doctype html>
 </div>
 
 <div id="main">
+  <div id="toolbar">
+    <label class="inline"><span>zoom</span><select id="zoom">
+      <option value="fit">fit</option><option value="1">100%</option>
+      <option value="2">200%</option><option value="4">400%</option></select></label>
+    <label class="inline"><span>right pane</span><select id="view">
+      <option value="out">ROI encoded</option>
+      <option value="diff">difference &times;N</option></select></label>
+    <label class="inline" id="gainwrap" hidden><span>&times;</span>
+      <input type="range" id="gain" min="1" max="30" value="8" style="width:90px">
+      <output class="val" id="gain_v">8</output></label>
+  </div>
   <div id="views">
-    <div class="pane"><h3>original</h3><div class="shot">
+    <div class="pane"><h3>original <em id="lsize"></em></h3><div class="shot" id="lshot">
       <div class="frame" id="lframe"><img id="left">
         <svg viewBox="0 0 1 1" preserveAspectRatio="none"><g id="lbox"></g></svg></div></div></div>
-    <div class="pane"><h3>ROI encoded</h3><div class="shot">
+    <div class="pane"><h3 id="rtitle">ROI encoded <em id="rsize"></em></h3>
+      <div class="shot" id="rshot">
       <div class="frame" id="rframe"><img id="right">
         <svg viewBox="0 0 1 1" preserveAspectRatio="none"><g id="rbox"></g></svg></div></div></div>
   </div>
@@ -486,7 +576,7 @@ const $ = id => document.getElementById(id);
 const KNOBS = ["crf","gop","qp_delta","background_qp_delta","pad_norm","hold_sec",
                "bbox_x","bbox_y","bbox_w","bbox_h","seconds"];
 const ALL = KNOBS.concat(["encoder","codec","kind","target_bitrate","metrics","roi_file",
-                          "override_quality"]);
+                          "override_quality","number_frames"]);
 let runId = null, poll = null, pending = null, srcInfo = null, current = null;
 
 for (const k of KNOBS) {
@@ -535,6 +625,7 @@ function params() {
   const p = {source: $("source").value, encoder: $("encoder").value, codec: $("codec").value,
              kind: $("kind").value, target_bitrate: Number($("target_bitrate").value),
              metrics: $("metrics").checked, roi_file: $("roi_file").value,
+             number_frames: $("number_frames").checked,
              override_quality: $("override_quality").checked, t: 0.0};
   for (const k of KNOBS) p[k] = Number($(k).value);
   return p;
@@ -588,11 +679,59 @@ function showStats(i) {
 function loadFrame(n) {
   if (!runId) return;
   $("frame_v").value = n;
+  const view = $("view").value, gain = $("gain").value;
   $("left").src  = "/img/" + runId + "/src/" + n + ".png";
-  $("right").src = "/img/" + runId + "/out/" + n + ".png";
+  $("right").src = view === "diff"
+    ? "/img/" + runId + "/diff/" + n + ".png?gain=" + gain
+    : "/img/" + runId + "/out/" + n + ".png";
+  // The box means nothing over a difference map; the difference is the subject there.
+  $("rbox").style.display = view === "diff" ? "none" : "";
   drawBox(n);
 }
 $("frame").addEventListener("input", e => loadFrame(Number(e.target.value)));
+
+// Zoom, because this is where "I see no difference" usually comes from: a 1280-wide frame
+// squeezed into a 600-wide pane is downscaled, and downscaling is a low-pass filter that
+// removes exactly the ringing and blocking worth looking at. At 100% the pixels are the
+// encoder's own. The panes scroll together so the two views never drift apart.
+function applyZoom() {
+  const z = $("zoom").value;
+  const fit = z === "fit";
+  for (const [shot, frame] of [["lshot","lframe"], ["rshot","rframe"]]) {
+    $(shot).classList.toggle("zoomed", !fit);
+    $(frame).style.width = fit || !srcInfo ? "" : (srcInfo.width * Number(z)) + "px";
+    $(frame).style.height = fit || !srcInfo ? "" : (srcInfo.height * Number(z)) + "px";
+  }
+}
+$("zoom").addEventListener("change", applyZoom);
+let syncing = false;
+for (const [a, b] of [["lshot","rshot"], ["rshot","lshot"]])
+  $(a).addEventListener("scroll", () => {
+    if (syncing) return;
+    syncing = true;
+    $(b).scrollTop = $(a).scrollTop; $(b).scrollLeft = $(a).scrollLeft;
+    syncing = false;
+  });
+
+$("view").addEventListener("change", () => {
+  const diff = $("view").value === "diff";
+  $("gainwrap").hidden = !diff;
+  $("rtitle").innerHTML = (diff ? "difference" : "ROI encoded") + ' <em id="rsize"></em>';
+  if (current) showSizes(current);
+  loadFrame(Number($("frame").value) || 0);
+});
+$("gain").addEventListener("input", () => {
+  $("gain_v").value = $("gain").value;
+  if ($("view").value === "diff") loadFrame(Number($("frame").value) || 0);
+});
+
+function showSizes(i) {
+  const l = $("lsize"), r = $("rsize");
+  if (l) l.textContent = `${i.width}×${i.height} · ${fmtBytes(i.clip_bytes)}`;
+  if (r) r.textContent = $("view").value === "diff" ? ""
+    : `${i.width}×${i.height} · ${fmtBytes(i.bytes)}` +
+      (i.clip_bytes ? ` · ${(100 * i.bytes / i.clip_bytes).toFixed(0)}%` : "");
+}
 
 function busy(on, text) {
   $("prog").classList.toggle("on", on);
@@ -616,7 +755,8 @@ async function start() {
     clearInterval(poll); poll = null; busy(false, "");
     if (s.error) { $("err").textContent = s.error; return; }
     const i = s.result;
-    runId = i.id; current = i; showStats(i); $("log").textContent = i.log || "";
+    runId = i.id; current = i; showStats(i); showSizes(i); applyZoom();
+    $("log").textContent = i.log || "";
     const last = Math.max(0, i.frames - 1);
     const keep = Math.min(Number($("frame").value) || 0, last);
     $("frame").max = last; $("frame").disabled = false; $("frame").value = keep;
@@ -700,13 +840,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             _, run_id, side, name = parts
             with LOCK:
                 entry = RUNS.get(run_id)
-            if entry is None or side not in ("src", "out"):
+            if entry is None or side not in ("src", "out", "diff"):
                 self._send(404, b"no such run", "text/plain")
                 return
             try:
                 index = int(name[:-4])
             except ValueError:
                 self._send(400, b"bad frame", "text/plain")
+                return
+            if side == "diff":
+                gain = int((query.get("gain") or ["8"])[0])
+                dest = difference(entry, index, max(1, min(gain, 40)))
+                if dest is None:
+                    self._send(404, b"no such frame", "text/plain")
+                    return
+                self._send(200, dest.read_bytes(), "image/png")
                 return
             dest = entry["dir"] / "frames" / f"{side}_{index}.png"
             if not extract(entry[side], index, dest):
