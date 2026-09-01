@@ -54,6 +54,11 @@
 напрямую (`concurrency_test` — `sve_all`, ему нужны зарегистрированные бэкенды) (`sve_adaptive` слился в core срезом H). `public_headers_isolated` и
 `public_headers_selfcontained` собираются. Библиотека конфигурируется и собирается без `integration/`.
 
+**Разбор имён бэкендов уехал из файла про геометрию (срез W, 2026-09-01).** Три новых
+маленьких TU в `src/core/` по образцу `pixel_format.cpp` и `memory_type.cpp`:
+`backend_selection.cpp`, `codec_profile.cpp`, `policy.cpp`. `object_geometry.cpp` стал 181
+строкой вместо 310 и снова только про геометрию.
+
 **Пропуск теперь виден, а список имён бэкендов стал один (срез V, 2026-09-01).**
 Последняя строка `check.sh` — `all checks passed: N ok, M skipped, S steps`, то есть
 счётчик шагов, который `CLAUDE.md` велел читать вместо последней строки, сам стал
@@ -408,6 +413,35 @@ BUILD=build/integration python3 integration/bench/serve.py   # http://127.0.0.1:
 
 **Файл на 23.2% меньше и при этом лучше в зоне**, оплачено фоном. Вот это и есть
 предложение ROI в четырёх числах; из отношения «вход/выход» (132%) его не видно вовсе.
+
+### Срез W (2026-09-01): имена бэкендов уехали из файла про геометрию
+
+Чистый перенос, ни одной строки логики не изменено.
+
+`src/adaptive/object_geometry.cpp` был 310 строк, из которых геометрией — про
+ограничивающие прямоугольники, растеризацию полигона и дилатацию маски — были первые 186.
+Остальное набралось туда за срезы: `backend_name`, таблица `kNamedBackends` с парсером
+`backend_choice_from_name` и `backend_choice_names`, а следом `codec_profile_name`,
+`fallback_policy_name`, `quality_policy_name`. Разбор имён бэкендов в файле про геометрию
+объектов — SRP в чистом виде, и заметно это стало ровно тогда, когда срез V положил туда же
+таблицу с комментарием про NVENC и side data.
+
+Разложено по правилу, которое в репозитории уже действовало: один TU на заголовок или на
+перечисление, названный по нему, — так живут `src/core/pixel_format.cpp` (25 строк),
+`src/core/memory_type.cpp` (19) и `src/core/preset.cpp`. Появились
+`src/core/backend_selection.cpp` (зеркало `include/sve/backend_selection.h`),
+`src/core/codec_profile.cpp` и `src/core/policy.cpp` (зеркало `include/sve/policy.h`,
+которое объявляет оба его перечисления). `object_geometry.cpp` — 181 строка и только
+геометрия; из его инклюдов ушли `backend_selection.h`, `policy.h`, `<span>`, `<stdexcept>`,
+`<string>` и задвоившийся `<string_view>`.
+
+`backend_supports` остался в `backend/common/backend_registry.cpp` и переезжать ему некуда:
+он спрашивает реестр, а не таблицу имён.
+
+**Гейт:** побайтное совпадение с `ffb5833` на трёх путях; 17/17; оба header-таргета;
+`check.sh` — `all checks passed: 105 ok, 1 skipped, 30 steps`, то есть ровно то же, что до
+переноса. Зубов у этого среза нет и быть не может — он ничего не утверждает, кроме того,
+что после перекладывания собирается и даёт тот же байт.
 
 ### Срез V (2026-09-01): пропуск виден в итоге, а список имён стал один
 

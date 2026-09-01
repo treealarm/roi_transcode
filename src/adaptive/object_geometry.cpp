@@ -5,18 +5,11 @@
 // corner outside the outline is not protected. The AABB of the same outline stays available
 // for anything that only draws boxes.
 
-#include "sve/backend_selection.h"
 #include "sve/object.h"
-#include "sve/policy.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <span>
-#include <stdexcept>
-#include <string_view>
-#include <string>
-#include <string_view>
 #include <vector>
 
 namespace sve {
@@ -183,128 +176,6 @@ void dilate_mask(uint8_t* mask, int32_t width, int32_t height, int32_t radius)
             dst[x] = peak;
         }
     }
-}
-
-const char* backend_name(Backend e)
-{
-    switch (e) {
-    case Backend::Auto:  return "auto";
-    case Backend::IntelOneVpl:   return "qsv";
-    case Backend::Vaapi: return "vaapi";
-    case Backend::NvidiaNvenc: return "nvenc";
-    case Backend::X264:  return "x264";
-    case Backend::X265:  return "x265";
-    case Backend::X264Direct: return "x264direct";
-    case Backend::X265Direct: return "x265direct";
-    case Backend::IntelOneVplDirect: return "onevpldirect";
-    }
-    return "?";
-}
-
-namespace {
-
-/// The library ships no default order any more (§8.4), so the application supplies one.
-/// This is the order measured on the hardware this project runs on: Quick Sync first
-/// because it is several times faster here, VA-API second because it reaches the same
-/// integrated GPU when the oneVPL dispatcher finds no runtime, the software encoders last
-/// because they always work. NVENC is absent on purpose -- the FFmpeg wrapper for it does
-/// not read region-of-interest side data, so a stream chosen automatically would quietly
-/// carry no adaptive quality at all.
-constexpr Backend kAutoOrder[] = {
-    Backend::IntelOneVpl, Backend::Vaapi, Backend::X264, Backend::X265};
-
-/// "cpu" is Auto over exactly the two software backends. That is not a workaround for the
-/// split but the thing itself: whichever of the two cannot produce the codec is skipped
-/// with its reason logged, which is what the one combined backend used to do silently
-/// inside itself.
-constexpr Backend kCpuOrder[] = {Backend::X264, Backend::X265};
-
-struct NamedBackend {
-    std::string_view name;
-    Backend kind;
-    /// The preference order the name stands for. Empty for the names that mean one backend
-    /// outright -- there is nothing to choose between, and Auto is not what was asked for.
-    std::span<const Backend> order;
-};
-
-/// Every spelling accepted, in the order the refusal message lists them. One table rather
-/// than a chain of comparisons beside a hand-written list, because the two drifted: the
-/// message named neither the direct backends nor "qsvdirect", and a caller who typed one
-/// correctly was told it did not exist.
-constexpr NamedBackend kNamedBackends[] = {
-    {"auto", Backend::Auto, kAutoOrder},
-    {"cpu", Backend::Auto, kCpuOrder},
-    {"qsv", Backend::IntelOneVpl, {}},
-    {"vaapi", Backend::Vaapi, {}},
-    {"nvenc", Backend::NvidiaNvenc, {}},
-    {"x264", Backend::X264, {}},
-    {"x265", Backend::X265, {}},
-    {"x264direct", Backend::X264Direct, {}},
-    {"x265direct", Backend::X265Direct, {}},
-    {"onevpldirect", Backend::IntelOneVplDirect, {}},
-    {"qsvdirect", Backend::IntelOneVplDirect, {}},
-};
-
-} // namespace
-
-std::string backend_choice_names()
-{
-    std::string out;
-    for (const NamedBackend& known : kNamedBackends) {
-        if (!out.empty()) {
-            out += '|';
-        }
-        out.append(known.name);
-    }
-    return out;
-}
-
-BackendChoice backend_choice_from_name(const char* name)
-{
-    const std::string_view s = name != nullptr ? name : "";
-    for (const NamedBackend& known : kNamedBackends) {
-        if (s != known.name) {
-            continue;
-        }
-        BackendChoice choice;
-        choice.kind = known.kind;
-        choice.selection.preferred.assign(known.order.begin(), known.order.end());
-        return choice;
-    }
-    throw std::invalid_argument(
-        "unknown encoder '" + std::string(s) + "' (" + backend_choice_names() + ")");
-}
-
-const char* codec_profile_name(CodecProfile p)
-{
-    switch (p) {
-    case CodecProfile::Auto:         return "auto";
-    case CodecProfile::H264Baseline: return "h264-baseline";
-    case CodecProfile::H264Main:     return "h264-main";
-    case CodecProfile::H264High:     return "h264-high";
-    case CodecProfile::H265Main:     return "h265-main";
-    case CodecProfile::H265Main10:   return "h265-main10";
-    }
-    return "?";
-}
-
-const char* fallback_policy_name(FallbackPolicy p)
-{
-    switch (p) {
-    case FallbackPolicy::Permissive: return "permissive";
-    case FallbackPolicy::Strict:     return "strict";
-    }
-    return "?";
-}
-
-const char* quality_policy_name(QualityPolicy p)
-{
-    switch (p) {
-    case QualityPolicy::OBJECT_FIRST:  return "OBJECT_FIRST";
-    case QualityPolicy::BALANCED:      return "BALANCED";
-    case QualityPolicy::BITRATE_FIRST: return "BITRATE_FIRST";
-    }
-    return "?";
 }
 
 } // namespace sve

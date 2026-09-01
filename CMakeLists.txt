@@ -116,8 +116,11 @@ add_library(sve
     src/metadata/sei_payload.cpp
     src/metadata/sidecar.cpp
     src/backend/common/backend_registry.cpp
+    src/core/backend_selection.cpp
+    src/core/codec_profile.cpp
     src/core/logging.cpp
     src/core/memory_type.cpp
+    src/core/policy.cpp
     src/core/pixel_format.cpp
     src/core/preset.cpp
     src/core/frame_roi_pipeline.cpp
