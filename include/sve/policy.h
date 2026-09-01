@@ -7,6 +7,8 @@
 // not native encoder VBR/VBV.
 
 #include <cstdint>
+#include <functional>
+#include <string_view>
 
 namespace sve {
 
@@ -64,13 +66,43 @@ struct TemporalROIConfig {
     bool use_track_prediction = true;
 };
 
-/// TZ v3 §19 -- whether object metadata is written into the bitstream (SEI) and how many
-/// objects one frame may carry.
+/// Where object metadata goes -- TZ v4.2 §19.
+///
+/// Two channels, and §19.3 exists because the first one is not always available: a backend
+/// may not carry SEI at all, and Р5 turns it off for CPU H.265 outright. The sidecar is
+/// how the metadata still reaches the consumer when the bitstream cannot carry it.
+enum class SidecarFormat : int32_t {
+    /// No sidecar. The default: a caller who has not asked for one gets no extra work.
+    None = 0,
+    /// One JSON object per line -- §19.3's first named form.
+    NDJSON,
+};
+
+/// One sidecar record, handed over as it is produced.
+///
+/// A callback rather than a std::ostream, though §19.3 names both. An ostream in this
+/// header would put <ostream> on every consumer's include path for a feature most of them
+/// do not use, and a callback wraps one in three lines while the reverse is not true. The
+/// library never opens a file: §19.3 leaves naming and container binding to the
+/// application, and transcode_file is where <output_basename>.svemeta.ndjson is spelled.
+using SidecarSink = std::function<void(std::string_view record)>;
+
+/// TZ v4.2 §19 -- whether object metadata is written into the bitstream (SEI), whether a
+/// sidecar is written beside it, and how many objects one frame may carry.
 struct MetadataConfig {
     /// Embed user-data-unregistered SEI when the backend advertises `sei` (libx264/libx265).
     bool bitstream_sei = true;
     /// Soft cap; lowest-priority objects are dropped first if over.
     uint32_t max_objects = 64;
+
+    /// §19.3. None unless the caller asks, and asking without a sink is InvalidArgument
+    /// rather than a silently discarded stream.
+    SidecarFormat sidecar = SidecarFormat::None;
+    /// Called once per emitted packet, in emission order, with one complete record and no
+    /// trailing newline. §19.3 requires record N to correspond to the Nth emitted packet,
+    /// so this is driven from packet delivery rather than from submission -- with lookahead
+    /// those are neither the same moment nor the same order.
+    SidecarSink sidecar_sink;
 };
 
 /// §15. The bitrate budget, spent on critical objects first.

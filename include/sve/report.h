@@ -14,6 +14,10 @@ namespace sve {
 struct Report {
     Backend encoder_used = Backend::X264;
     std::string backend_name;
+    /// Where the §19.3 sidecar was written, empty when none was asked for. The library
+    /// writes records and the application names the file, so this is the application
+    /// saying which name it chose rather than the encoder reporting its own doing.
+    std::string sidecar_path;
     int64_t frames = 0;
     int64_t packets = 0;
     int64_t bytes = 0;

@@ -419,6 +419,83 @@ void strict_refuses_a_frame_whose_regions_do_not_fit()
     CHECK(enc->GetStatistics().fallbacks_applied == 0);
 }
 
+/// §19.3: one record per emitted packet, in emission order, and §19.3 again: the sidecar
+/// works when the bitstream metadata does not.
+void the_sidecar_follows_the_packets_not_the_submissions()
+{
+    auto pixels = std::make_shared<Pixels>();
+    std::vector<std::string> records;
+
+    EncoderConfig cfg = config_for();
+    // SEI off on purpose. §19.3 opens with "если SEI недоступен или отключён", so the
+    // sidecar has to stand on its own -- reachable only through the SEI path would defeat
+    // the case it exists for.
+    cfg.settings.metadata.bitstream_sei = false;
+    cfg.settings.metadata.sidecar = SidecarFormat::NDJSON;
+    cfg.settings.metadata.sidecar_sink = [&records](std::string_view line) {
+        records.emplace_back(line);
+    };
+    auto enc = open_encoder(cfg);
+
+    constexpr int kFrames = 12;
+    std::vector<EncodedPacket> packets;
+    const auto drain = [&] {
+        for (;;) {
+            EncodedPacket packet;
+            const Status s = enc->ReceivePacket(&packet);
+            if (!s.ok()) {
+                return;
+            }
+            packets.push_back(std::move(packet));
+        }
+    };
+    // Held outside the loop: Regions::boxes is a span, so the vector has to outlive the
+    // submit that reads through it.
+    std::vector<Box> boxes(1);
+    boxes[0].kind = "plate";
+    boxes[0].width = 0.2f;
+    boxes[0].height = 0.2f;
+    boxes[0].confidence = 0.9f;
+    for (int i = 0; i < kFrames; ++i) {
+        FrameMetadata meta;
+        meta.timestamp = MediaTimestamp{i, Rational{1, 25}};
+        boxes[0].x = 0.25f;
+        boxes[0].y = 0.25f;
+        meta.regions.boxes = boxes;
+        CHECK(enc->SubmitFrame(TimedFrame{make_frame(pixels, i), meta}).ok());
+        drain();
+    }
+    CHECK(enc->Flush().ok());
+    drain();
+
+    CHECK(records.size() == packets.size());
+    CHECK(!records.empty());
+    for (std::size_t i = 0; i < records.size(); ++i) {
+        // frame_index counts emissions, and the PTS is the one the packet came back with.
+        // Both are string checks rather than a parse: this test would otherwise need a
+        // JSON reader, and the core deliberately has none.
+        const std::string index = "\"frame_index\":" + std::to_string(i);
+        CHECK(records[i].find(index) != std::string::npos);
+        const std::string pts = "\"pts\":" + std::to_string(packets[i].pts);
+        CHECK(records[i].find(pts) != std::string::npos);
+    }
+}
+
+/// A format without a sink is refused, not quietly dropped (§50).
+void a_sidecar_without_a_sink_is_refused()
+{
+    EncoderConfig cfg = config_for();
+    cfg.settings.metadata.sidecar = SidecarFormat::NDJSON;
+    bool refused = false;
+    try {
+        auto enc = CreateVideoEncoder(cfg);
+        (void)enc;
+    } catch (const EncoderError& e) {
+        refused = e.status().code() == StatusCode::InvalidArgument;
+    }
+    CHECK(refused);
+}
+
 } // namespace
 
 int main()
@@ -439,6 +516,8 @@ int main()
     diagnostics_go_where_the_caller_says();
     strict_refuses_where_permissive_degrades();
     strict_refuses_a_frame_whose_regions_do_not_fit();
+    the_sidecar_follows_the_packets_not_the_submissions();
+    a_sidecar_without_a_sink_is_refused();
     std::printf("ok\n");
     return 0;
 }

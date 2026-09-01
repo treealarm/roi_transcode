@@ -743,6 +743,37 @@ fi
 # actually links -- so this step costs a Release build from scratch, and is worth it: until
 # the components were split there was nothing for readelf to read, and "the core does not
 # depend on FFmpeg" was a claim about intentions.
+# §19.3 and §19.4. The line count is the easy half; what matters is that record N
+# describes packet N, and the only way to get that wrong without it being obvious is
+# B-frame reordering, where emission order is not submission order. Records written when a
+# frame was handed in would pass a count and fail this.
+step "sidecar records correspond to emitted packets"
+if "${BUILD}/roi-transcode" --in "$SRC" --roi "${ROOT}/testdata/roi.json" \
+    --out "${WORK}/sidecar.mp4" --encoder x265direct --codec h265 --crf 30 --gop 15 \
+    --sidecar >"${WORK}/sidecar.log" 2>&1; then
+    meta="${WORK}/sidecar.svemeta.ndjson"
+    if [[ -f "$meta" ]]; then
+        assert_eq "one record per packet" \
+            "$(wc -l < "$meta")" "$(count_packets "${WORK}/sidecar.mp4")"
+        ffprobe -v error -select_streams v:0 -show_entries packet=pts -of csv=p=0 \
+            "${WORK}/sidecar.mp4" | tr -d ',' > "${WORK}/sidecar_pts.txt"
+        if summary=$("${ROOT}/integration/scripts/sidecar-check.py" \
+                "$meta" "${WORK}/sidecar_pts.txt" 2>&1); then
+            pass "records line up with packets (${summary})"
+        else
+            fail "sidecar does not correspond to the packets: ${summary}"
+        fi
+        # Not a claim about the codec: a check that the check has teeth. On a stream with
+        # no reordering, records written at submit would line up too.
+        reordered=$(printf '%s' "$summary" | grep -oE '[0-9]+ reordering' | cut -d' ' -f1)
+        assert_gt "the stream reorders, so order is really tested" "${reordered:-0}" "0"
+    else
+        fail "no sidecar was written"
+    fi
+else
+    fail "sidecar encode"; sed 's/^/      /' "${WORK}/sidecar.log" >&2
+fi
+
 step "dependency scan: the core declares and links nothing it must not"
 if depscan=$("${ROOT}/integration/scripts/dependency-scan.sh" "${WORK}/depscan" 2>&1); then
     printf '%s\n' "$depscan" | grep -E '^  (ok|skip)' | sed 's/^/  /'

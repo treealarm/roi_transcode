@@ -8,6 +8,9 @@
 #include "sve/frame.h"
 
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <string>
 #include <vector>
 
 namespace sve {
@@ -110,6 +113,27 @@ Report transcode_file(const std::string& input_path,
     // Left to propagate: EncoderError is a std::runtime_error, and this entry point
     // already answers a whole file with one exception. Re-wrapping it in fail() would
     // throw away the StatusCode a caller can branch on.
+    // §19.3 names the file and leaves the naming to the application, which is this
+    // function: the library writes records, not files. Opened only when a sidecar was
+    // asked for, and a sidecar that cannot be opened is a failure rather than a silently
+    // missing file -- the caller asked for metadata and would otherwise get an encode that
+    // looks complete without it.
+    std::ofstream sidecar;
+    std::string sidecar_path;
+    if (cfg.settings.metadata.sidecar != SidecarFormat::None) {
+        const std::filesystem::path base = std::filesystem::path(output_path);
+        const std::filesystem::path path =
+            base.parent_path() / (base.stem().string() + ".svemeta.ndjson");
+        sidecar.open(path);
+        if (!sidecar) {
+            fail("cannot open sidecar " + path.string());
+        }
+        cfg.settings.metadata.sidecar_sink = [&sidecar](std::string_view record) {
+            sidecar << record << '\n';
+        };
+        sidecar_path = path.string();
+    }
+
     const std::unique_ptr<SmartVideoEncoder> made = CreateVideoEncoder(cfg);
     SmartVideoEncoder& enc = *made;
 
@@ -219,7 +243,8 @@ Report transcode_file(const std::string& input_path,
     open_mux();
     file_sink.end();
 
-    const Report report = enc.ToReport();
+    Report report = enc.ToReport();
+    report.sidecar_path = sidecar_path;
     std::fprintf(stderr, "encoded with %s crf=%d preset=%s converted=%ld uploaded=%ld\n",
         report.backend_name.c_str(), settings.crf, preset_name(settings.preset),
         static_cast<long>(report.frames_converted),

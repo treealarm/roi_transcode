@@ -13,7 +13,7 @@ void usage()
         "Usage: roi-transcode --in CLIP --roi roi.json --out OUT.mp4\n"
         "         [--encoder auto|qsv|vaapi|nvenc|x264|x265|cpu] [--codec h264|h265|source]\n"
         "         [--crf 28] [--gop N] [--preset balanced]\n"
-        "         [--target-bitrate BPS] [--bitrate-overshoot F]\n"
+        "         [--target-bitrate BPS] [--bitrate-overshoot F] [--sidecar]\n"
         "\n"
         "ROI transcoder, H.264 by default. Target is Intel Quick Sync.\n"
         "--codec source keeps whatever the input already is, which is what an\n"
@@ -22,6 +22,10 @@ void usage()
         "--target-bitrate: CPU H.264 opens CBR+filler (ROI redistributes coded\n"
         "quality; mux bitrate matches). CPU H.265 and HW stay on CQP/CRF + outer\n"
         "BitrateBudget loop.\n"
+        "--sidecar writes <output_basename>.svemeta.ndjson beside the output (TZ §19.3):\n"
+        "one JSON line per emitted packet, carrying the objects that frame was submitted\n"
+        "with. Independent of SEI -- it is what carries the metadata when the bitstream\n"
+        "cannot, and its lines follow emission order including B-frame reordering.\n"
         "--bitrate-overshoot is the allowed average overshoot\n"
         "fraction (default 0.1 when a target is set).\n"
         "QSV maps AVRegionOfInterest to mfxExtEncoderROI (CQP + low_power).\n"
@@ -90,6 +94,8 @@ int main(int argc, char** argv)
             } else if (std::strcmp(a, "--bitrate-overshoot") == 0) {
                 settings.rate_control.max_average_overshoot =
                     std::stof(need("--bitrate-overshoot"));
+            } else if (std::strcmp(a, "--sidecar") == 0) {
+                settings.metadata.sidecar = sve::SidecarFormat::NDJSON;
             } else if (std::strcmp(a, "-h") == 0
                 || std::strcmp(a, "--help") == 0) {
                 usage();

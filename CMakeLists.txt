@@ -96,6 +96,7 @@ add_library(sve
     src/adaptive/roi_lag.cpp
     src/metadata/cbor.cpp
     src/metadata/sei_payload.cpp
+    src/metadata/sidecar.cpp
     src/backend/common/backend_registry.cpp
     src/core/logging.cpp
     src/core/memory_type.cpp

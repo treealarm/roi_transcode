@@ -58,4 +58,14 @@ bool decode_sei_payload(std::span<const uint8_t> bytes, SeiFrame& out);
 std::vector<SeiObject> sei_objects_from_boxes(
     std::span<const Box> boxes, uint32_t max_objects = 64);
 
+/// One NDJSON sidecar record -- §19.3. The same fields §19.2 puts in the SEI payload, plus
+/// `frame_index`, which is the position of the packet this record accompanies.
+///
+/// Written by hand rather than through a JSON library, for the reason recorded against CBOR
+/// in STATUS.md: the core's dependency set is empty and this is a fixed schema, not
+/// arbitrary JSON. No trailing newline -- the caller decides what separates records, since
+/// a file wants one and a message queue does not.
+std::string encode_sidecar_ndjson(const SeiFrame& frame, uint64_t frame_index,
+    uint32_t max_objects = 64);
+
 } // namespace sve

@@ -15,6 +15,7 @@
 
 #include <format>
 #include <deque>
+#include <map>
 #include <functional>
 #include <span>
 #include <utility>
@@ -116,10 +117,45 @@ struct SmartVideoEncoder::Impl : PacketSink {
 
         ++stats.packets_received;
         stats.bytes_encoded += static_cast<int64_t>(packet.payload.size());
+        write_sidecar(packet.pts);
         queued.push_back(std::move(out));
     }
 
-    void end() override {}
+    void end() override
+    {
+        // Anything still held has no packet and never will. §19.4 asks for complete
+        // synchronisation, so the gap is counted and said out loud rather than leaving a
+        // file that is simply shorter than the stream.
+        if (!pending_sidecar.empty()) {
+            sidecar_orphans += static_cast<int64_t>(pending_sidecar.size());
+            pending_sidecar.clear();
+        }
+        if (sidecar_orphans > 0) {
+            log.warn(std::format("sidecar: {} frame(s) submitted whose packet never "
+                                 "arrived; records and packets do not correspond",
+                sidecar_orphans));
+        }
+    }
+
+    /// The record for the packet just emitted, if a sidecar was asked for.
+    void write_sidecar(int64_t pts)
+    {
+        if (config.settings.metadata.sidecar == SidecarFormat::None
+            || !config.settings.metadata.sidecar_sink) {
+            return;
+        }
+        const auto it = pending_sidecar.find(pts);
+        if (it == pending_sidecar.end()) {
+            // A packet whose frame we never held. Not silently skipped: §19.3's guarantee
+            // is that records correspond to packets, and a missing one breaks it.
+            ++sidecar_orphans;
+            return;
+        }
+        config.settings.metadata.sidecar_sink(encode_sidecar_ndjson(
+            it->second, sidecar_index, config.settings.metadata.max_objects));
+        ++sidecar_index;
+        pending_sidecar.erase(it);
+    }
 
     bool queue_full() const { return queued.size() >= kMaxQueuedPackets; }
 
@@ -237,15 +273,42 @@ struct SmartVideoEncoder::Impl : PacketSink {
     }
     bool warned_roi_map = false;
 
+    /// Submitted metadata waiting for the packet it belongs to -- §19.3.
+    ///
+    /// Keyed by PTS because that is §19.4's first synchronisation key and the only one the
+    /// packet carries back. Submission order is not emission order once a codec has
+    /// lookahead or B-frames, so writing the record at submit would produce a file whose
+    /// Nth line is not the Nth packet -- which is the one thing §19.3 asks of it.
+    std::map<int64_t, SeiFrame> pending_sidecar;
+    /// Position of the packet this record accompanies, which is what §19.3 calls
+    /// frame_index. Counts emissions, not submissions.
+    uint64_t sidecar_index = 0;
+    /// Frames whose packet never arrived to claim them. A packet dropped or a PTS that
+    /// came back changed would leave one here, and §19.4 wants 100% synchronisation --
+    /// so this is counted and reported rather than left as a quietly shorter file.
+    int64_t sidecar_orphans = 0;
+
     /// §19.1 keeps `objects` and `roi_info` as separate fields, and §19.2's payload is the
     /// objects -- so what goes in is what the caller submitted, not what the pipeline made
     /// of it after smoothing and normalisation. The two entry points disagreed about this
     /// until they were built on one encoder: the file path embedded the applied boxes, the
     /// session path the submitted ones. The session path was right.
-    Status sei_for(const FrameMetadata& meta, int64_t pts, std::vector<uint8_t>* out)
+    /// The metadata for one frame, for both channels §19 defines.
+    ///
+    /// Built once and used twice on purpose. The sidecar exists precisely for the case
+    /// where the bitstream cannot carry the objects -- §19.3 opens with "если SEI
+    /// недоступен или отключён" -- so it must not be reachable only through the SEI path.
+    /// Deriving both from one SeiFrame is also what keeps the two channels describing the
+    /// same frame the same way; the file path and the session path once disagreed about
+    /// exactly this, and §19.1's separation of `objects` from `roi_info` is the rule they
+    /// broke. What goes in is what the caller submitted.
+    Status metadata_for(const FrameMetadata& meta, int64_t pts, std::vector<uint8_t>* out)
     {
+        const MetadataConfig& cfg = config.settings.metadata;
+        const bool want_sidecar = cfg.sidecar != SidecarFormat::None && cfg.sidecar_sink;
+
         const EncoderCapabilities caps = encoder.capabilities();
-        const bool wanted = config.settings.metadata.bitstream_sei;
+        const bool wanted = cfg.bitstream_sei;
         if (wanted && !caps.sei) {
             count_fallback(warned_sei);
         }
@@ -253,15 +316,25 @@ struct SmartVideoEncoder::Impl : PacketSink {
             !s.ok()) {
             return s;
         }
-        if (!wanted || !caps.sei) {
+
+        const bool want_sei = wanted && caps.sei;
+        if (!want_sei && !want_sidecar) {
             return Status::Ok();
         }
+
         SeiFrame frame;
         frame.frame_id = static_cast<uint64_t>(stats.frames_submitted);
         frame.pts = pts;
-        frame.objects =
-            sei_objects_from_boxes(meta.regions.boxes, config.settings.metadata.max_objects);
-        *out = encode_sei_side_data(frame, config.settings.metadata.max_objects);
+        frame.objects = sei_objects_from_boxes(meta.regions.boxes, cfg.max_objects);
+        if (want_sei) {
+            *out = encode_sei_side_data(frame, cfg.max_objects);
+        }
+        if (want_sidecar) {
+            // Held until this frame's packet comes out; see write_sidecar. A second frame
+            // at the same PTS replaces the first, which is the only sane reading of two
+            // frames claiming one timestamp.
+            pending_sidecar[pts] = std::move(frame);
+        }
         return Status::Ok();
     }
 };
@@ -273,6 +346,15 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const EncoderConfig& confi
 {
     if (!config.input.valid()) {
         throw EncoderError(Status::InvalidArgument("input video format is not usable"));
+    }
+
+    // §19.3 asks for a sink when it asks for a sidecar. Refused here rather than accepted
+    // and dropped: a caller who set the format and forgot the sink would otherwise get a
+    // successful encode and no metadata, which is the shape of failure §50 forbids.
+    if (config.settings.metadata.sidecar != SidecarFormat::None
+        && !config.settings.metadata.sidecar_sink) {
+        throw EncoderError(Status::InvalidArgument(
+            "a sidecar format was requested without a sidecar sink to write it to"));
     }
 
     auto impl = std::make_unique<SmartVideoEncoder::Impl>(config);
@@ -453,7 +535,7 @@ Status SmartVideoEncoder::Impl::submit(const FrameMetadata& metadata, const Hand
             s.warned_roi = true;
         }
         std::vector<uint8_t> sei;
-        if (const Status made = s.sei_for(metadata, pts, &sei); !made.ok()) {
+        if (const Status made = s.metadata_for(metadata, pts, &sei); !made.ok()) {
             return made;
         }
         if (metadata.force_key_frame || s.key_frame_pending) {
