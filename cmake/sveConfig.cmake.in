@@ -1,0 +1,9 @@
+@PACKAGE_INIT@
+
+# find_package(sve CONFIG) gives sve::sve and whichever components this build installed.
+# §26.4 fixes the public target name, and the components are separate on purpose: they are
+# explicitly linkable and must not become transitive dependencies of the core.
+include("${CMAKE_CURRENT_LIST_DIR}/sveTargets.cmake")
+
+set(SVE_COMPONENTS @SVE_INSTALLED_COMPONENTS@)
+check_required_components(sve)

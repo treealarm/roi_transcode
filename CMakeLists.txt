@@ -6,7 +6,12 @@
 # that is off by default so a consumer building the library never sees gRPC at all.
 
 cmake_minimum_required(VERSION 3.22)
-project(smart-video-encoder CXX)
+# One version source (§26.3, §58.7): the manifest is the file a release already has to
+# touch, so it is the one that carries the number rather than a copy kept in step by hand.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg.json" SVE_MANIFEST)
+string(JSON SVE_VERSION GET "${SVE_MANIFEST}" version)
+
+project(smart-video-encoder VERSION ${SVE_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -48,6 +53,7 @@ set(SVE_WARNINGS
     $<$<CXX_COMPILER_ID:MSVC>:/W4>
 )
 
+include(GNUInstallDirs)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FFMPEG REQUIRED
     libavformat
@@ -77,7 +83,7 @@ pkg_check_modules(X265 x265)
 # link without dragging FFmpeg along; now that the core itself drags nothing, the split has
 # nothing left to protect.
 # ---------------------------------------------------------------------------
-add_library(sve STATIC
+add_library(sve
     src/adaptive/importance.cpp
     src/adaptive/object_normalizer.cpp
     src/adaptive/object_geometry.cpp
@@ -103,16 +109,31 @@ add_library(sve STATIC
     src/core/backend_deleters.cpp
 )
 target_include_directories(sve
-    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PUBLIC  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
     # As sve_adaptive published it before the merge: the arithmetic tests and the example
     # applications include these headers directly. Narrowing that is header hygiene, not
     # the dependency split, and doing both at once would hide one behind the other.
-    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/src/adaptive
+    # BUILD_INTERFACE only -- these are internal headers and are not installed, so an
+    # installed consumer never sees the path.
+    PUBLIC  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/adaptive>
 )
 target_compile_definitions(sve PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_compile_options(sve PRIVATE ${SVE_WARNINGS})
+# §26.3 wants libsve.so.<major> from a shared build. The targets above take their type from
+# BUILD_SHARED_LIBS rather than saying STATIC: an explicit STATIC ignores the switch, and
+# the first dependency scan reported "passed" having skipped every readelf check because
+# there was no shared object to read.
+# Static stays the default because
+# ta_vms links us statically through add_subdirectory() and changing that without its say
+# is not ours to do; BUILD_SHARED_LIBS=ON is what the dependency scan of §44 configures,
+# since readelf needs something to read.
+set_target_properties(sve PROPERTIES
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${PROJECT_VERSION_MAJOR}
+    POSITION_INDEPENDENT_CODE ON)
 add_library(sve::sve ALIAS sve)
 
 # A component links the core and is linked by the deployment, never the other way round.
@@ -126,6 +147,7 @@ function(sve_add_backend_component name)
     target_compile_options(${name} PRIVATE ${SVE_WARNINGS})
     target_compile_definitions(${name} PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_link_libraries(${name} PUBLIC sve)
+    set_target_properties(${name} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -135,7 +157,7 @@ endfunction()
 # libraries with separate APIs, which is the same reason §5.4 makes them separate backends.
 # ---------------------------------------------------------------------------
 if(SVE_BUILD_BACKEND_X264)
-    add_library(sve_backend_x264 STATIC src/backend/x264/x264_backend.cpp)
+    add_library(sve_backend_x264 src/backend/x264/x264_backend.cpp)
     sve_add_backend_component(sve_backend_x264)
     target_include_directories(sve_backend_x264 SYSTEM PRIVATE ${X264_INCLUDE_DIRS})
     target_link_directories(sve_backend_x264 PUBLIC ${X264_LIBRARY_DIRS})
@@ -144,7 +166,7 @@ if(SVE_BUILD_BACKEND_X264)
 endif()
 
 if(SVE_BUILD_BACKEND_X265)
-    add_library(sve_backend_x265 STATIC src/backend/x265/x265_backend.cpp)
+    add_library(sve_backend_x265 src/backend/x265/x265_backend.cpp)
     sve_add_backend_component(sve_backend_x265)
     target_include_directories(sve_backend_x265 SYSTEM PRIVATE ${X265_INCLUDE_DIRS})
     target_link_directories(sve_backend_x265 PUBLIC ${X265_LIBRARY_DIRS})
@@ -160,12 +182,13 @@ endif()
 # libavutil but not libavcodec.
 # ---------------------------------------------------------------------------
 if(SVE_BUILD_FFMPEG_INTEROP)
-    add_library(sve_ffmpeg_interop STATIC
+    add_library(sve_ffmpeg_interop
         src/core/av_frame_adapter.cpp
         src/backend/common/av_pixel_format.cpp
     )
     target_include_directories(sve_ffmpeg_interop
-        PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
+        PUBLIC  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
     target_include_directories(sve_ffmpeg_interop SYSTEM PUBLIC ${FFMPEG_INCLUDE_DIRS})
@@ -185,7 +208,7 @@ endif()
 # well -- and off by default so that the default build is the graph the specification draws.
 # ---------------------------------------------------------------------------
 if(SVE_BUILD_BACKEND_FFMPEG)
-    add_library(sve_backend_ffmpeg STATIC
+    add_library(sve_backend_ffmpeg
         src/backend/common/backend_common.cpp
         src/backend/software/software_backend.cpp
         src/backend/onevpl/onevpl_backend.cpp
@@ -209,14 +232,15 @@ endif()
 # keeping them in their own target is what stops that spreading.
 # ---------------------------------------------------------------------------
 if(SVE_BUILD_EXAMPLES)
-    add_library(sve_examples STATIC
+    add_library(sve_examples
         src/core/transcode_file.cpp
         src/core/session.cpp
         src/core/frame_input.cpp
         src/core/file_mux_sink.cpp
     )
     target_include_directories(sve_examples
-        PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
+        PUBLIC  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
     target_include_directories(sve_examples SYSTEM PUBLIC ${FFMPEG_INCLUDE_DIRS})
@@ -266,6 +290,75 @@ foreach(component sve_backend_x264 sve_backend_x265 sve_backend_ffmpeg
         target_link_libraries(sve_all INTERFACE ${component})
     endif()
 endforeach()
+
+# ---------------------------------------------------------------------------
+# Install and export -- §26.3
+#
+# find_package(sve CONFIG) yields sve::sve, and each component is its own explicitly
+# linkable target. The pkg-config file is the part §26.4 states as a rule and §44 checks:
+#
+#     Основной sve.pc не объявляет FFmpeg, x264, x265 или vendor SDK зависимостями.
+#     Component metadata объявляет только собственные зависимости соответствующего backend.
+#
+# The core's Requires.private is empty, and that is now a fact about the build rather than
+# a promise: the core links nothing, so there is nothing for it to declare.
+# ---------------------------------------------------------------------------
+include(CMakePackageConfigHelpers)
+
+set(SVE_INSTALL_TARGETS sve sve_all)
+set(SVE_INSTALLED_COMPONENTS "")
+foreach(component sve_backend_x264 sve_backend_x265 sve_backend_ffmpeg
+                  sve_ffmpeg_interop sve_examples)
+    if(TARGET ${component})
+        list(APPEND SVE_INSTALL_TARGETS ${component})
+        list(APPEND SVE_INSTALLED_COMPONENTS ${component})
+    endif()
+endforeach()
+
+install(TARGETS ${SVE_INSTALL_TARGETS} EXPORT sveTargets
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(DIRECTORY include/sve DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING PATTERN "*.h")
+install(EXPORT sveTargets NAMESPACE sve::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/sve)
+
+configure_package_config_file(cmake/sveConfig.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/sveConfig.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/sve)
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/sveConfigVersion.cmake"
+    COMPATIBILITY SameMajorVersion)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/sveConfig.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/sveConfigVersion.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/sve)
+
+# One .pc per installable unit, each declaring only what it actually links.
+function(sve_write_pc target library description requires)
+    set(SVE_PC_LIBRARY "${library}")
+    set(SVE_PC_DESCRIPTION "${description}")
+    set(SVE_PC_REQUIRES_PRIVATE "${requires}")
+    configure_file(cmake/sve.pc.in "${CMAKE_CURRENT_BINARY_DIR}/${target}.pc" @ONLY)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${target}.pc"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+endfunction()
+
+sve_write_pc(sve sve "Adaptive ROI video encoding -- core" "")
+if(TARGET sve_backend_x264)
+    sve_write_pc(sve-backend-x264 sve_backend_x264
+        "Adaptive ROI video encoding -- direct libx264 backend" "x264")
+endif()
+if(TARGET sve_backend_x265)
+    sve_write_pc(sve-backend-x265 sve_backend_x265
+        "Adaptive ROI video encoding -- direct libx265 backend" "x265")
+endif()
+if(TARGET sve_ffmpeg_interop)
+    # libavutil and not libavcodec: the adapter converts a frame, it does not encode, and
+    # §26.4 allows the interop component exactly this one.
+    sve_write_pc(sve-ffmpeg-interop sve_ffmpeg_interop
+        "Adaptive ROI video encoding -- AVFrame interop" "libavutil")
+endif()
 
 # ---------------------------------------------------------------------------
 # Tests -- §52 tests/unit

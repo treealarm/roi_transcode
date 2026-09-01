@@ -738,6 +738,20 @@ else
     printf '  skip  crowded scene not generated (benchmarks/synthetic/make-scenes.py)\n'
 fi
 
+# §20 and §44, and the first place either can be shown with a number rather than asserted.
+# It configures a shared build of §5.5's graph, installs it and reads what each object
+# actually links -- so this step costs a Release build from scratch, and is worth it: until
+# the components were split there was nothing for readelf to read, and "the core does not
+# depend on FFmpeg" was a claim about intentions.
+step "dependency scan: the core declares and links nothing it must not"
+if depscan=$("${ROOT}/integration/scripts/dependency-scan.sh" "${WORK}/depscan" 2>&1); then
+    printf '%s\n' "$depscan" | grep -E '^  (ok|skip)' | sed 's/^/  /'
+    pass "$(printf '%s\n' "$depscan" | tail -1)"
+else
+    printf '%s\n' "$depscan" | grep -E '^  (FAIL|skip)' | sed 's/^/  /' >&2
+    fail "dependency scan (§26.4, §44)"
+fi
+
 step "the library builds on its own"
 # Configures the project with the integration switched off -- no JSON, no protos, no gRPC,
 # no CLI. This is the claim the layout makes: TZ v2.0 §52 describes the library, and what
