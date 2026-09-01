@@ -350,6 +350,10 @@ def encode_job(job_id: str, p: dict) -> None:
             RUNS[run_id] = {"src": clip, "out": out_path, "dir": rundir}
             JOBS[job_id]["result"] = dict(result)
 
+        stage("extracting frames")
+        for side in ("src", "out"):
+            extract_all(RUNS[run_id], side, result["frames"])
+
         if p.get("metrics", True):
             stage("measuring")
             result["ssim_zone"] = metric("ssim", clip, out_path, zone)
@@ -362,6 +366,21 @@ def encode_job(job_id: str, p: dict) -> None:
     except Exception as exc:  # any failure is the page's to show, not the console's
         with LOCK:
             JOBS[job_id].update(stage="failed", done=True, error=str(exc))
+
+
+def extract_all(entry: dict, side: str, count: int) -> None:
+    """Every frame of one side in a single ffmpeg run.
+
+    Frame by frame each request re-opened and re-decoded the file, which is fine for
+    stepping and hopeless for playback: at 25 fps the decode alone outruns the frame
+    budget. One pass writes them all, so the slider is instant and Play has something to
+    play.
+    """
+    frames = entry["dir"] / "frames"
+    if (frames / f"{side}_{max(0, count - 1)}.png").exists():
+        return
+    run(["ffmpeg", "-hide_banner", "-v", "error", "-y", "-i", str(entry[side]),
+         "-vsync", "0", "-start_number", "0", str(frames / f"{side}_%d.png")])
 
 
 def extract(path: Path, index: int, dest: Path) -> bool:
@@ -443,6 +462,7 @@ PAGE = r"""<!doctype html>
   .pane h3 em { font-style:normal; opacity:.6; font-weight:400; text-transform:none;
                 letter-spacing:0; }
   #toolbar { display:flex; gap:18px; align-items:center; }
+  button.mini { width:32px; margin:0; padding:5px 0; font-size:12px; }
   .inline { margin:0; gap:6px; }
   .inline select { width:auto; }
   .frame { position:relative; max-width:100%; max-height:100%; background:#0004;
@@ -500,9 +520,11 @@ PAGE = r"""<!doctype html>
     they are. The fixtures are left alone: check.sh measures the background in the corner
     the number would land in, and the clip is built so the background does not
     crawl.">?</i></span><input type="checkbox" id="number_frames"></label>
-  <label><span>live<i class="q" data-tip="Re-run 600 ms after a knob stops moving. The
-    pause is the point: a slider fires on every pixel of travel, and an encode per pixel
-    would queue for minutes.">?</i></span><input type="checkbox" id="live"></label>
+  <label><span>auto re-encode<i class="q" data-tip="Re-run the encode by itself, 600 ms
+    after a knob stops moving, so a knob change shows its result without pressing the
+    button. The pause is the point: a slider fires on every pixel of travel, and an encode
+    per pixel would queue for minutes. This is not playback -- for that, use Play under the
+    panes.">?</i></span><input type="checkbox" id="live"></label>
 
   <h2>Encoding</h2>
   <label><span>backend<i class="q" data-tip="x264direct and x265direct drive libx264 and
@@ -590,9 +612,17 @@ PAGE = r"""<!doctype html>
         <svg viewBox="0 0 1 1" preserveAspectRatio="none"><g id="rbox"></g></svg></div></div></div>
   </div>
   <div id="bar">
+    <button id="play" class="mini" disabled>&#9654;</button>
     <span>frame</span>
     <input type="range" id="frame" min="0" max="0" value="0" disabled>
     <output class="val" id="frame_v">0</output>
+    <label class="inline"><span>speed<i class="q" data-tip="Playback rate as a fraction of
+      the clip's own. The frames are the decoded ones, played in order -- no second encode,
+      so nothing is added to what you are judging. Slow it down to watch the background
+      pump between keyframes.">?</i></span><select id="speed">
+      <option value="0.25">&frac14;&times;</option><option value="0.5">&frac12;&times;</option>
+      <option value="1" selected>1&times;</option></select></label>
+    <label class="inline"><span>loop</span><input type="checkbox" id="loop" checked></label>
     <span id="prog"><span class="spin"></span><span id="stage"></span></span>
   </div>
   <div class="legend">
@@ -740,7 +770,37 @@ function loadFrame(n) {
   $("rbox").style.display = view === "diff" ? "none" : "";
   drawBox(n);
 }
-$("frame").addEventListener("input", e => loadFrame(Number(e.target.value)));
+$("frame").addEventListener("input", e => { stop(); loadFrame(Number(e.target.value)); });
+
+// Playback, which is what most people mean by watching a codec work. Some of what ROI
+// encoding does is only visible in motion -- the background pumping between keyframes, and
+// whether §13's anti-flicker is holding the zone steady -- and a still frame cannot show
+// either. These are the decoded frames played in order, not a second encode, so nothing is
+// added to the thing being judged.
+let timerId = null;
+function playing() { return timerId !== null; }
+function stop() {
+  if (timerId) clearInterval(timerId);
+  timerId = null;
+  $("play").innerHTML = "&#9654;";
+}
+function play() {
+  if (!runId || playing()) return;
+  const fps = (current && current.fps ? current.fps : 25) * Number($("speed").value);
+  $("play").innerHTML = "&#10073;&#10073;";
+  timerId = setInterval(() => {
+    const last = Number($("frame").max), next = Number($("frame").value) + 1;
+    if (next > last) {
+      if (!$("loop").checked) { stop(); return; }
+      $("frame").value = 0;
+    } else {
+      $("frame").value = next;
+    }
+    loadFrame(Number($("frame").value));
+  }, Math.max(20, 1000 / Math.max(1, fps)));
+}
+$("play").addEventListener("click", () => playing() ? stop() : play());
+$("speed").addEventListener("change", () => { if (playing()) { stop(); play(); } });
 
 // Zoom, because this is where "I see no difference" usually comes from: a 1280-wide frame
 // squeezed into a 600-wide pane is downscaled, and downscaling is a low-pass filter that
@@ -792,6 +852,7 @@ function busy(on, text) {
 }
 
 async function start() {
+  stop();
   $("err").textContent = "";
   busy(true, "queued");
   const r = await fetch("/run", {method: "POST", body: JSON.stringify(params())});
@@ -812,6 +873,7 @@ async function start() {
     const last = Math.max(0, i.frames - 1);
     const keep = Math.min(Number($("frame").value) || 0, last);
     $("frame").max = last; $("frame").disabled = false; $("frame").value = keep;
+    $("play").disabled = last === 0;
     loadFrame(keep);
   }, 250);
 }
