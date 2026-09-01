@@ -6,6 +6,10 @@
 /build*/
 /out/
 /.cache/
+# Python leaves these beside any script it runs; the tree has had .py files since
+# make-scenes.py and picked up a bench of its own on 2026-08-31.
+__pycache__/
+*.pyc
 *.mp4
 !testdata/*.json
 # Fetched by scripts/fetch-intel-qsv.sh — the Intel VA-API driver, ~61 MB. Not a
