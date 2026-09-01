@@ -158,8 +158,9 @@ class X264Backend final : public IEncoderBackend {
 public:
     Backend kind() const override { return Backend::X264Direct; }
 
-    EncoderCapabilities GetCapabilities(Codec codec) const override
+    EncoderCapabilities GetCapabilities(const CapabilityQuery& query) const override
     {
+        const Codec codec = query.codec;
         EncoderCapabilities c;
         if (codec != Codec::H264) {
             return c;

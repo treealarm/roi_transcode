@@ -37,8 +37,9 @@ public:
 
     Backend kind() const override { return m_kind; }
 
-    EncoderCapabilities GetCapabilities(Codec codec) const override
+    EncoderCapabilities GetCapabilities(const CapabilityQuery& query) const override
     {
+        const Codec codec = query.codec;
         EncoderCapabilities c;
         if (codec != m_codec) {
             // Not a degraded answer but an empty one: this backend cannot produce that

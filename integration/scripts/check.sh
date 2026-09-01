@@ -412,6 +412,29 @@ if [[ -e /dev/dri/renderD128 ]]; then
             else
                 fail "the block map run did not complete"
             fi
+
+            # The other half of the same decision, and the reason GetCapabilities takes a
+            # CapabilityQuery: mfxExtMBQP carries absolute quantisers, so it needs CQP,
+            # while §16's rolling criterion needs the hardware's own rate control. Both are
+            # available on this backend and not at once. Asked for a bitrate, it opens VBR
+            # and goes back to rectangles -- and says so, rather than accepting a block
+            # grid it will discard all but four of, which is what §50 forbids.
+            step "a target bitrate on Intel trades the block map for rectangles, audibly"
+            if "${BUILD}/roi-transcode" --in "$SRC" \
+                --roi "${ROOT}/testdata/synth_manyroi.json" \
+                --out "${WORK}/mbqp_vbr.mp4" --encoder onevpldirect --codec h264 \
+                --crf 28 --target-bitrate 3000000 >"${WORK}/mbqp_vbr.log" 2>&1; then
+                _r=$(grep -oE 'ROI: [0-9]+ rects' "${WORK}/mbqp_vbr.log" | head -1 \
+                    | grep -oE '[0-9]+')
+                assert_eq "the budget is back to the driver's H.264 limit" "${_r:-none}" "4"
+                if grep -Eq 'guard: [0-9]+ roi region\(s\) dropped' "${WORK}/mbqp_vbr.log"; then
+                    pass "and the regions it cost are reported, not dropped in silence"
+                else
+                    fail "regions were truncated without a guard line (§50)"
+                fi
+            else
+                fail "the target-bitrate run on onevpldirect did not complete"
+            fi
         else
             step "native oneVPL backend (§5.2)"
             printf '  skip  onevpldirect is not in this build or has no device\n'

@@ -30,8 +30,9 @@ class NvencBackend final : public LibavBackend {
 public:
     Backend kind() const override { return Backend::NvidiaNvenc; }
 
-    EncoderCapabilities GetCapabilities(Codec codec) const override
+    EncoderCapabilities GetCapabilities(const CapabilityQuery& query) const override
     {
+        const Codec codec = query.codec;
         EncoderCapabilities c;
         // Asked of the build, not declared. This backend said it could produce both codecs
         // whatever FFmpeg had been compiled with, and on a build without the nvcodec

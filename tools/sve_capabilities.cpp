@@ -31,11 +31,22 @@
 
 namespace {
 
+/// A nominal target, only its non-zero-ness matters -- see CapabilityQuery.
+constexpr uint64_t kNominalTarget = 4'000'000;
+
 struct CodecReport {
     const char* name;
     sve::Codec codec;
     bool supported = false;
+    /// What the backend answers with no target bitrate asked for.
     sve::EncoderCapabilities caps;
+    /// And what it answers with one.
+    ///
+    /// Reported separately since 2026-09-01, because on the native oneVPL backend the two
+    /// differ: it has a per-block QP map under CQP and hardware VBR under a target, and not
+    /// both. A report that printed only one of them would be telling a reader that a
+    /// feature is there when whether it is there depends on what they ask for.
+    sve::EncoderCapabilities caps_with_target;
 };
 
 const char* yes_no(bool value) { return value ? "true" : "false"; }
@@ -83,7 +94,13 @@ void print_json(const std::vector<std::pair<sve::Backend, std::vector<CodecRepor
             std::printf("          \"native_bitrate\": %s,\n", yes_no(k.native_bitrate));
             std::printf("          \"main10\": %s,\n", yes_no(k.main10));
             std::printf("          \"p010_input\": %s,\n", yes_no(k.p010_input));
-            std::printf("          \"max_roi_regions\": %u\n", k.max_roi_regions);
+            std::printf("          \"max_roi_regions\": %u,\n", k.max_roi_regions);
+            // §16 and §2.2 are not always available together; where they are not, this says
+            // which of them a target bitrate costs.
+            std::printf("          \"with_target_bitrate\": { \"qp_map\": %s, "
+                        "\"native_bitrate\": %s }\n",
+                yes_no(c.caps_with_target.qp_map),
+                yes_no(c.caps_with_target.native_bitrate));
             std::printf("        }");
             wrote = true;
         }
@@ -109,6 +126,13 @@ void print_text(const std::vector<std::pair<sve::Backend, std::vector<CodecRepor
                 c.name, k.max_roi_regions, yes_no(k.roi_rectangles), yes_no(k.qp_map),
                 k.qp_map_block_width, k.qp_map_block_height, yes_no(k.sei),
                 yes_no(k.native_bitrate), yes_no(k.main10));
+            // Only when the answer actually changes, so the common case stays one line.
+            if (c.caps_with_target.qp_map != k.qp_map
+                || c.caps_with_target.native_bitrate != k.native_bitrate) {
+                std::printf("        with a target bitrate: qp_map=%-5s native_bitrate=%s\n",
+                    yes_no(c.caps_with_target.qp_map),
+                    yes_no(c.caps_with_target.native_bitrate));
+            }
         }
         if (!any) {
             // Registered but unable to produce anything here: no device, or no encoder in
@@ -154,7 +178,9 @@ int main(int argc, char** argv)
             {"h265", sve::Codec::H265, false, {}},
         };
         for (CodecReport& c : codecs) {
-            c.caps = backend->GetCapabilities(c.codec);
+            c.caps = backend->GetCapabilities(sve::CapabilityQuery{c.codec, 0});
+            c.caps_with_target =
+                backend->GetCapabilities(sve::CapabilityQuery{c.codec, kNominalTarget});
             c.supported = c.codec == sve::Codec::H264 ? c.caps.h264 : c.caps.h265;
         }
         all.emplace_back(kind, std::move(codecs));

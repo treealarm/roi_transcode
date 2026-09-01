@@ -117,8 +117,9 @@ class X265Backend final : public IEncoderBackend {
 public:
     Backend kind() const override { return Backend::X265Direct; }
 
-    EncoderCapabilities GetCapabilities(Codec codec) const override
+    EncoderCapabilities GetCapabilities(const CapabilityQuery& query) const override
     {
+        const Codec codec = query.codec;
         EncoderCapabilities c;
         if (codec != Codec::H265) {
             return c;

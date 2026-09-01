@@ -25,6 +25,7 @@
 
 #include "adaptive/importance_map.h"
 #include "backend/common/intel_roi_limit.h"
+#include "backend/common/rate_control.h"
 #include "sve/backend_registry.h"
 #include "sve/encoder_backend.h"
 
@@ -88,11 +89,10 @@ mfxU32 align_down(int32_t value)
 /// caller will get. A probe that queries a differently shaped parameter set is a probe that
 /// can answer yes to a question nobody asked -- and the answer it gives (qp_map) is one the
 /// adaptive layer changes its own behaviour on.
-/// Always CQP, and that is a decision rather than an omission -- see native_bitrate in
-/// GetCapabilities. A target bitrate is served by §15's outer BitrateBudget loop here, the
-/// same way the x265 and VA-API backends serve it.
+/// CQP, or VBR when a target bitrate was asked for -- and the choice is the same one
+/// GetCapabilities answered with, because both read the same target. See CapabilityQuery.
 void fill_encode_params(mfxVideoParam& p, Codec codec, int32_t width, int32_t height,
-    Rational frame_rate, int crf, int gop)
+    Rational frame_rate, int crf, int gop, uint64_t target_bitrate)
 {
     p.mfx.CodecId = codec_id(codec);
     p.mfx.TargetUsage = MFX_TARGETUSAGE_BALANCED;
@@ -113,14 +113,23 @@ void fill_encode_params(mfxVideoParam& p, Codec codec, int32_t width, int32_t he
     p.mfx.EncodedOrder = 0;
     p.IOPattern = MFX_IOPATTERN_IN_SYSTEM_MEMORY;
 
-    // CQP. It is what makes a per-region QP offset mean what it says: under a rate control
-    // loop the offsets are advice the controller may spend elsewhere -- and the block map
-    // this backend now sends is stronger than advice, being absolute quantisers.
-    p.mfx.RateControlMethod = MFX_RATECONTROL_CQP;
-    const auto qp = static_cast<mfxU16>(std::clamp(crf, kMinCodedQp, kMaxQp));
-    p.mfx.QPI = qp;
-    p.mfx.QPP = qp;
-    p.mfx.QPB = qp;
+    if (target_bitrate > 0) {
+        // The hardware's own rate control, which is what §16's rolling criterion needs.
+        // The block map is given up here and GetCapabilities has already said so.
+        const VbvPlan vbv = vbv_plan_for(target_bitrate);
+        p.mfx.RateControlMethod = MFX_RATECONTROL_VBR;
+        p.mfx.TargetKbps = static_cast<mfxU16>(std::min(vbv.bitrate_kbps, 65535));
+        p.mfx.MaxKbps = static_cast<mfxU16>(std::min(vbv.max_kbps, 65535));
+    } else {
+        // CQP. It is what makes a per-region QP offset mean what it says: under a rate
+        // control loop the offsets are advice the controller may spend elsewhere -- and the
+        // block map this backend sends is stronger than advice, being absolute quantisers.
+        p.mfx.RateControlMethod = MFX_RATECONTROL_CQP;
+        const auto qp = static_cast<mfxU16>(std::clamp(crf, kMinCodedQp, kMaxQp));
+        p.mfx.QPI = qp;
+        p.mfx.QPP = qp;
+        p.mfx.QPB = qp;
+    }
 
     mfxFrameInfo& fi = p.mfx.FrameInfo;
     fi.FourCC = MFX_FOURCC_NV12;
@@ -164,7 +173,7 @@ bool query_accepts_mbqp(mfxSession session, Codec codec)
     // of the resolution; 1280x720 is already 16-aligned, so no frame is described here that
     // the encoder would have to correct first.
     mfxVideoParam in{};
-    fill_encode_params(in, codec, 1280, 720, Rational{25, 1}, 28, 0);
+    fill_encode_params(in, codec, 1280, 720, Rational{25, 1}, 28, 0, 0);
     mfxExtCodingOption3 in_co3 = coding_option3(MFX_CODINGOPTION_ON);
     mfxExtBuffer* in_ext[1] = {&in_co3.Header};
     in.ExtParam = in_ext;
@@ -379,8 +388,15 @@ class OneVplNativeBackend final : public IEncoderBackend {
 public:
     Backend kind() const override { return Backend::IntelOneVplDirect; }
 
-    EncoderCapabilities GetCapabilities(Codec codec) const override
+    EncoderCapabilities GetCapabilities(const CapabilityQuery& query) const override
     {
+        const Codec codec = query.codec;
+        // The one capability on this backend that depends on what is being asked for, and
+        // the reason CapabilityQuery exists at all. With no target bitrate the encoder
+        // opens CQP and mfxExtMBQP means what it says; with one it opens VBR, where a map
+        // of absolute quantisers would fight the rate controller, and ROI goes back to
+        // rectangles. Both answers are true, and which one is true depends on the caller.
+        const bool cqp = query.target_bitrate == 0;
         EncoderCapabilities c;
         const DeviceProbe& device = probe(codec);
         if (!device.device) {
@@ -401,7 +417,7 @@ public:
         // §2.2's block-level quality, through mfxExtMBQP. Asked of the driver rather than
         // assumed -- see query_accepts_mbqp -- because the whole rectangle budget is
         // dropped upstream on the strength of this answer.
-        c.qp_map = device.mbqp;
+        c.qp_map = cqp && device.mbqp;
         if (c.qp_map) {
             c.qp_map_block_width = kMbqpBlock;
             c.qp_map_block_height = kMbqpBlock;
@@ -414,16 +430,16 @@ public:
         // map, which is qp_map. Reporting emphasis_map for it would be renaming a feature
         // rather than having it.
         c.emphasis_map = false;
-        // Not the encoder's own bitrate control, and the map is the reason. iHD takes the
-        // per-block array as *absolute* quantisers (see set_qp_map), which is only
-        // meaningful while the global quantiser is fixed -- so this backend opens CQP and
-        // a target bitrate is served by §15's outer loop, exactly as capabilities.h
-        // describes for a hardware backend that only honours ROI under CQP.
+        // The encoder's own bitrate control, which this backend does have -- and which is
+        // the other half of the trade above. Asked for a target, it opens VBR and gives up
+        // the block map; asked for none, it opens CQP and keeps it. Neither is a downgrade
+        // of the other and neither is silent: the answer above says which one the caller
+        // is about to get.
         //
-        // It said true until 2026-09-01, when the block map was measured. Hardware VBR and
-        // §2.2's block-level quality cannot both be had from this API, and §2.2 is the one
-        // the specification asks for.
-        c.native_bitrate = false;
+        // This is the one mechanism on this hardware that can meet §16's rolling criterion.
+        // §15's outer loop cannot -- measured, срез Q in docs/STATUS.md -- so refusing VBR
+        // in order to keep the map would have cost §16 on Intel entirely.
+        c.native_bitrate = true;
         return c;
     }
 
@@ -447,14 +463,18 @@ public:
         }
 
         mfxVideoParam& p = s->param;
+        const uint64_t target = config.rate_control.target_bitrate;
         fill_encode_params(p, config.codec, config.input.width, config.input.height,
-            config.input.frame_rate, config.crf, config.gop);
+            config.input.frame_rate, config.crf, config.gop, target);
 
         // The per-block QP map of §2.2, asked for at Init because that is the only place
         // mfxExtCodingOption3::EnableMBQP can be set -- the runtime buffer of §26 below is
         // refused outright without it. Held in the session: VPL keeps the pointer in
         // mfxVideoParam, and Init reads it after this function's frame is gone.
-        s->co3 = coding_option3(MFX_CODINGOPTION_ON);
+        // Asked for only when the map is what this session is going to use. Under VBR it
+        // would be asked for and then never sent, which is a promise made to the driver
+        // that nothing keeps.
+        s->co3 = coding_option3(target == 0 ? MFX_CODINGOPTION_ON : MFX_CODINGOPTION_OFF);
         s->init_ext[0] = &s->co3.Header;
         p.ExtParam = s->init_ext;
         p.NumExtParam = 1;
@@ -505,7 +525,12 @@ public:
             return Status::BackendError("MFXVideoENCODE_GetVideoParam failed");
         }
         s->mbqp_ready = opened_co3.EnableMBQP == MFX_CODINGOPTION_ON;
-        if (!s->mbqp_ready && probe(config.codec).mbqp) {
+        // The capability this session was chosen on, recomputed from the same inputs. A
+        // disagreement means the answer given to the adaptive layer was wrong, and the
+        // regions arriving from now on are sized for a promise this encoder cannot keep.
+        const bool promised_map =
+            GetCapabilities(CapabilityQuery{config.codec, target}).qp_map;
+        if (!s->mbqp_ready && promised_map) {
             return Status::BackendError(
                 "oneVPL accepted EnableMBQP when asked and dropped it when opened; "
                 "the per-block QP map this backend reported is not there");

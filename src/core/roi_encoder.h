@@ -91,6 +91,8 @@ private:
     long m_backends_declined = 0;
     std::vector<std::string> m_backends_skipped;
     Codec m_codec = Codec::H265;
+    /// What the session was opened with -- see capabilities().
+    uint64_t m_target_bitrate = 0;
     const IEncoderBackend* m_backend = nullptr;
     SessionPtr m_session;
 

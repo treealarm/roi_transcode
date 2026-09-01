@@ -66,6 +66,30 @@ namespace sve {
 /// name on the type §8.2 means, and a name that says what it is on this one, is the reading
 /// that leaves nobody guessing. Merging them is a design change, not a rename, and is not
 /// one to make while the backend layer is being replaced.
+/// What the caller means to ask of an encoder, for the capabilities that depend on it.
+///
+/// GetCapabilities took only a Codec until 2026-09-01, and that was enough while every
+/// answer was a property of the hardware. It is not one. On Intel the per-block QP map and
+/// the encoder's own bitrate control exclude each other: mfxExtMBQP carries *absolute*
+/// quantisers (measured -- iHD does not implement the delta mode), and absolute quantisers
+/// mean nothing while a rate controller is moving the global one. So "does this backend
+/// have a block map" cannot be answered without knowing whether a target bitrate is coming.
+///
+/// It has to be answerable, because the adaptive layer changes its own behaviour on the
+/// answer: effective_region_budget() drops the rectangle budget entirely once qp_map is
+/// true. A backend that claimed the map and then opened VBR would be handed a full block
+/// grid and would silently discard all but four regions, which is what §50 forbids.
+///
+/// Kept as a struct rather than a second argument so that the next configuration-dependent
+/// capability does not change the signature again.
+struct CapabilityQuery {
+    Codec codec = Codec::H265;
+    /// The target bitrate the caller intends to set, or zero for none.
+    /// Only its zero-ness is read today; it is the whole number so that a backend which
+    /// cannot serve a *particular* rate can say so later.
+    uint64_t target_bitrate = 0;
+};
+
 struct BackendConfig {
     /// Geometry, pixel layout, frame rate and time base -- TZ v3.4 §8.3. Held as one
     /// structure rather than as loose fields so that "what is coming in" cannot be edited
@@ -169,7 +193,15 @@ public:
     /// differs: on Alder Lake HEVC encodes through EncSliceLP with CQP only, and H.264 does
     /// not share those limits. One capability set for both codecs would have to be the
     /// intersection, which would understate what the hardware does.
-    virtual EncoderCapabilities GetCapabilities(Codec codec) const = 0;
+    virtual EncoderCapabilities GetCapabilities(const CapabilityQuery& query) const = 0;
+
+    /// The same question for a caller with nothing to say about rate control. Non-virtual
+    /// on purpose: there is one answer to give and one place to give it, and a backend that
+    /// overrode this one instead of the other would be answering a question nobody asks.
+    EncoderCapabilities GetCapabilities(Codec codec) const
+    {
+        return GetCapabilities(CapabilityQuery{codec, 0});
+    }
 
     /// Opens an encoder and returns it. StatusCode::DeviceUnavailable means "not on this
     /// machine" -- the caller moves to the next backend in the chain, so an absent GPU must

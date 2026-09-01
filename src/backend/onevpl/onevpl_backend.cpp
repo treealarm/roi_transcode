@@ -23,8 +23,9 @@ class OneVplBackend final : public LibavBackend {
 public:
     Backend kind() const override { return Backend::IntelOneVpl; }
 
-    EncoderCapabilities GetCapabilities(Codec codec) const override
+    EncoderCapabilities GetCapabilities(const CapabilityQuery& query) const override
     {
+        const Codec codec = query.codec;
         EncoderCapabilities c;
         c.h264 = true;
         c.h265 = true;

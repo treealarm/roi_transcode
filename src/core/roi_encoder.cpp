@@ -98,7 +98,9 @@ void RoiEncoder::attach(PacketSink& sink)
 
 EncoderCapabilities RoiEncoder::capabilities() const
 {
-    return m_backend ? m_backend->GetCapabilities(m_codec) : EncoderCapabilities{};
+    return m_backend
+        ? m_backend->GetCapabilities(CapabilityQuery{m_codec, m_target_bitrate})
+        : EncoderCapabilities{};
 }
 
 Result<FrameBufferPtr> RoiEncoder::create_frame(MemoryType memory)
@@ -169,6 +171,12 @@ void RoiEncoder::open_deferred(const BackendConfig& config)
     }
 
     m_codec = config.codec;
+    // Kept because capabilities() has to ask the same question the session was opened
+    // with. Since 2026-09-01 one of the answers depends on it: the native oneVPL backend
+    // has a per-block QP map under CQP and hardware VBR under a target, and not both.
+    // Asking without the target would tell the adaptive layer it may drop the rectangle
+    // budget on a session that is going to want rectangles.
+    m_target_bitrate = config.rate_control.target_bitrate;
 
     // Asked of the backend rather than read off its session: this is what replaced
     // reaching for an AVCodecContext, and it is why a backend on its own SDK can now
