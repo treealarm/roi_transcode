@@ -175,7 +175,7 @@ void a_backend_that_will_not_open_arrives_as_an_error_event()
     cfg.settings.encoder = Backend::Auto;
     // Nothing else in the order, so the chain is exhausted rather than falling to
     // software -- which since 4.1 is said by leaving software off the list.
-    cfg.backend_selection.preferred = {Backend::NvidiaNvenc};
+    cfg.settings.backend_selection.preferred = {Backend::NvidiaNvenc};
 
     auto pixels = std::make_shared<Pixels>();
     auto push = open_push(cfg);

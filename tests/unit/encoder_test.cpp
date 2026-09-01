@@ -337,23 +337,38 @@ void an_unusable_preference_order_is_refused_before_anything_opens()
     // §8.4: Auto with no order is InvalidArgument. The library used to ship a default,
     // which amounted to guessing at hardware it cannot see.
     EncoderConfig empty = config_for(Backend::Auto);
-    empty.backend_selection.preferred.clear();
+    empty.settings.backend_selection.preferred.clear();
     CHECK(create_refusal(empty) == StatusCode::InvalidArgument);
 
     // Auto cannot appear inside its own order, and no backend twice.
     EncoderConfig recursive = config_for(Backend::Auto);
-    recursive.backend_selection.preferred = {Backend::Auto, Backend::X264};
+    recursive.settings.backend_selection.preferred = {Backend::Auto, Backend::X264};
     CHECK(create_refusal(recursive) == StatusCode::InvalidArgument);
 
     EncoderConfig twice = config_for(Backend::Auto);
-    twice.backend_selection.preferred = {Backend::X264, Backend::X264};
+    twice.settings.backend_selection.preferred = {Backend::X264, Backend::X264};
     CHECK(create_refusal(twice) == StatusCode::InvalidArgument);
 
     // A well-formed order that no backend in this build can serve fails at open, which is
     // a different answer: the request was valid, the machine could not meet it.
     EncoderConfig hardware_only = config_for(Backend::Auto);
-    hardware_only.backend_selection.preferred = {Backend::NvidiaNvenc};
+    hardware_only.settings.backend_selection.preferred = {Backend::NvidiaNvenc};
     CHECK(create_refusal(hardware_only) != StatusCode::Ok);
+}
+
+void the_preference_order_is_read_where_the_backend_is_named()
+{
+    // §8.4's order and the Backend it qualifies are one decision, and they live in one
+    // struct for that reason. They used to live in two: Settings::backend_selection beside
+    // Settings::encoder, and a second copy on EncoderConfig which was the one the encoder
+    // actually read. transcode_file and Session bridged the two by hand, so a caller who
+    // built an EncoderConfig himself and filled the field next to the Backend was told his
+    // order was empty. Nothing here copies anything.
+    EncoderConfig cfg = config_for(Backend::Auto);
+    cfg.settings.backend_selection.preferred = {Backend::X264};
+
+    auto enc = open_encoder(cfg);
+    CHECK(enc->GetStatistics().encoder_used == Backend::X264);
 }
 
 void diagnostics_go_where_the_caller_says()
@@ -513,6 +528,7 @@ int main()
     the_selection_orders_the_backends_and_can_exclude_them();
     a_backend_that_cannot_encode_the_codec_is_left_out_with_its_reason();
     an_unusable_preference_order_is_refused_before_anything_opens();
+    the_preference_order_is_read_where_the_backend_is_named();
     diagnostics_go_where_the_caller_says();
     strict_refuses_where_permissive_degrades();
     strict_refuses_a_frame_whose_regions_do_not_fit();

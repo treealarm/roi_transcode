@@ -35,7 +35,7 @@ def config(backend=sve.Backend.X264_DIRECT, codec=sve.Codec.H264):
     cfg.input.time_base = sve.Rational(1, 25)
     cfg.settings.codec = codec
     cfg.settings.crf = 30
-    cfg.backend_selection.preferred = [backend]
+    cfg.settings.backend_selection.preferred = [backend]
     return cfg
 
 
@@ -105,7 +105,7 @@ def test_config_and_metadata_round_trip():
     cfg = config()
     assert cfg.input.width == WIDTH
     assert cfg.settings.codec == sve.Codec.H264
-    assert cfg.backend_selection.preferred == [sve.Backend.X264_DIRECT]
+    assert cfg.settings.backend_selection.preferred == [sve.Backend.X264_DIRECT]
 
     meta = sve.FrameMetadata()
     box = sve.BoundingBox()
@@ -228,7 +228,7 @@ def test_statistics_count_what_went_through():
 
 def test_an_empty_preference_order_is_an_invalid_argument():
     cfg = config()
-    cfg.backend_selection.preferred = []
+    cfg.settings.backend_selection.preferred = []
     with pytest.raises(sve.InvalidArgumentError) as caught:
         sve.SmartVideoEncoder(cfg)
     # §58.6: the code survives, so a caller branches on it rather than on the message.
@@ -238,7 +238,7 @@ def test_an_empty_preference_order_is_an_invalid_argument():
 
 def test_encoder_errors_share_one_base():
     cfg = config()
-    cfg.backend_selection.preferred = []
+    cfg.settings.backend_selection.preferred = []
     with pytest.raises(sve.SmartVideoEncoderError):
         sve.SmartVideoEncoder(cfg)
 

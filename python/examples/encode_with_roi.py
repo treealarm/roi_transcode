@@ -38,7 +38,7 @@ def run(with_roi: bool) -> int:
     cfg.input.time_base = sve.Rational(1, 25)
     cfg.settings.codec = sve.Codec.H264
     cfg.settings.crf = 32
-    cfg.backend_selection.preferred = [sve.Backend.X264_DIRECT]
+    cfg.settings.backend_selection.preferred = [sve.Backend.X264_DIRECT]
     if with_roi:
         # Everything outside the object gives up quality for it.
         cfg.settings.quality.background_qp_delta = 20

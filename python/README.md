@@ -14,7 +14,7 @@ cfg.input.pixel_format = sve.PixelFormat.YUV420P
 cfg.input.frame_rate = sve.Rational(25, 1)
 cfg.input.time_base = sve.Rational(1, 25)
 cfg.settings.codec = sve.Codec.H264
-cfg.backend_selection.preferred = [sve.Backend.X264_DIRECT]
+cfg.settings.backend_selection.preferred = [sve.Backend.X264_DIRECT]
 
 packets = []
 with sve.SmartVideoEncoder(cfg) as enc:

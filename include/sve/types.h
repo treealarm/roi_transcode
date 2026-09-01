@@ -261,6 +261,12 @@ struct Settings {
     /// under Auto: since 4.1 the library ships no default order, because the only honest
     /// default is the one whoever deploys the system chooses for their own hardware
     /// (§8.4). `backend_choice_from_name` fills both fields together from a name.
+    ///
+    /// It sits beside `encoder` and not on EncoderConfig because the two are one decision:
+    /// an order only means anything under Backend::Auto, and every helper that produces one
+    /// produces the other with it. EncoderConfig used to carry a second copy, which was the
+    /// one the encoder read, so an order set here reached nothing unless the caller knew to
+    /// copy it across by hand. There is one now, and this is it.
     BackendSelection backend_selection;
     /// H.264 by default: it is the codec every player and every browser handles, and a caller
     /// that has an opinion says so. `SameAsSource` is the one to reach for when transcoding.

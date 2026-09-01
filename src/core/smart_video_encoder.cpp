@@ -363,7 +363,7 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const EncoderConfig& confi
 
     BackendConfig& ep = impl->backend_config;
     ep.input = config.input;
-    ep.backend_selection = config.backend_selection;
+    ep.backend_selection = config.settings.backend_selection;
     ep.kind = config.settings.encoder;
     ep.codec = config.settings.codec;
     ep.policy = config.settings.policy;

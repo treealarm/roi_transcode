@@ -146,10 +146,6 @@ struct EncoderConfig {
     InputVideoFormat input;
     Settings settings;
 
-    /// Which backends Backend::Auto may consider, and in what order (§8.4). Ignored when
-    /// settings.encoder names one.
-    BackendSelection backend_selection;
-
     /// Where diagnostics go (§29). Left unset they go to stderr, one line each, which is
     /// what a command-line tool and the acceptance scripts want.
     LogSink log;

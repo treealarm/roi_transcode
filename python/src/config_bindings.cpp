@@ -147,6 +147,7 @@ void register_config(py::module_& m)
         "API gives it.")
         .def(py::init<>())
         .def_readwrite("encoder", &sve::Settings::encoder)
+        .def_readwrite("backend_selection", &sve::Settings::backend_selection)
         .def_readwrite("codec", &sve::Settings::codec)
         .def_readwrite("crf", &sve::Settings::crf)
         .def_readwrite("gop", &sve::Settings::gop)
@@ -158,13 +159,7 @@ void register_config(py::module_& m)
     py::class_<sve::EncoderConfig>(m, "EncoderConfig", "§8.2's public configuration.")
         .def(py::init<>())
         .def_readwrite("input", &sve::EncoderConfig::input)
-        .def_readwrite("settings", &sve::EncoderConfig::settings)
-        // The one place a preference order is set. The C++ struct has a second
-        // Settings::backend_selection which the encoder ignores -- transcode_file copies
-        // one into the other by hand -- and reproducing that trap in a new API would be
-        // handing on a mistake rather than binding one. Python has one field, and it is
-        // the one §8.4 acts on.
-        .def_readwrite("backend_selection", &sve::EncoderConfig::backend_selection);
+        .def_readwrite("settings", &sve::EncoderConfig::settings);
 
     py::class_<sve::EncoderCapabilities>(m, "EncoderCapabilities", "§7.2, §23.")
         .def(py::init<>())
