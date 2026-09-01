@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Turn a regions sidecar into ASS subtitles, so a player can draw the boxes over the clip.
 
-The encoded file carries no boxes. It cannot: what ROI encoding does is spend bits differently,
-and nothing about where they went survives into the bitstream (SEI metadata is not implemented,
-deliberately -- see docs/plan-v2.md, block D). So the regions travel beside the video, and the
-way to see them without writing a viewer is to hand them to one that already exists.
+What ROI encoding does is spend bits differently, and where they went is not something a
+player can show you. The objects are in the bitstream -- §19 puts them in user-data
+unregistered SEI, and that has been true since the CBOR work -- but no player reads our
+SEI, so the regions also travel beside the video and this hands them to a player that
+already knows how to draw.
+
+(The line that used to be here said SEI was "not implemented, deliberately" and pointed at
+docs/plan-v2.md, block D. Both halves went stale: §19 is implemented, and that file was
+deleted in the 2026-08-30 clear-out. For a bench that draws the boxes from the same sidecar
+against the encoded frames, see integration/bench/serve.py.)
 
 ASS is that hand-off. Its drawing mode (\\p1) takes vector shapes, every player worth using
 renders it through libass, and the result composites over the video without touching a pixel of
