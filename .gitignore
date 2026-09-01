@@ -10,6 +10,10 @@
 # make-scenes.py and picked up a bench of its own on 2026-08-31.
 __pycache__/
 *.pyc
+# The extension is built beside the package so pytest imports it without an install step
+# (python/CMakeLists.txt). It is a build artefact like any other.
+/python/smart_video_encoder/*.so
+/python/*.egg-info/
 *.mp4
 !testdata/*.json
 # Fetched by scripts/fetch-intel-qsv.sh — the Intel VA-API driver, ~61 MB. Not a

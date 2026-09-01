@@ -58,6 +58,12 @@
       "dependencies": [
         "nlohmann-json"
       ]
+    },
+    "python": {
+      "description": "Python bindings (TZ §58). pybind11 is header-only and the C++ core never sees it: §58.8 requires the core not to depend on Python, NumPy or pybind11.",
+      "dependencies": [
+        "pybind11"
+      ]
     }
   }
 }

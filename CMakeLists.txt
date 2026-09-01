@@ -22,6 +22,9 @@ option(SVE_BUILD_INTEGRATION "Build the ta_vms gRPC service, CLI and tools" OFF)
 # the specification does describe this one: sve-capabilities is part of the deliverable,
 # where the CLI and the scripts are not.
 option(SVE_BUILD_TOOLS       "Build sve-capabilities (§23)"               ON)
+# §58.8: off by default, and the core never depends on Python, NumPy or pybind11 whether it
+# is on or off -- the bindings live in python/ and link the public library from outside.
+option(SVE_BUILD_PYTHON      "Build the Python extension (§58)"           OFF)
 
 # Each backend is an independent optional component (TZ v4.2 §5.5), and the core names none
 # of them: what a build has is generated below into RegisterDeploymentBackends, which is the
@@ -510,6 +513,10 @@ if(SVE_BUILD_TESTS)
     target_include_directories(public_headers_isolated
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_options(public_headers_isolated PRIVATE ${SVE_WARNINGS})
+endif()
+
+if(SVE_BUILD_PYTHON)
+    add_subdirectory(python)
 endif()
 
 if(SVE_BUILD_INTEGRATION)

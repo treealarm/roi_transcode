@@ -823,6 +823,39 @@ else
     fail "dependency scan (§26.4, §44)"
 fi
 
+# §58.9's Python suite. It needs its own build directory: a Python extension is a shared
+# object, and the libavcodec-backed components this build uses link a static FFmpeg without
+# -fPIC. The configuration below is §5.5's graph, which is what §58.9 asks the tests to run
+# against anyway.
+#
+# Skipped loudly when the toolchain is not there. A skip is not a pass, and this one is
+# printed rather than hidden -- the same hazard CLAUDE.md records for the synthetic scenes.
+step "python bindings (§58)"
+if ! python3 -c "import pybind11, numpy, pytest" >/dev/null 2>&1; then
+    printf '  skip  python bindings need pybind11, numpy and pytest\n'
+elif ! python3-config --includes >/dev/null 2>&1; then
+    printf '  skip  python bindings need the CPython development headers\n'
+else
+    PYBUILD="${WORK}/python-build"
+    if cmake -S "$ROOT" -B "$PYBUILD" -G Ninja \
+        -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT:-/mnt/wdblue/vcpkg}/scripts/buildsystems/vcpkg.cmake" \
+        -DVCPKG_MANIFEST_MODE=OFF -DCMAKE_BUILD_TYPE=Release \
+        -DSVE_BUILD_PYTHON=ON -DSVE_BUILD_TESTS=OFF -DSVE_BUILD_TOOLS=OFF \
+        -DSVE_BUILD_INTEGRATION=OFF -DSVE_BUILD_BACKEND_FFMPEG=OFF \
+        -DSVE_BUILD_EXAMPLES=OFF >"${WORK}/python_build.log" 2>&1 \
+        && cmake --build "$PYBUILD" -j"$(nproc)" >>"${WORK}/python_build.log" 2>&1; then
+        if pyout=$(cd "${ROOT}/python" && python3 -m pytest tests/ -q 2>&1); then
+            pass "pytest: $(printf '%s' "$pyout" | tail -1)"
+        else
+            fail "python bindings suite"
+            printf '%s\n' "$pyout" | tail -20 | sed 's/^/      /' >&2
+        fi
+    else
+        fail "python extension build"
+        tail -15 "${WORK}/python_build.log" | sed 's/^/      /' >&2
+    fi
+fi
+
 step "the library builds on its own"
 # Configures the project with the integration switched off -- no JSON, no protos, no gRPC,
 # no CLI. This is the claim the layout makes: TZ v2.0 §52 describes the library, and what

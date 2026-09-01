@@ -42,6 +42,27 @@ enum class StatusCode {
     Error,
 };
 
+/// The code's own name, for a log line, a report or a language binding that has to hand
+/// the caller something more useful than a number. The same shape as backend_name and
+/// pixel_format_name, and there for the same reason: a number crossing a boundary loses
+/// the only thing that made it readable.
+constexpr const char* status_code_name(StatusCode code)
+{
+    switch (code) {
+    case StatusCode::Ok:                return "ok";
+    case StatusCode::DeviceUnavailable: return "device-unavailable";
+    case StatusCode::Unsupported:       return "unsupported";
+    case StatusCode::InvalidArgument:   return "invalid-argument";
+    case StatusCode::Again:             return "again";
+    case StatusCode::EndOfStream:       return "end-of-stream";
+    case StatusCode::BackendError:      return "backend-error";
+    case StatusCode::OutOfMemory:       return "out-of-memory";
+    case StatusCode::Timeout:           return "timeout";
+    case StatusCode::Error:             return "error";
+    }
+    return "?";
+}
+
 class Status {
 public:
     Status() = default;
