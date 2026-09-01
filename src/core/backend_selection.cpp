@@ -37,14 +37,33 @@ const char* backend_name(Backend e)
 namespace {
 
 /// The library ships no default order any more (§8.4), so the application supplies one.
-/// This is the order measured on the hardware this project runs on: Quick Sync first
-/// because it is several times faster here, VA-API second because it reaches the same
-/// integrated GPU when the oneVPL dispatcher finds no runtime, the software encoders last
-/// because they always work. NVENC is absent on purpose -- the FFmpeg wrapper for it does
-/// not read region-of-interest side data, so a stream chosen automatically would quietly
-/// carry no adaptive quality at all.
+/// This is the order measured on the hardware this project runs on.
+///
+/// The direct backends lead it, and that is a decision taken 2026-09-01 rather than a
+/// preference. What a caller who says nothing gets is what this list says, and through
+/// libavcodec it was measurably less than the specification asks for: iHD takes four ROI
+/// rectangles on H.264 and eight on H.265, so of six well-separated regions two were
+/// dropped into the crushed background (SSIM spread 0.01081), while the native path paints
+/// mfxExtMBQP per 16x16 block and serves all of them alike (0.000144). With a target
+/// bitrate the gap is wider still: the native backend opens the hardware's own VBR and
+/// meets §16 at P95 110% of target, where the outer BitrateBudget loop the libavcodec path
+/// falls back to measured 305% and did not vary with the target at all.
+///
+/// IntelOneVpl and Vaapi stay behind it rather than being dropped. The native backend is
+/// young -- 2026-08-31 -- and they reach the same integrated GPU by an older road, so a
+/// machine where the oneVPL dispatcher finds no runtime still encodes on hardware. That is
+/// a fallback and not a substitution: §8.4 has the chain log which backend declined and
+/// why, so the weaker path can be seen rather than guessed at.
+///
+/// The software encoders are last because they always work, and both are listed because a
+/// backend that cannot produce the requested codec is skipped here with its reason -- so
+/// H.264 takes X264Direct and H.265 takes X265Direct without the caller choosing.
+///
+/// NVENC is absent on purpose: the FFmpeg wrapper for it does not read region-of-interest
+/// side data, so a stream chosen automatically would quietly carry no adaptive quality.
 constexpr Backend kAutoOrder[] = {
-    Backend::IntelOneVpl, Backend::Vaapi, Backend::X264, Backend::X265};
+    Backend::IntelOneVplDirect, Backend::IntelOneVpl, Backend::Vaapi,
+    Backend::X264Direct, Backend::X265Direct};
 
 /// "cpu" is Auto over exactly the two software backends. That is not a workaround for the
 /// split but the thing itself: whichever of the two cannot produce the codec is skipped

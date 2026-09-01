@@ -359,19 +359,32 @@ step "encoder backends"
 if [[ -e /dev/dri/renderD128 ]]; then
     # shellcheck source=/dev/null
     if source "${ROOT}/integration/scripts/qsv-env.sh" 2>/dev/null; then
+        # What a caller who names no backend gets. Since 2026-09-01 that is the native
+        # oneVPL backend rather than the libavcodec one, because the default is what §2.2
+        # and §16 are either met on or not: through libavcodec the same encode loses two of
+        # six regions to the driver's rectangle limit and misses §16 outright.
+        #
+        # Asserted on the backend's own name and not on the codec token, which is only
+        # "hevc" on the direct path and says nothing about who produced it.
         encode qsv_auto synth_roi.json auto || true
-        got=$(grep -oE 'encoded with [^ ]+' "${WORK}/qsv_auto.log" | head -1 | cut -d' ' -f3)
-        assert_eq "auto picks QSV with the Intel runtime" "${got:-none}" "hevc_qsv"
+        if grep -q 'encoded with .*Intel oneVPL, direct API' "${WORK}/qsv_auto.log"; then
+            pass "auto picks the native oneVPL backend with the Intel runtime"
+        else
+            fail "auto did not pick the native oneVPL backend: $(grep -m1 '^encoded with' "${WORK}/qsv_auto.log")"
+        fi
         CODEC=h264 encode qsv_auto_h264 synth_roi.json auto || true
-        got=$(grep -oE 'encoded with [^ ]+' "${WORK}/qsv_auto_h264.log" | head -1 | cut -d' ' -f3)
-        assert_eq "auto picks QSV for H.264 too" "${got:-none}" "h264_qsv"
+        if grep -q 'encoded with .*Intel oneVPL, direct API' "${WORK}/qsv_auto_h264.log"; then
+            pass "auto picks the native oneVPL backend for H.264 too"
+        else
+            fail "auto did not pick the native oneVPL backend for H.264: $(grep -m1 '^encoded with' "${WORK}/qsv_auto_h264.log")"
+        fi
         # QSV is the primary path and it is CQP, so the strict form of the
         # mechanism checks runs here.
         step "the ROI mechanism does what it claims (QSV, CQP, HEVC)"
-        ENC=auto CODEC=h265 mechanism_checks qsv_h265 yes
+        ENC=qsv CODEC=h265 mechanism_checks qsv_h265 yes
 
         step "the ROI mechanism does what it claims (QSV, CQP, H.264)"
-        ENC=auto CODEC=h264 mechanism_checks qsv_h264 yes
+        ENC=qsv CODEC=h264 mechanism_checks qsv_h264 yes
 
         # §5.2's native backend, on the same assertions as the libavcodec QSV path above.
         # `yes` for cqp: it opens CQP, so per-region offsets are independent per block and
