@@ -19,6 +19,39 @@ the comparison do not.
     # then open http://127.0.0.1:8765
 
 Needs ffmpeg and ffprobe on PATH, which every other check here needs too.
+
+How it fits together
+--------------------
+
+Three processes, and the browser is not one of the interesting ones::
+
+    browser  ──HTTP──▶  this script  ──subprocess──▶  roi-transcode  (the library)
+                                     ──subprocess──▶  ffmpeg / ffprobe
+
+The page is a single HTML string served from PAGE below; there is no build step, no
+bundler and no framework, so what the browser runs is what is written here. It never
+touches a file or a codec itself -- it can only ask this script, over five endpoints:
+
+    GET  /             the page
+    GET  /fixtures     the clips in the tree, each paired with its ROI document
+    GET  /source?path= what a clip already is: codec, size, fps, frames, measured GOP
+    GET  /roi?path=    a ROI document summarised (sample count, kinds, time span)
+    POST /run          start an encode; returns a job id straight away
+    GET  /job?id=      that job's stage, and its result once done
+    GET  /img/<run>/<src|out|diff>/<n>.png   one frame of one side
+
+A run is a background thread rather than a blocking request, which is the whole reason
+the page can show a stage while it works. encode_job is the sequence: read the source,
+cut the segment, optionally burn frame numbers in, write the ROI document, run
+roi-transcode, extract every frame of both sides in one ffmpeg pass each, then measure.
+Each step sets a stage the page is polling for.
+
+run_encode's descendant, the roi-transcode invocation inside encode_job, is the only
+place that knows how the library is driven. §58's Python bindings replace that one
+subprocess call; the endpoints, the page and the comparison do not change.
+
+Nothing is written into the tree. Cuts, numbered copies, extracted frames and generated
+ROI documents all live under WORK, a temporary directory removed when the server stops.
 """
 
 from __future__ import annotations
@@ -305,7 +338,11 @@ def build_roi(p: dict) -> dict:
             kinds = {s["kind"] for s in doc.get("samples", []) if s.get("kind")}
             doc["kinds"] = {k: {"qp_delta": p["qp_delta"], "pad_norm": p["pad_norm"]}
                             for k in (kinds or {p["kind"]})}
-            doc["hold_sec"] = p["hold_sec"]
+            # hold_sec is deliberately not overridden. It is the track's own timing, not a
+            # quality knob: it says how long one sample stands before the next replaces it.
+            # Overriding it with the slider's default of 20 s made every past position of a
+            # moving box stay live -- the overlay drew a trail of them, and the encoder was
+            # not drawing anything, it was protecting all 65 of them.
         return doc
     return {
         "background_qp_delta": p["background_qp_delta"],
@@ -642,7 +679,10 @@ PAGE = r"""<!doctype html>
     found it buys about ten times what raising the boost itself does.">?</i></span>
     <input type="range" id="pad_norm" min="0" max="0.2"
     step="0.005" value="0.02"><output class="val" id="pad_norm_v">0.02</output></label>
-  <label><span>hold_sec</span><input type="range" id="hold_sec" min="0.1" max="20"
+  <label><span>hold_sec<i class="q" data-tip="How long one submitted sample stands before
+    the next replaces it. Applies to the synthetic box only: a loaded track keeps its own
+    timing, because overriding it would make every past position of a moving box stay
+    protected.">?</i></span><input type="range" id="hold_sec" min="0.1" max="20"
     step="0.1" value="20"><output class="val" id="hold_sec_v">20</output></label>
 
   <h2>Synthetic box (frame fractions)</h2>
