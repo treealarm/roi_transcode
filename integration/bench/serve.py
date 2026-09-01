@@ -695,7 +695,11 @@ PAGE = r"""<!doctype html>
     the file's contents, never its path, and the encoder needs the path.">?</i></span>
     <input type="text" id="source" value="testdata/synth.mp4"></label>
   <div id="srcinfo">&mdash;</div>
-  <button id="match" class="wide" disabled>Match source settings</button>
+  <button id="match" class="wide" disabled>Match source settings<i class="q" data-tip="Copy
+    the codec, crf and keyint the clip was encoded with, read out of its own bitstream. The
+    codec comes along because crf is not one scale between encoders: crf 16 from an x264
+    source applied to an x265 run asks for much higher quality than the source has and the
+    file comes out half again as large.">?</i></button>
   <p class="matchnote" id="matchnote"></p>
 
   <h2>Run</h2>
@@ -947,20 +951,45 @@ async function loadSource() {
 // and x265 both write their whole option string into a user-data SEI, and it survives
 // muxing, so for anything either produced this copies a fact rather than a guess.
 //
-// The codec is deliberately left alone. Matching it too would silently switch h265 runs to
-// h264 on an h264 source, which is a bigger decision than "line the settings up".
+// The codec has to come along, and the first version leaving it alone was a trap. CRF is
+// not one scale: carrying crf 16 off an x264 source onto an x265 run asks for far higher
+// quality than the source has, and the output comes out half again as large. Measured on
+// synth.mp4, same crf 16 and gop 50, two second cut against a 56.5 kB input:
+//
+//     x264direct  ROI off 57.9 kB (102%)   ROI on 46.8 kB (82%)
+//     x265direct  ROI off 79.1 kB (140%)   ROI on 69.9 kB (123%)
+//
+// Same numbers, different meaning. On the source's own codec the ROI run is smaller than
+// the source, which is the answer the button exists to make visible.
+//
+// The backend follows only when it has to: a codec-specific one that cannot encode what
+// was just selected would fail the run outright.
 $("match").addEventListener("click", () => {
   const set = (srcInfo && srcInfo.settings) || {};
   const applied = [];
+  if (srcInfo && srcInfo.codec) {
+    const codec = srcInfo.codec === "hevc" || srcInfo.codec === "h265" ? "h265"
+                : srcInfo.codec === "h264" ? "h264" : null;
+    if (codec) {
+      $("codec").value = codec;
+      applied.push(codec);
+      const backend = $("encoder").value;
+      const wrong = (codec === "h265" && backend.startsWith("x264"))
+                 || (codec === "h264" && backend.startsWith("x265"));
+      if (wrong) {
+        $("encoder").value = codec === "h265" ? "x265direct" : "x264direct";
+        applied.push("backend " + $("encoder").value);
+      }
+    }
+  }
   if (set.gop) { $("gop").value = set.gop; $("gop_v").value = set.gop; applied.push("gop " + set.gop); }
   if (set.crf) {
     const crf = Math.round(set.crf);
     $("crf").value = crf; $("crf_v").value = crf; applied.push("crf " + crf);
   }
   $("target_bitrate").value = 0;
-  $("matchnote").textContent = applied.length
-    ? "applied " + applied.join(", ") + " — codec left as chosen"
-    : "nothing to apply";
+  $("matchnote").textContent = applied.length ? "applied " + applied.join(", ")
+                                              : "nothing to apply";
 });
 $("source").addEventListener("change", loadSource);
 loadSource();
