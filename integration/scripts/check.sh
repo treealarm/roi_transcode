@@ -850,6 +850,56 @@ else
             fail "python bindings suite"
             printf '%s\n' "$pyout" | tail -20 | sed 's/^/      /' >&2
         fi
+        # §58.7 and §58.9's wheel-install test. A wheel that builds is not a wheel that
+        # works: the module has to import with no build tree in sight, which is the one
+        # thing running pytest inside python/ cannot show.
+        if python3 -c "import build, scikit_build_core" >/dev/null 2>&1; then
+            WHEELDIR="${WORK}/wheel"
+            # The toolchain has to reach the wheel build: it configures its own CMake in
+            # an isolated environment, and without vcpkg pkg_check_modules cannot find
+            # FFmpeg. CMake reads CMAKE_TOOLCHAIN_FILE from the environment since 3.21.
+            if (cd "${ROOT}/python" \
+                && VCPKG_ROOT="${VCPKG_ROOT:-/mnt/wdblue/vcpkg}" \
+                   CMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT:-/mnt/wdblue/vcpkg}/scripts/buildsystems/vcpkg.cmake" \
+                   python3 -m build --wheel --outdir "$WHEELDIR" . ) \
+                    >"${WORK}/wheel.log" 2>&1; then
+                whl=$(ls "${WHEELDIR}"/*.whl 2>/dev/null | head -1)
+                # Only the package and its extension belong in it. Headers and static
+                # archives are unusable from Python and were 1.5 MB of nothing until
+                # SVE_INSTALL=OFF; this is what keeps that from coming back.
+                stray=$(python3 -c "
+import sys, zipfile
+names = zipfile.ZipFile(sys.argv[1]).namelist()
+print(' '.join(sorted({n.split('/')[0] for n in names}
+                      - {'smart_video_encoder', 'smart_video_encoder-2.0.0.dist-info'})))
+" "$whl" 2>/dev/null)
+                if [[ -z "${stray// }" ]]; then
+                    pass "wheel carries only the package ($(basename "$whl"))"
+                else
+                    fail "wheel carries more than the package: ${stray}"
+                fi
+                site="${WORK}/wheel-site"
+                rm -rf "$site"
+                if pip install --quiet --no-index --no-deps --target "$site" "$whl" \
+                        >>"${WORK}/wheel.log" 2>&1 \
+                    && (cd "$WORK" && PYTHONPATH="$site" python3 -c "
+import smart_video_encoder as sve
+assert sve.__version__, 'no version'
+assert sve.build_manifest['commit'], 'no build manifest'
+assert sve.available_backends(), 'no backends in the wheel'
+") >>"${WORK}/wheel.log" 2>&1; then
+                    pass "wheel installs and imports with no build tree"
+                else
+                    fail "wheel install/import"
+                    tail -10 "${WORK}/wheel.log" | sed 's/^/      /' >&2
+                fi
+            else
+                fail "wheel build"
+                tail -10 "${WORK}/wheel.log" | sed 's/^/      /' >&2
+            fi
+        else
+            printf '  skip  wheel test needs build and scikit-build-core\n'
+        fi
     else
         fail "python extension build"
         tail -15 "${WORK}/python_build.log" | sed 's/^/      /' >&2

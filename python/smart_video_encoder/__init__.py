@@ -64,6 +64,11 @@ from ._core import _frame_from_arrays
 # Python package cannot report a number the C++ library disagrees with.
 from ._core import __version__  # noqa: F401
 
+# §58.7's build manifest: what this particular artefact was built from. A wheel is opaque,
+# and "which libx264 is in here, from which commit, under what licence" is the first thing
+# a bug report needs.
+from ._core import build_manifest  # noqa: F401
+
 __all__ = [name for name in dir() if not name.startswith("_")]
 
 

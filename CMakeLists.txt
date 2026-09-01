@@ -25,6 +25,11 @@ option(SVE_BUILD_TOOLS       "Build sve-capabilities (§23)"               ON)
 # §58.8: off by default, and the core never depends on Python, NumPy or pybind11 whether it
 # is on or off -- the bindings live in python/ and link the public library from outside.
 option(SVE_BUILD_PYTHON      "Build the Python extension (§58)"           OFF)
+# Whether this build installs the C++ package at all. On for an ordinary install; off for a
+# wheel, which carries the extension and the Python package and has no use for static
+# archives or headers -- they added 1.5 MB of unusable weight before this existed, and
+# §58.7 asks for the wheel's contents to be a deliberate decision rather than a leftover.
+option(SVE_INSTALL           "Install the C++ package (headers, libs, pkg-config)" ON)
 
 # Each backend is an independent optional component (TZ v4.2 §5.5), and the core names none
 # of them: what a build has is generated below into RegisterDeploymentBackends, which is the
@@ -168,7 +173,7 @@ if(SVE_BUILD_BACKEND_X264)
     add_library(sve_backend_x264 src/backend/x264/x264_backend.cpp)
     sve_add_backend_component(sve_backend_x264)
     target_include_directories(sve_backend_x264 SYSTEM PRIVATE ${X264_INCLUDE_DIRS})
-    target_link_directories(sve_backend_x264 PUBLIC ${X264_LIBRARY_DIRS})
+    target_link_directories(sve_backend_x264 PUBLIC $<BUILD_INTERFACE:${X264_LIBRARY_DIRS}>)
     target_link_libraries(sve_backend_x264 PUBLIC ${X264_LIBRARIES})
     add_library(sve::backend_x264_static ALIAS sve_backend_x264)
 endif()
@@ -177,7 +182,7 @@ if(SVE_BUILD_BACKEND_X265)
     add_library(sve_backend_x265 src/backend/x265/x265_backend.cpp)
     sve_add_backend_component(sve_backend_x265)
     target_include_directories(sve_backend_x265 SYSTEM PRIVATE ${X265_INCLUDE_DIRS})
-    target_link_directories(sve_backend_x265 PUBLIC ${X265_LIBRARY_DIRS})
+    target_link_directories(sve_backend_x265 PUBLIC $<BUILD_INTERFACE:${X265_LIBRARY_DIRS}>)
     target_link_libraries(sve_backend_x265 PUBLIC ${X265_LIBRARIES})
     add_library(sve::backend_x265_static ALIAS sve_backend_x265)
 endif()
@@ -201,7 +206,7 @@ if(SVE_BUILD_FFMPEG_INTEROP)
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
     target_include_directories(sve_ffmpeg_interop SYSTEM PUBLIC ${FFMPEG_INCLUDE_DIRS})
     if(FFMPEG_LIBRARY_DIRS)
-        target_link_directories(sve_ffmpeg_interop PUBLIC ${FFMPEG_LIBRARY_DIRS})
+        target_link_directories(sve_ffmpeg_interop PUBLIC $<BUILD_INTERFACE:${FFMPEG_LIBRARY_DIRS}>)
     endif()
     target_link_libraries(sve_ffmpeg_interop PUBLIC sve ${FFMPEG_LIBRARIES})
     target_compile_options(sve_ffmpeg_interop PRIVATE ${SVE_WARNINGS})
@@ -226,7 +231,7 @@ if(SVE_BUILD_BACKEND_FFMPEG)
     sve_add_backend_component(sve_backend_ffmpeg)
     target_include_directories(sve_backend_ffmpeg SYSTEM PUBLIC ${FFMPEG_INCLUDE_DIRS})
     if(FFMPEG_LIBRARY_DIRS)
-        target_link_directories(sve_backend_ffmpeg PUBLIC ${FFMPEG_LIBRARY_DIRS})
+        target_link_directories(sve_backend_ffmpeg PUBLIC $<BUILD_INTERFACE:${FFMPEG_LIBRARY_DIRS}>)
     endif()
     target_link_libraries(sve_backend_ffmpeg PUBLIC ${FFMPEG_LIBRARIES})
 endif()
@@ -253,7 +258,7 @@ if(SVE_BUILD_EXAMPLES)
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
     target_include_directories(sve_examples SYSTEM PUBLIC ${FFMPEG_INCLUDE_DIRS})
     if(FFMPEG_LIBRARY_DIRS)
-        target_link_directories(sve_examples PUBLIC ${FFMPEG_LIBRARY_DIRS})
+        target_link_directories(sve_examples PUBLIC $<BUILD_INTERFACE:${FFMPEG_LIBRARY_DIRS}>)
     endif()
     target_link_libraries(sve_examples PUBLIC sve ${FFMPEG_LIBRARIES})
     if(SVE_BUILD_FFMPEG_INTEROP)
@@ -311,7 +316,9 @@ if(SVE_BUILD_TOOLS)
     add_executable(sve-capabilities tools/sve_capabilities.cpp)
     target_link_libraries(sve-capabilities PRIVATE sve_all)
     target_compile_options(sve-capabilities PRIVATE ${SVE_WARNINGS})
-    install(TARGETS sve-capabilities RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    if(SVE_INSTALL)
+        install(TARGETS sve-capabilities RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -327,6 +334,8 @@ endif()
 # a promise: the core links nothing, so there is nothing for it to declare.
 # ---------------------------------------------------------------------------
 include(CMakePackageConfigHelpers)
+
+if(SVE_INSTALL)
 
 set(SVE_INSTALL_TARGETS sve sve_all)
 set(SVE_INSTALLED_COMPONENTS "")
@@ -382,6 +391,8 @@ if(TARGET sve_ffmpeg_interop)
     sve_write_pc(sve-ffmpeg-interop sve_ffmpeg_interop
         "Adaptive ROI video encoding -- AVFrame interop" "libavutil")
 endif()
+
+endif()  # SVE_INSTALL
 
 # ---------------------------------------------------------------------------
 # Tests -- §52 tests/unit

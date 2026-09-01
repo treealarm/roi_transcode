@@ -61,6 +61,21 @@ def test_import_and_version():
     assert sve.__version__.count(".") >= 1
 
 
+def test_build_manifest_describes_this_artefact():
+    """§58.7: every field comes from the build, so none can describe a build that was not."""
+    manifest = sve.build_manifest
+    for field in ("version", "commit", "compiler", "build_type", "cxx_standard",
+                  "cxx_abi", "libx264", "libx265", "features", "license"):
+        assert manifest[field], f"{field} is empty"
+    assert manifest["version"] == sve.__version__
+    # Linking libx264/libx265 directly is what puts this under the GPL, and §55 wants that
+    # visible before a release rather than discovered by a packager.
+    assert "GPL" in manifest["license"]
+    # The features are the components this artefact carries, which §5.5 makes a build-time
+    # decision -- so a wheel without the direct codecs would be a wheel that cannot encode.
+    assert "x264" in manifest["features"]
+
+
 def test_capability_discovery_without_opening_an_encoder():
     """§58.3: module-level discovery, no encoder required."""
     backends = sve.available_backends()

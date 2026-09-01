@@ -29,9 +29,20 @@ test = ["pytest>=7"]
 # library, and configuring from here would build it twice under two sets of options.
 cmake.source-dir = ".."
 wheel.packages = ["smart_video_encoder"]
-build-dir = "build/{wheel_tag}"
+# Outside the package directory: a build tree under python/ ends up inside the sdist and
+# inside the source directory CMake exports against.
+build-dir = "../build-wheel/{wheel_tag}"
 
 [tool.scikit-build.cmake.define]
+# Manifest mode off: with it on, vcpkg installs its tree inside the wheel's build directory
+# -- which sits under the source tree -- and CMake then refuses to export targets whose
+# library paths are "prefixed in the source directory". The toolchain file and an already
+# installed vcpkg tree come from the environment, which is where machine-specific paths
+# belong.
+VCPKG_MANIFEST_MODE = "OFF"
+# A wheel carries the Python package and its extension. The C++ headers and static
+# archives are not usable from Python and were adding about 1.5 MB of nothing.
+SVE_INSTALL = "OFF"
 SVE_BUILD_PYTHON = "ON"
 SVE_BUILD_TESTS = "OFF"
 SVE_BUILD_INTEGRATION = "OFF"
