@@ -75,6 +75,10 @@ CLI = BUILD / "roi-transcode"
 PORT = int(os.environ.get("PORT", "8765"))
 
 WORK = Path(tempfile.mkdtemp(prefix="sve-bench-"))
+# Identifies this run of the server. The page checks it and says so when it no longer
+# matches -- during a session of "edit, restart, reload" an open tab silently keeps running
+# the old script, and a fix that is already on disk looks like a fix that does not work.
+BUILD_ID = str(int(time.time()))
 RUNS: dict[str, dict] = {}
 JOBS: dict[str, dict] = {}
 CLIPS: dict[tuple[str, float], Path] = {}
@@ -673,6 +677,9 @@ PAGE = r"""<!doctype html>
   .q:hover { opacity:1; border-color:var(--accent); color:var(--accent); }
   /* Fixed, and driven from script, because the sidebar scrolls: a tooltip positioned
      inside it is clipped by its own overflow, and this one has to sit outside. */
+  #stale { position:fixed; top:0; left:0; right:0; z-index:10; padding:7px 12px;
+           background:#f5a623; color:#111; font-size:12px; text-align:center; }
+  #stale a { color:#111; }
   #tip { position:fixed; z-index:9; max-width:320px; padding:8px 10px; border-radius:6px;
          background:var(--fg); color:var(--bg); font-size:11.5px; line-height:1.45;
          box-shadow:0 4px 16px #0005; pointer-events:none; display:none; }
@@ -681,6 +688,8 @@ PAGE = r"""<!doctype html>
               vertical-align:middle; }
 </style>
 <div id="tip"></div>
+<div id="stale" hidden>The server restarted since this page was loaded &mdash; it is running
+  older code than the server has. <a href="" onclick="location.reload();return false">Reload</a>.</div>
 <div id="side">
   <h1>ROI encoder bench</h1>
 
@@ -1015,6 +1024,18 @@ $("fixture").addEventListener("change", () => {
 });
 loadFixtures();
 
+// Tell the tab when it has fallen behind the server. Cheap, and it removes a whole class of
+// confusion: a page kept open across a restart runs the script it was served, so a change
+// already on disk reads as a change that did not work.
+let buildId = null;
+setInterval(async () => {
+  try {
+    const v = await (await fetch("/version")).json();
+    if (buildId === null) buildId = v.build;
+    else if (v.build !== buildId) $("stale").hidden = false;
+  } catch (e) { /* server gone; nothing useful to say */ }
+}, 3000);
+
 async function loadRoi() {
   const ref = $("roi_file").value.trim();
   if (!ref) { $("roiinfo").textContent = ""; return; }
@@ -1226,6 +1247,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._json({"error": f"no such file: {src}"})
                 return
             self._json(source_info(src))
+            return
+        if path == "/version":
+            self._json({"build": BUILD_ID})
             return
         if path == "/fixtures":
             self._json(fixtures())
