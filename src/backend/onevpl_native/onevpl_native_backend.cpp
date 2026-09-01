@@ -26,6 +26,7 @@
 #include "adaptive/importance_map.h"
 #include "backend/common/intel_roi_limit.h"
 #include "backend/common/rate_control.h"
+#include "sve/backend_plugin.h"
 #include "sve/backend_registry.h"
 #include "sve/encoder_backend.h"
 
@@ -999,10 +1000,27 @@ const IEncoderBackend& onevpl_native_backend()
     return instance;
 }
 
+namespace {
+
+const IEncoderBackend* acquire_onevpl_backend() noexcept
+{
+    return &onevpl_native_backend();
+}
+
+/// One description for both delivery paths -- see the x264 component and §26.4.
+constexpr SveBackendPluginDescriptorV1 kDescriptor{
+    .abi_version = kBackendPluginAbiVersion,
+    .descriptor_size = sizeof(SveBackendPluginDescriptorV1),
+    .backend_id = static_cast<int32_t>(Backend::IntelOneVplDirect),
+    .acquire = &acquire_onevpl_backend,
+};
+
+} // namespace
+
 /// §26.4's static registration for this component.
 Status RegisterOneVplBackend(BackendRegistry& registry) noexcept
 {
-    return registry.Register(onevpl_native_backend());
+    return registry.Register(kDescriptor);
 }
 
 } // namespace sve

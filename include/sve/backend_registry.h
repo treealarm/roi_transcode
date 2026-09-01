@@ -15,12 +15,13 @@
 // the consumer passes --whole-archive, which pushes a build condition onto whoever embeds
 // us -- and ta_vms embeds us with add_subdirectory().
 //
-// §26.4 also asks for a shared SveBackendPluginDescriptorV1 across static and dynamic
-// delivery. That type is not here yet, deliberately: the dynamic loader is a later slice,
-// and a C ABI struct with no caller is an abstraction invented ahead of its use. It arrives
-// with the loader that reads it. Recorded in STATUS.md as a deviation rather than left to
-// be discovered.
+// §26.4 also asks that static and dynamic delivery share one SveBackendPluginDescriptorV1,
+// and since 2026-09-01 they do: sve/backend_plugin.h carries the descriptor, this registry
+// is the only thing that reads one, and a component describes itself once for both paths.
+// The dynamic loader that finds a descriptor in a shared module is a later slice; what it
+// finds is already defined, and already the thing the static path registers.
 
+#include "sve/backend_plugin.h"
 #include "sve/backend_selection.h"
 #include "sve/status.h"
 
@@ -36,14 +37,22 @@ class IEncoderBackend;
 /// a registry that owned them would be inventing a lifetime none of them has.
 class BackendRegistry {
 public:
-    /// Adds `backend` under its own `kind()`.
+    /// Adds the backend `descriptor` describes, under the identifier it declares.
+    ///
+    /// This is the only way in, and it takes a descriptor rather than a backend so that
+    /// there is one route for both of §26.4's delivery paths. Everything the descriptor
+    /// claims is checked before anything is registered: `abi_version` and `descriptor_size`
+    /// against this build's, a non-null `acquire` that yields a non-null backend, and the
+    /// backend's own `kind()` against the declared identifier -- a component that says
+    /// X264Direct and hands over something else would otherwise be registered under a name
+    /// answering with another backend's capabilities.
     ///
     /// A second registration of the same identifier is `InvalidArgument`, including when
     /// one comes from a static component and the other from a plugin. §26.4 forbids silent
     /// override in as many words, and it is the right refusal: two implementations
     /// answering to one name differ somewhere, and whichever won would be a coin toss made
     /// at link time.
-    Status Register(const IEncoderBackend& backend) noexcept;
+    Status Register(const SveBackendPluginDescriptorV1& descriptor) noexcept;
 
     /// Null when this build does not have it, which is a normal answer rather than an
     /// error -- §26.4 requires that removing a component leaves the core standing.

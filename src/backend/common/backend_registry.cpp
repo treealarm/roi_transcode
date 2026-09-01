@@ -25,9 +25,35 @@
 
 namespace sve {
 
-Status BackendRegistry::Register(const IEncoderBackend& backend) noexcept
+Status BackendRegistry::Register(const SveBackendPluginDescriptorV1& descriptor) noexcept
 {
-    const Backend kind = backend.kind();
+    // Checked in this order on purpose: the version says whether the rest of the object
+    // means what this build thinks it means, so nothing below it is read until it agrees.
+    if (descriptor.abi_version != kBackendPluginAbiVersion) {
+        return Status::InvalidArgument(std::format(
+            "backend plugin abi version {} does not match this build's {}",
+            descriptor.abi_version, kBackendPluginAbiVersion));
+    }
+    if (descriptor.descriptor_size != sizeof(SveBackendPluginDescriptorV1)) {
+        return Status::InvalidArgument(std::format(
+            "backend plugin descriptor is {} bytes, this build's is {}",
+            descriptor.descriptor_size, sizeof(SveBackendPluginDescriptorV1)));
+    }
+    if (descriptor.acquire == nullptr) {
+        return Status::InvalidArgument("backend plugin descriptor has no acquire function");
+    }
+    const IEncoderBackend* acquired = descriptor.acquire();
+    if (acquired == nullptr) {
+        return Status::InvalidArgument("backend plugin acquired no backend");
+    }
+    const Backend kind = acquired->kind();
+    if (static_cast<int32_t>(kind) != descriptor.backend_id) {
+        return Status::InvalidArgument(std::format(
+            "backend plugin declares identifier {} and acquired {}",
+            descriptor.backend_id, backend_name(kind)));
+    }
+    const IEncoderBackend& backend = *acquired;
+
     for (const IEncoderBackend* seen : m_backends) {
         if (seen->kind() == kind) {
             // §26.4: a duplicate identifier is refused, never silently overridden. The

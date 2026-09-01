@@ -32,6 +32,7 @@
 // this backend ever needed from it was BackendSession, which sve/encoder_backend.h
 // declares.
 #include "backend/common/rate_control.h"
+#include "sve/backend_plugin.h"
 #include "sve/backend_registry.h"
 #include "sve/encoder_backend.h"
 #include "preset.h"
@@ -481,11 +482,30 @@ const IEncoderBackend& x264_direct_backend()
     return instance;
 }
 
+namespace {
+
+const IEncoderBackend* acquire_x264_backend() noexcept
+{
+    return &x264_direct_backend();
+}
+
+/// The one description of this component, in the sense §26.4 asks for: the static
+/// registration below registers it, and the dynamic build's sve_backend_plugin_v1()
+/// returns this same object.
+constexpr SveBackendPluginDescriptorV1 kDescriptor{
+    .abi_version = kBackendPluginAbiVersion,
+    .descriptor_size = sizeof(SveBackendPluginDescriptorV1),
+    .backend_id = static_cast<int32_t>(Backend::X264Direct),
+    .acquire = &acquire_x264_backend,
+};
+
+} // namespace
+
 /// §26.4's static registration for this component. Explicit, so the core never names it
 /// and a build without libx264 simply does not call this.
 Status RegisterX264Backend(BackendRegistry& registry) noexcept
 {
-    return registry.Register(x264_direct_backend());
+    return registry.Register(kDescriptor);
 }
 
 } // namespace sve

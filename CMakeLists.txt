@@ -477,6 +477,13 @@ if(SVE_BUILD_TESTS)
     # behind it are safe to reach simultaneously, and a build with no backends registered
     # would pass it by having nothing to contend over.
     find_package(Threads REQUIRED)
+    # §26.4's descriptor checks. Links sve_all because the descriptors it builds acquire a
+    # real backend, which means the deployment registry has to have one.
+    add_executable(backend_plugin_test tests/unit/backend_plugin_test.cpp)
+    target_link_libraries(backend_plugin_test PRIVATE sve_all)
+    target_compile_options(backend_plugin_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME backend_plugin COMMAND backend_plugin_test)
+
     add_executable(concurrency_test tests/unit/concurrency_test.cpp)
     target_link_libraries(concurrency_test PRIVATE sve_all Threads::Threads)
     target_compile_options(concurrency_test PRIVATE ${SVE_WARNINGS})
