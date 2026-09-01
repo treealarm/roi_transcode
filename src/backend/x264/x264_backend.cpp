@@ -31,6 +31,7 @@
 // everything was one target, and the first thing the §5.5 split refused to compile. All
 // this backend ever needed from it was BackendSession, which sve/encoder_backend.h
 // declares.
+#include "backend/common/rate_control.h"
 #include "sve/backend_registry.h"
 #include "sve/encoder_backend.h"
 #include "preset.h"
@@ -39,6 +40,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <span>
 #include <string>
 #include <vector>
@@ -173,10 +175,16 @@ public:
         // SEI goes in through x264_picture_t::extra_sei, which is a direct channel rather
         // than the udu_sei option the libavcodec path has to ask for.
         c.sei = true;
-        // Not yet: the native rate control modes are a separate piece of work from getting
-        // the offsets right, and claiming one that is not wired would be the silent
-        // degradation §50 forbids.
-        c.native_bitrate = false;
+        // ABR with VBV, which is what §16's rolling criterion actually needs and what the
+        // outer BitrateBudget loop of §15 cannot give: that loop can only raise the
+        // background quantiser, so it cannot hold a one-second window and cannot control
+        // the opening seconds at all (measured, see срез Q in docs/STATUS.md).
+        //
+        // The offsets keep working underneath it, which is the reason this is possible here
+        // and not on Intel: x264's quant_offsets are documented as "added on top of the
+        // decisions made by x264", so they compose with rate control instead of replacing
+        // it. mfxExtMBQP on iHD carries absolute quantisers and does not.
+        c.native_bitrate = true;
         c.max_roi_regions = 0;  // a per-macroblock map has no region count to run out of
         return c;
     }
@@ -232,8 +240,19 @@ public:
             p.rc.i_aq_mode = X264_AQ_VARIANCE;
         }
 
-        p.rc.i_rc_method = X264_RC_CRF;
-        p.rc.f_rf_constant = static_cast<float>(config.crf);
+        if (config.rate_control.target_bitrate > 0) {
+            // ABR for the average, VBV for the peak. Without the VBV pair x264 hits the
+            // average over the whole clip and is free to spend a burst anywhere inside it,
+            // which is exactly the rolling window §16 measures.
+            const VbvPlan vbv = vbv_plan_for(config.rate_control.target_bitrate);
+            p.rc.i_rc_method = X264_RC_ABR;
+            p.rc.i_bitrate = vbv.bitrate_kbps;
+            p.rc.i_vbv_max_bitrate = vbv.max_kbps;
+            p.rc.i_vbv_buffer_size = vbv.buffer_kbits;
+        } else {
+            p.rc.i_rc_method = X264_RC_CRF;
+            p.rc.f_rf_constant = static_cast<float>(config.crf);
+        }
 
         // Annex B with headers repeated on every keyframe: the packets go to a muxer that
         // may start mid-stream, and a decoder that never sees SPS/PPS decodes nothing.

@@ -38,14 +38,14 @@ BitrateBudget::BitrateBudget(const RateControlPolicy& policy)
     // Zero on the wire means "use the built-in default", not "zero tolerance".
     m_avg_overshoot = policy.max_average_overshoot > 0.0f
         ? policy.max_average_overshoot
-        : 0.1f;
+        : kDefaultAverageOvershoot;
     // v3 acceptance: 1 s rolling peak ≤ 120% of target → default overshoot 0.2.
     m_peak_overshoot = policy.max_peak_overshoot > 0.0f
         ? policy.max_peak_overshoot
-        : 0.2f;
-    m_recovery_sec = policy.recovery_window_ms > 0
-        ? static_cast<double>(policy.recovery_window_ms) / kMsPerSec
-        : 1.0;
+        : kDefaultPeakOvershoot;
+    m_recovery_sec = static_cast<double>(policy.recovery_window_ms > 0
+        ? policy.recovery_window_ms
+        : kDefaultRecoveryWindowMs) / kMsPerSec;
 }
 
 void BitrateBudget::trim(std::vector<Chunk>& chunks, double& sec, int64_t& bytes, double limit)

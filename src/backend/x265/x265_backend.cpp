@@ -44,13 +44,16 @@
 // everything was one target, and the first thing the §5.5 split refused to compile. All
 // this backend ever needed from it was BackendSession, which sve/encoder_backend.h
 // declares.
+#include "backend/common/rate_control.h"
 #include "sve/backend_registry.h"
 #include "sve/encoder_backend.h"
 #include "preset.h"
 
 #include <algorithm>
 #include <cstdint>
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -63,7 +66,6 @@ extern "C" {
 namespace sve {
 
 namespace {
-
 /// One frame's worth of what has to outlive the submit call: the offsets x265 reads through
 /// a bare pointer, and the SEI bytes we write ourselves once the picture comes back out.
 struct HeldFrameData {
@@ -131,9 +133,16 @@ public:
         c.qp_map_block_height = 16;
         c.runtime_roi_update = true;
         c.sei = true;
-        // The HEVC target-bitrate path is the one decision Р5 refused on this stack, and
-        // going direct does not by itself make it stable. Claimed when it is measured.
-        c.native_bitrate = false;
+        // Claimed only once it was measured, which is what Р5 asked for in as many words:
+        // "вернуть SEI и native bitrate можно только отдельным срезом с regression-
+        // покрытием, не тихой сменой поведения".
+        //
+        // What Р5 was guarding against was heap corruption on the ROI+SEI path -- "free():
+        // invalid size", aborts on real clips. That was diagnosed in slice H1 and it was
+        // not ours: x265 4.1 allocates its per-frame SEI buffer once and writes into it
+        // without a size check (copyUserSEIMessages). This backend has written the SEI NAL
+        // itself ever since, so the defect Р5 named is gone rather than avoided.
+        c.native_bitrate = true;
         c.max_roi_regions = 0;
         return c;
     }
@@ -178,8 +187,19 @@ public:
         if (p.rc.aqMode == X265_AQ_NONE) {
             p.rc.aqMode = X265_AQ_AUTO_VARIANCE;
         }
-        p.rc.rateControlMode = X265_RC_CRF;
-        p.rc.rfConstant = static_cast<double>(config.crf);
+        if (config.rate_control.target_bitrate > 0) {
+            // ABR for the average, VBV for the peak -- the same pair as the x264 backend
+            // and for the same reason: §16 measures a one-second rolling window, and an
+            // average-only mode is free to spend a burst anywhere inside the clip.
+            const VbvPlan vbv = vbv_plan_for(config.rate_control.target_bitrate);
+            p.rc.rateControlMode = X265_RC_ABR;
+            p.rc.bitrate = vbv.bitrate_kbps;
+            p.rc.vbvMaxBitrate = vbv.max_kbps;
+            p.rc.vbvBufferSize = vbv.buffer_kbits;
+        } else {
+            p.rc.rateControlMode = X265_RC_CRF;
+            p.rc.rfConstant = static_cast<double>(config.crf);
+        }
 
         p.bAnnexB = 1;
         p.bRepeatHeaders = 1;
@@ -232,10 +252,23 @@ public:
         const uint64_t token = claim_slot(s, &slot);
         pic_in.userData = token_to_user_data(token);
         HeldFrameData& held = *slot;
-        if (!control.regions.empty()) {
-            build_offsets(s, control.regions, held.offsets);
-            pic_in.quantOffsets = held.offsets.data();
-        }
+        // Always handed over, even with nothing to say -- an all-zero grid, which is what
+        // "no offset" means to x265 anyway ("added on top of the decisions made by x265").
+        //
+        // Never conditionally, and this is a crash rather than a tidiness point. x265
+        // allocates a frame's m_quantOffsets lazily, when a picture carrying offsets first
+        // reaches it, and it recycles frames through a pool. A clip whose early frames
+        // carry no regions therefore fills that pool with frames that have no array, and
+        // the first later picture that does carry offsets memcpy's into a null pointer.
+        // Measured: ASan puts the destination at 0x0 with a length of 0x3840, which is
+        // exactly 3600 floats -- our 80x45 grid for 1280x720.
+        //
+        // It reproduces on any clip whose regions come and go, which testdata/roi.json does
+        // (its object lives 0.25 s of twelve). It went unseen because it needs enough
+        // frames for the pool to recycle, and it was the target-bitrate path that first
+        // ran long enough to get there.
+        build_offsets(s, control.regions, held.offsets);
+        pic_in.quantOffsets = held.offsets.data();
         // Kept here and written by us on the way out -- see write_prefix_sei and the header
         // comment. Not handed to x265: its own user-SEI path corrupts the heap.
         held.sei.assign(control.sei_unregistered.begin(), control.sei_unregistered.end());

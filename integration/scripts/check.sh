@@ -545,6 +545,66 @@ PY
     else
         printf '  skip  onevpldirect is not in this build or has no device\n'
     fi
+
+    # §16, which until 2026-09-01 was never checked at all -- and could not be, because it
+    # says the rolling criterion is valid only for sequences of thirty seconds or more and
+    # testdata/synth.mp4 is twelve. So the fixture is built here: the crowd scene three
+    # times over, which is thirty-six seconds of content expensive enough that a target
+    # bitrate actually binds (synth.mp4 at CRF 28 runs at 42 kbps, fifteen times under any
+    # target worth asking for, and a target that never binds tests nothing).
+    step "a target bitrate is honoured (§16)"
+    _crowd="${SCENES}/crowded/source.mp4"
+    if [[ -f "$_crowd" ]]; then
+        _list="${WORK}/long.txt"
+        : > "$_list"
+        for _i in 1 2 3; do printf "file '%s'\n" "$(realpath "$_crowd")" >> "$_list"; done
+        if ffmpeg -y -hide_banner -loglevel error -f concat -safe 0 -i "$_list" \
+            -c copy "${WORK}/long.mp4" 2>/dev/null; then
+            for _spec in "x264direct h264" "x265direct h265"; do
+                # shellcheck disable=SC2086
+                set -- $_spec
+                if "${BUILD}/roi-transcode" --in "${WORK}/long.mp4" \
+                    --roi "${ROOT}/testdata/synth_roi.json" --out "${WORK}/br_$1.mp4" \
+                    --encoder "$1" --codec "$2" --crf 28 --target-bitrate 3000000 \
+                    >"${WORK}/br_$1.log" 2>&1; then
+                    if "${ROOT}/integration/scripts/bitrate-check.py" \
+                        "${WORK}/br_$1.mp4" 3000000 > "${WORK}/br_$1.txt" 2>&1; then
+                        pass "[$1] average overshoot and P95 rolling are within §16"
+                    else
+                        fail "[$1] §16: $(tr '\n' ' ' < "${WORK}/br_$1.txt")"
+                    fi
+                else
+                    fail "[$1] target-bitrate encode did not complete"
+                fi
+            done
+
+            # The regression for a crash this step is how we found. libx265 allocates a
+            # frame's quantOffsets array lazily -- the first picture carrying offsets is
+            # what makes it -- and recycles frames through a pool, so a clip whose early
+            # frames carry no regions filled that pool with frames having no array, and the
+            # first later picture that did carry offsets wrote into a null pointer. This
+            # backend now hands over the grid on every frame, zero-filled when there is
+            # nothing to say.
+            #
+            # testdata/roi.json is the shape that reproduces it: its object lives a quarter
+            # of a second, so most frames carry no region and a few do. Only completion is
+            # asserted, not §16 -- the thresholds above were measured with synth_roi.json,
+            # and asserting numbers on a fixture nobody measured is how a step becomes
+            # flaky.
+            if "${BUILD}/roi-transcode" --in "${WORK}/long.mp4" \
+                --roi "${ROOT}/testdata/roi.json" --out "${WORK}/br_comeandgo.mp4" \
+                --encoder x265direct --codec h265 --crf 28 --target-bitrate 2000000 \
+                >"${WORK}/br_comeandgo.log" 2>&1; then
+                pass "regions that come and go survive a long ABR encode"
+            else
+                fail "x265direct crashed or failed on regions that come and go (rc=$?)"
+            fi
+        else
+            printf '  skip  could not build the 36 s fixture\n'
+        fi
+    else
+        printf '  skip  crowded scene not generated, §16 needs >=30 s (its own rule)\n'
+    fi
 else
     printf '  skip  scenes not generated (benchmarks/synthetic/make-scenes.py)\n'
 fi

@@ -119,6 +119,17 @@ struct MetadataConfig {
 /// BitrateBudget remains an object-first fine-tuner. Area budget
 /// (`Quality::max_protected_fraction`) still caps how much of the frame may be protected
 /// at once.
+/// The defaults a zero in RateControlPolicy stands for.
+///
+/// Named and shared because a zero on the wire means "use the built-in default", and that
+/// default is read in two places that must agree: the outer BitrateBudget loop, and any
+/// backend wiring the policy onto its own rate control. Two copies of 0.2f is the kind of
+/// duplication that only shows up as a behaviour difference between two backends.
+inline constexpr float kDefaultAverageOvershoot = 0.1f;
+/// 120% of target over a ~1 s window, which is §16's rolling acceptance bound.
+inline constexpr float kDefaultPeakOvershoot = 0.2f;
+inline constexpr uint32_t kDefaultRecoveryWindowMs = 1000;
+
 struct RateControlPolicy {
     /// Target average bitrate in bits per second. Zero leaves CQP/CRF alone.
     uint64_t target_bitrate = 0;
