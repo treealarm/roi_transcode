@@ -380,6 +380,10 @@ def encode_job(job_id: str, p: dict) -> None:
 
         stage("cutting segment")
         clip = clip_of(src, float(p.get("seconds") or 0), info["duration"])
+        # Measured before numbering. The numbered copy is lossless (-qp 0) and several
+        # times the size of anything it is compared against, so reporting it as "input"
+        # turned a 125% ratio into a 17% one and made the encoder look brilliant.
+        segment_bytes = clip.stat().st_size
         if p.get("number_frames"):
             stage("numbering frames")
             # Used as both the encoder's input and the reference it is measured against,
@@ -438,7 +442,7 @@ def encode_job(job_id: str, p: dict) -> None:
 
         result = {
             "id": run_id, "bytes": out_path.stat().st_size,
-            "clip_bytes": clip.stat().st_size,
+            "clip_bytes": segment_bytes,
             "frames": frame_count(out_path), "clip_frames": frame_count(clip),
             "width": width, "height": height,
             "codec": probe(out_path, "stream=codec_name"),
@@ -448,6 +452,7 @@ def encode_job(job_id: str, p: dict) -> None:
             "track": track_of(doc), "hold_sec": doc.get("hold_sec", 0.25),
             "fps": info["fps"],
             "ssim_zone": None, "ssim_bg": None, "psnr_zone": None,
+            "flat_bytes": None, "flat_ssim_zone": None, "flat_ssim_bg": None,
         }
         with LOCK:
             RUNS[run_id] = {"src": clip, "out": out_path, "dir": rundir}
@@ -456,6 +461,27 @@ def encode_job(job_id: str, p: dict) -> None:
         stage("extracting frames")
         for side in ("src", "out"):
             extract_all(RUNS[run_id], side, result["frames"])
+
+        if p.get("flat_baseline"):
+            # The same knobs with the ROI switched off. Input against output compares two
+            # arbitrary encodes -- the source's own CRF against ours -- and answers nothing
+            # about ROI. This is the question ROI exists to answer: at these settings, what
+            # did steering the quality cost, and what did it buy in the zone.
+            stage("encoding flat baseline")
+            flat_doc = dict(doc)
+            flat_doc["background_qp_delta"] = 0
+            flat_doc["kinds"] = {k: {"qp_delta": 0, "pad_norm": 0.0}
+                                 for k in doc.get("kinds", {"plate": {}})}
+            flat_path, flat_out = rundir / "flat.json", rundir / "flat.mp4"
+            flat_path.write_text(json.dumps(flat_doc, indent=2))
+            flat_cmd = list(cmd)
+            flat_cmd[flat_cmd.index("--roi") + 1] = str(flat_path)
+            flat_cmd[flat_cmd.index("--out") + 1] = str(flat_out)
+            if run(flat_cmd).returncode == 0 and flat_out.exists():
+                result["flat_bytes"] = flat_out.stat().st_size
+                if p.get("metrics", True):
+                    result["flat_ssim_zone"] = metric("ssim", clip, flat_out, zone)
+                    result["flat_ssim_bg"] = metric("ssim", clip, flat_out, bg)
 
         if p.get("metrics", True):
             stage("measuring")
@@ -622,6 +648,11 @@ PAGE = r"""<!doctype html>
     shorter run does not tilt the comparison -- it only makes a knob change cost seconds
     instead of a minute.">?</i></span><input type="range" id="seconds" min="0.5" max="12"
     step="0.5" value="2"><output class="val" id="seconds_v">2</output></label>
+  <label><span>flat baseline<i class="q" data-tip="Encode a second time with the ROI
+    switched off -- same crf, same gop, no boost and no background suppression -- and
+    report both. Input against output compares the source's CRF with ours and says nothing
+    about ROI; this is the question ROI exists to answer. Doubles the run.">?</i></span>
+    <input type="checkbox" id="flat_baseline"></label>
   <label><span>metrics<i class="q" data-tip="SSIM and PSNR over the zone and over a
     background corner, across the whole segment. Two extra ffmpeg passes; turn it off when
     you only want to look.">?</i></span><input type="checkbox" id="metrics" checked></label>
@@ -753,7 +784,7 @@ const $ = id => document.getElementById(id);
 const KNOBS = ["crf","gop","qp_delta","background_qp_delta","pad_norm","hold_sec",
                "bbox_x","bbox_y","bbox_w","bbox_h","seconds"];
 const ALL = KNOBS.concat(["encoder","codec","kind","target_bitrate","metrics","roi_file",
-                          "override_quality","number_frames"]);
+                          "override_quality","number_frames","flat_baseline"]);
 let runId = null, poll = null, pending = null, srcInfo = null, current = null;
 
 for (const k of KNOBS) {
@@ -823,6 +854,7 @@ function params() {
              kind: $("kind").value, target_bitrate: Number($("target_bitrate").value),
              metrics: $("metrics").checked, roi_file: $("roi_file").value,
              number_frames: $("number_frames").checked,
+             flat_baseline: $("flat_baseline").checked,
              override_quality: $("override_quality").checked, t: 0.0};
   for (const k of KNOBS) p[k] = Number($(k).value);
   return p;
@@ -882,15 +914,28 @@ $("roi_file").addEventListener("change", loadRoi);
 function showStats(i) {
   const num = v => v === null || v === undefined ? "—" : Number(v).toFixed(6);
   const ratio = i.clip_bytes ? (100 * i.bytes / i.clip_bytes).toFixed(1) + "%" : "—";
-  $("stats").innerHTML = [
-    ["size", fmtBytes(i.bytes) + " (" + ratio + " of segment)"],
+  const rows = [
+    ["input segment", fmtBytes(i.clip_bytes)],
+    ["output", fmtBytes(i.bytes) + " (" + ratio + " of input)"],
     ["frames", i.frames + " of " + i.clip_frames],
-    ["output", i.codec + " " + i.fps_text + " fps, " + i.duration.toFixed(2) + " s"],
+    ["format", i.codec + " " + i.fps_text + " fps, " + i.duration.toFixed(2) + " s"],
     ["SSIM zone", num(i.ssim_zone)],
     ["SSIM background", num(i.ssim_bg)],
     ["PSNR zone", i.psnr_zone == null ? "—" : Number(i.psnr_zone).toFixed(2) + " dB"],
     ["run time", i.seconds == null ? "—" : i.seconds + " s"],
-  ].map(([k, v]) => "<div><b>" + k + "</b>" + v + "</div>").join("");
+  ];
+  // The flat encode is the only comparison that isolates what ROI did: same knobs, same
+  // codec, ROI off. Shown beside the ROI numbers rather than instead of them.
+  if (i.flat_bytes != null) {
+    const d = 100 * (i.bytes - i.flat_bytes) / i.flat_bytes;
+    rows.push(["flat (no ROI)", fmtBytes(i.flat_bytes)]);
+    rows.push(["ROI vs flat", (d >= 0 ? "+" : "") + d.toFixed(1) + "% size"]);
+    if (i.flat_ssim_zone != null)
+      rows.push(["zone: ROI vs flat", num(i.ssim_zone) + " vs " + num(i.flat_ssim_zone)]);
+    if (i.flat_ssim_bg != null)
+      rows.push(["bg: ROI vs flat", num(i.ssim_bg) + " vs " + num(i.flat_ssim_bg)]);
+  }
+  $("stats").innerHTML = rows.map(([k, v]) => "<div><b>" + k + "</b>" + v + "</div>").join("");
 }
 
 function loadFrame(n) {
