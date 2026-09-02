@@ -238,6 +238,30 @@ void ffmpeg_diagnostics_arrive_through_the_sink()
     check(log.lines.size() == settled, "clearing the sink restores FFmpeg's own default");
 }
 
+/// A tinted level is still the level it is.
+///
+/// av_log carries a colour tint in the high bits of its level -- AV_LOG_C(x) is (x << 8) --
+/// and every consumer inside FFmpeg masks it off before doing anything. The first version
+/// of this routing compared and mapped the raw value, so a tinted AV_LOG_ERROR arrived as
+/// 50192: it failed the level test and disappeared from the sink and from stderr both, and
+/// had it passed, it would have been classified as Trace. Found by review rather than by
+/// this file, which is the reason the case is written down here now.
+void a_tinted_level_is_still_the_level_it_is()
+{
+    Captured log;
+    SetFFmpegLogSink(log.sink());
+
+    av_log(nullptr, AV_LOG_ERROR | AV_LOG_C(196), "sve logging test tinted\n");
+
+    if (!log.said_at(LogLevel::Error, "sve logging test tinted")) {
+        log.dump("tinted");
+    }
+    check(log.said_at(LogLevel::Error, "sve logging test tinted"),
+        "a tinted error is delivered, and delivered as an error");
+
+    SetFFmpegLogSink(nullptr);
+}
+
 } // namespace
 
 int main()
@@ -249,6 +273,7 @@ int main()
     a_strict_refusal_reaches_the_log_and_not_only_the_caller();
     a_metadata_channel_that_cannot_carry_says_so();
     ffmpeg_diagnostics_arrive_through_the_sink();
+    a_tinted_level_is_still_the_level_it_is();
 
     if (failures > 0) {
         std::fprintf(stderr, "logging_test: %d failure(s)\n", failures);

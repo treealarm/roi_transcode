@@ -700,9 +700,16 @@ Status SmartVideoEncoder::Reconfigure(const RuntimeEncoderSettings& settings)
     // §29's "reconfigure", and it names what actually changed rather than that a call
     // happened: §8.2 lets three things move and a caller may set any subset, so "reconfigured"
     // on its own would leave a reader to guess which.
-    s.log.info(std::format("reconfigured:{}{}{}",
-        settings.frame_rate ? " frame_rate" : "", settings.quality ? " quality" : "",
-        settings.target_bitrate ? " target_bitrate" : ""));
+    //
+    // A call that set nothing says nothing. It is Ok -- there was nothing invalid about it --
+    // but no setting moved, and a bare "reconfigured:" naming no field would put a
+    // reconfiguration in the log that did not happen, which is the opposite of what §29
+    // wants the event for.
+    if (settings.frame_rate || settings.quality || settings.target_bitrate) {
+        s.log.info(std::format("reconfigured:{}{}{}",
+            settings.frame_rate ? " frame_rate" : "", settings.quality ? " quality" : "",
+            settings.target_bitrate ? " target_bitrate" : ""));
+    }
     return Status::Ok();
 }
 

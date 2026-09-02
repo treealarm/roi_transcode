@@ -10,6 +10,7 @@
 // compiling, a public header grew a dependency it must not have -- which is exactly the
 // property TZ v2.0 §7 and §8 rely on, and the reason BackendSession is opaque.
 
+#include "sve/ffmpeg_log.h"
 #include "sve/input_format.h"
 #include "sve/packet.h"
 #include "sve/sve.h"
@@ -106,7 +107,21 @@ private:
     const sve::LogSink sink = [](sve::LogLevel, std::string_view) {};
     (void)sve::fallback_policy_name(with_policy.fallback);
     (void)sve::log_level_name(sve::LogLevel::Warning);
+    (void)sve::log_level_name(sve::LogLevel::Trace);
     (void)sink;
+
+    // §29's FFmpeg routing, and it is here for the reason the whole file exists. The header
+    // is about FFmpeg and deliberately names no FFmpeg type, so that an embedder without
+    // FFmpeg on the include path can still compile against the public surface. Reached from
+    // neither sve.h nor the includes above until 2026-09-02, that claim was made in a commit
+    // message and checked nowhere -- only public_headers_selfcontained compiled it, and it
+    // does so with ${FFMPEG_INCLUDE_DIRS} on the path, which proves the opposite of what was
+    // wanted. Naming the function is what puts it under this target.
+    //
+    // Declared, never called: this object library is never linked, and the definition lives
+    // in the FFmpeg interop component that an isolated build does not have.
+    const auto route = &sve::SetFFmpegLogSink;
+    (void)route;
     (void)selection.allow_unlisted;
 
     // §8 and §10: memory types, objects, policies.

@@ -38,21 +38,33 @@ enum class LogLevel {
 const char* log_level_name(LogLevel level);
 
 /// The events §29 requires a library to emit, so that the list is in the code rather than
-/// only in the specification. Every one of them is emitted through a Logger, and
-/// tests/unit/logging_test.cpp holds one encoder to each.
+/// only in the specification. Every one of them is emitted through a Logger. How far each
+/// is held by a test differs, and is said here rather than left to be assumed:
 ///
-///   * backend selected          -- which one opened and how many declined first
-///   * capability report         -- what the one that opened says it can do
-///   * fallback                  -- a degradation was applied (§50)
-///   * unsupported feature       -- something was refused rather than worked around
-///   * encoder reset/reconfigure -- Reconfigure and Stop
-///   * frame drop                -- see below
-///   * metadata failure          -- a metadata channel could not carry what was asked
+///   * backend selected          -- which one opened and how many declined first.
+///                                  Covered through a real encoder.
+///   * capability report         -- what the one that opened says it can do.
+///                                  Covered through a real encoder.
+///   * encoder reset/reconfigure -- Reconfigure and Stop.
+///                                  Covered through a real encoder.
+///   * fallback                  -- a degradation was applied (§50).
+///                                  Covered at the guard that emits it, not through an
+///                                  encoder: provoking one that way needs a backend
+///                                  lacking the capability, and every backend in this
+///                                  build has it.
+///   * unsupported feature       -- something was refused rather than worked around.
+///                                  Covered at the guard, for the same reason.
+///   * metadata failure          -- a metadata channel could not carry what was asked.
+///                                  Covered at the guard, for the same reason.
+///   * frame drop                -- see below. Emitted, and not forced by any test.
 ///
 /// On frame drop: this library never drops a submitted frame. Back pressure is `Again`
 /// from SubmitFrame, which is the caller's frame still in the caller's hands, not a loss.
 /// What can happen instead is a frame whose packet never arrives to claim it, and that is
-/// the event reported under this name.
+/// the event reported under this name. Nothing forces it: it needs an encoder that accepts
+/// a frame and then never emits a packet carrying its timestamp, which no backend here
+/// does. The acceptance step for §19.3 checks the condition it reports on -- that records
+/// and packets correspond -- rather than the warning that fires when they do not.
 
 /// Called from whichever thread produced the message, and possibly from the encoder's own
 /// worker -- an implementation that touches shared state must say so itself. Must not

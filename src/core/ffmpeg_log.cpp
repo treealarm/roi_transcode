@@ -16,13 +16,41 @@ namespace sve {
 
 namespace {
 
-std::mutex g_mutex;
-LogSink g_sink;
+/// Deliberately immortal, and never destroyed.
+///
+/// av_log_set_callback hands FFmpeg a raw function pointer that outlives everything: it is
+/// process-wide, and nothing takes it back when this translation unit's statics are
+/// destroyed at exit. An ordinary static here would leave `forward` locking a destroyed
+/// mutex and copying a destroyed std::function for any av_log that happens during static
+/// destruction -- a consumer tearing down a static AVFormatContext, say. Leaked on purpose
+/// so that the callback can never outlive what it touches; the leak is one mutex and one
+/// std::function, once, for the life of the process.
+std::mutex& mutex()
+{
+    static std::mutex* const m = new std::mutex();
+    return *m;
+}
+
+LogSink& sink_slot()
+{
+    static LogSink* const s = new LogSink();
+    return *s;
+}
 
 /// What av_log_format_line2 is given to write into before it says how much it wanted.
 /// Chosen to hold FFmpeg's own longest ordinary lines without a second pass; anything
 /// longer takes the resize below, so the number is a starting point rather than a limit.
 constexpr int kInitialLineBytes = 1024;
+
+/// The severity, with FFmpeg's colour tint removed.
+///
+/// av_log's level argument carries a tint in its high bits -- AV_LOG_C(x) is (x << 8) --
+/// and every consumer inside FFmpeg masks it off before doing anything (av_log_format_line2
+/// among them). Comparing or mapping the raw value instead means a tinted AV_LOG_ERROR
+/// arrives as 50192: it fails the level test and vanishes from the sink and from stderr
+/// both, and were it to pass, it would be classified as Trace. Masked once, here, so that
+/// neither the filter below nor the mapping can see the tint.
+int severity_of(int av_level) { return av_level & 0xff; }
 
 LogLevel level_from_av(int av_level)
 {
@@ -48,18 +76,20 @@ void forward(void* avcl, int level, const char* fmt, va_list args)
 {
     // Asked before anything is formatted: FFmpeg calls this for every message it considers,
     // including the ones the current av_log level discards, and formatting one only to drop
-    // it costs the encode for nothing.
-    if (level > av_log_get_level()) {
+    // it costs the encode for nothing. The comparison is on the masked severity, as
+    // av_log_default_callback's own is.
+    const int severity = severity_of(level);
+    if (severity > av_log_get_level()) {
         return;
     }
 
     LogSink sink;
     {
-        const std::lock_guard<std::mutex> lock(g_mutex);
-        if (!g_sink) {
+        const std::lock_guard<std::mutex> lock(mutex());
+        if (!sink_slot()) {
             return;
         }
-        sink = g_sink;
+        sink = sink_slot();
     }
 
     // FFmpeg's own formatter, so that the "[libx264 @ 0x...]" prefix and the line-continuation
@@ -96,7 +126,7 @@ void forward(void* avcl, int level, const char* fmt, va_list args)
     if (text.empty()) {
         return;
     }
-    sink(level_from_av(level), text);
+    sink(level_from_av(severity), text);
 }
 
 } // namespace
@@ -105,8 +135,8 @@ void SetFFmpegLogSink(LogSink sink)
 {
     const bool wanted = static_cast<bool>(sink);
     {
-        const std::lock_guard<std::mutex> lock(g_mutex);
-        g_sink = std::move(sink);
+        const std::lock_guard<std::mutex> lock(mutex());
+        sink_slot() = std::move(sink);
     }
     // The sink is swapped under the lock first, then the callback. A message arriving from
     // another thread mid-swap therefore finds a consistent sink or none -- never a dangling

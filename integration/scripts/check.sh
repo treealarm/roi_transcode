@@ -1200,15 +1200,25 @@ else
     fail "FFmpeg diagnostics did not reach the sink"
     printf '%s\n' "$ffmpeg_log_out" | head -5 | sed 's/^/      /' >&2
 fi
-if printf '%s' "$ffmpeg_log_out" | grep -q '^ffmpeg \[warning\]: '; then
-    pass "and so does an FFmpeg warning, at its own level"
+# That the text survived, without pinning FFmpeg's wording. An earlier version of this step
+# asserted "moov atom not found" and the presence of a warning-level line, which made an
+# FFmpeg upgrade or a different probe outcome redden the run with nothing wrong in the
+# product. What matters here is that something non-empty came through; the level mapping is
+# checked in logging_test, where the test chooses the level itself and the answer cannot
+# depend on which diagnostic FFmpeg happened to produce.
+if printf '%s' "$ffmpeg_log_out" | grep -qE '^ffmpeg \[error\]: .+'; then
+    pass "the routed line carries FFmpeg's message and not just the frame"
 else
-    fail "the level mapping lost the warning"
+    fail "the routed message arrived empty"
 fi
-if printf '%s' "$ffmpeg_log_out" | grep -q 'moov atom not found'; then
-    pass "the message itself survives the routing intact"
+# The half that proves routing rather than mere presence: FFmpeg's own format starts the
+# line with its context, "[mov,mp4,...]". If any line still begins that way, a diagnostic
+# went to stderr directly instead of through the sink.
+if printf '%s' "$ffmpeg_log_out" | grep -q '^\['; then
+    fail "an FFmpeg line reached stderr without going through the sink"
+    printf '%s\n' "$ffmpeg_log_out" | grep '^\[' | head -3 | sed 's/^/      /' >&2
 else
-    fail "the routed message lost its text"
+    pass "nothing bypassed the sink on its way to stderr"
 fi
 
 step "dependency scan: the core declares and links nothing it must not"

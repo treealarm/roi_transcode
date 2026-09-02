@@ -36,6 +36,15 @@ namespace sve {
 /// a time with the trailing newline removed, so a sink that adds its own framing does not
 /// have to strip anything.
 ///
+/// **The last two of those mappings need FFmpeg's own level raised first.** Installing a
+/// sink does not change what FFmpeg is willing to say: it discards anything above
+/// av_log_get_level(), which defaults to AV_LOG_INFO, so Debug and Trace never arrive
+/// unless the application calls av_log_set_level(AV_LOG_DEBUG) or higher itself. That is
+/// left to the application on purpose -- the level is process-wide exactly as this callback
+/// is, and a library that quietly raised it would be turning on a firehose in somebody
+/// else's process. It is documented here because a mapping the caller cannot reach reads
+/// as a defect otherwise.
+///
 /// FFmpeg calls its callback from any thread, including ones this library never created,
 /// so `sink` must tolerate that; the sink is held behind a lock here, but what the sink
 /// itself touches is the sink's own business.
