@@ -50,6 +50,39 @@ void register_exceptions(py::module_& m)
     g_unsupported = derive("UnsupportedError");
     g_device_unavailable = derive("DeviceUnavailableError");
     g_backend_error = derive("BackendError");
+
+    // §58.6 asks the mapping to be documented; this is the mapping itself, so a caller can
+    // read it rather than infer it from a table in a README that nothing checks. It is the
+    // same function raise_status consults, which is what makes the answer true.
+    m.def("exception_for_status_code", &exception_type_for, py::arg("code"),
+        "Which exception a StatusCode becomes, or None for the three codes that are not "
+        "errors: Ok, Again and EndOfStream (§58.6).");
+}
+
+py::object exception_type_for(sve::StatusCode code)
+{
+    switch (code) {
+    // Not errors, and deliberately not exceptions -- see the note at the top of this file.
+    case sve::StatusCode::Ok:
+    case sve::StatusCode::Again:
+    case sve::StatusCode::EndOfStream:
+        return py::none();
+    case sve::StatusCode::InvalidArgument:   return g_invalid_argument;
+    case sve::StatusCode::Unsupported:       return g_unsupported;
+    case sve::StatusCode::DeviceUnavailable: return g_device_unavailable;
+    // Everything that is not one of the three decisions above arrives as BackendError with
+    // `status_code` saying which it was. That includes OutOfMemory, Timeout and Error: they
+    // are not decisions a caller branches on differently, and a class per code would be a
+    // hierarchy nobody catches. The code itself is not lost either way.
+    case sve::StatusCode::BackendError:
+    case sve::StatusCode::OutOfMemory:
+    case sve::StatusCode::Timeout:
+    case sve::StatusCode::Error:
+        return g_backend_error;
+    }
+    // A value that is no enumerator at all. Nothing in the library produces one; if
+    // something ever does, it arrives as the base rather than as a wrong subclass.
+    return g_base;
 }
 
 [[noreturn]] void raise_status(const sve::Status& status)
@@ -57,12 +90,13 @@ void register_exceptions(py::module_& m)
     // The message is kept whole. §58.6 asks for the original text alongside the code, and
     // the C++ messages are written to be read -- rewriting them here would lose the part
     // that says which backend refused and why.
-    py::object type = g_backend_error;
-    switch (status.code()) {
-    case sve::StatusCode::InvalidArgument: type = g_invalid_argument; break;
-    case sve::StatusCode::Unsupported:     type = g_unsupported; break;
-    case sve::StatusCode::DeviceUnavailable: type = g_device_unavailable; break;
-    default: break;
+    py::object type = exception_type_for(status.code());
+    if (type.is_none()) {
+        // Ok, Again or EndOfStream reached a raising path, which is a defect in the
+        // bindings rather than in the caller's code: those three are answers, and every
+        // call site handles them before it gets here. Raising the base with the code in it
+        // says so out loud instead of manufacturing a plausible-looking BackendError.
+        type = g_base;
     }
     py::object error = type(status.message());
     error.attr("status_code") = static_cast<int>(status.code());

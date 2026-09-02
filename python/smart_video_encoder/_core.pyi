@@ -36,6 +36,7 @@ class Backend:
     X265: Backend
     X264_DIRECT: Backend
     X265_DIRECT: Backend
+    INTEL_ONE_VPL_DIRECT: Backend
     __members__: dict[str, Backend]
     @property
     def name(self) -> str: ...
@@ -53,6 +54,7 @@ class Codec:
     def value(self) -> int: ...
 
 class PixelFormat:
+    UNKNOWN: PixelFormat
     YUV420P: PixelFormat
     YUV422P: PixelFormat
     YUV444P: PixelFormat
@@ -122,6 +124,8 @@ class StatusCode:
     DEVICE_UNAVAILABLE: StatusCode
     BACKEND_ERROR: StatusCode
     OUT_OF_MEMORY: StatusCode
+    TIMEOUT: StatusCode
+    ERROR: StatusCode
     __members__: dict[str, StatusCode]
     @property
     def name(self) -> str: ...
@@ -374,4 +378,6 @@ def available_backends() -> list[Backend]: ...
 def backend_name(backend: Backend) -> str: ...
 def get_capabilities(backend: Backend, codec: Codec) -> EncoderCapabilities: ...
 def status_code_name(code: StatusCode) -> str: ...
+def exception_for_status_code(
+    code: StatusCode) -> type[SmartVideoEncoderError] | None: ...
 def log_level_name(level: LogLevel) -> str: ...

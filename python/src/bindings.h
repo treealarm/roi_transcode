@@ -41,6 +41,11 @@ void register_exceptions(pybind11::module_& m);
 /// and §58.6 requires them to have their own Python semantics rather than being masked.
 [[noreturn]] void raise_status(const sve::Status& status);
 
+/// Which Python exception class a status code becomes, or None for the three codes that are
+/// answers rather than errors (§58.6). Exposed to Python as `exception_for_status_code`, and
+/// used by `raise_status`, so the documented mapping and the real one are one thing.
+pybind11::object exception_type_for(sve::StatusCode code);
+
 void register_config(pybind11::module_& m);
 void register_metadata(pybind11::module_& m);
 void register_frames(pybind11::module_& m);

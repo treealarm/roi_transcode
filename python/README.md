@@ -105,7 +105,8 @@ feature, encoder reset/reconfigure, frame drop and metadata failure.
 * `frame_from_planes(planes, pixel_format, width, height) -> Frame` — wraps arrays without
   copying (§58.4). Rows may be padded; anything whose dtype, shape or strides do not fit
   raises `ValueError` or `TypeError` rather than being read wrongly later. The `Frame` holds
-  a reference to the arrays, so you may drop yours.
+  a reference to each plane array — not to the list you passed them in — so you may drop
+  yours, and reusing one list per frame is safe.
 * `FrameMetadata` — `timestamp`, `force_key_frame`, `objects: list[BoundingBox]`.
 * `BoundingBox` (§9) — `kind`, `label`, `x`, `y`, `width`, `height` (normalized 0..1),
   `confidence`, `track_id`, `t_sec`, `polygon: list[Point]`, `track: TrackEvidence`. Three
@@ -145,6 +146,17 @@ status as `status_code` (the enumerator's integer value) and `status_name` (its 
 so the C++ answer survives the crossing rather than being flattened into a message string.
 `Again` and `EndOfStream` are **not** exceptions -- they are the `False` from
 `submit_frame` and the `at_end` property, because neither is a failure.
+
+The whole mapping, and `exception_for_status_code(code)` answers it at runtime — it is the
+same function the raising path consults, so the two cannot disagree:
+
+| StatusCode | Becomes |
+|---|---|
+| `OK`, `AGAIN`, `END_OF_STREAM` | `None` — answers, not errors: an empty list and `at_end` |
+| `INVALID_ARGUMENT` | `InvalidArgumentError` |
+| `UNSUPPORTED` | `UnsupportedError` |
+| `DEVICE_UNAVAILABLE` | `DeviceUnavailableError` |
+| `BACKEND_ERROR`, `OUT_OF_MEMORY`, `TIMEOUT`, `ERROR` | `BackendError`, with `status_code` saying which |
 
 ## Examples
 

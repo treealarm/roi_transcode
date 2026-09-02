@@ -307,7 +307,7 @@ def test_the_public_surface_is_the_one_we_intend():
         "EncoderCapabilities", "EncoderStatistics",
         # Free functions and module-level values.
         "available_backends", "backend_name", "get_capabilities", "status_code_name",
-        "log_level_name",
+        "log_level_name", "exception_for_status_code",
         "frame_from_planes", "build_manifest",
         # The exception hierarchy of §58.6.
         "SmartVideoEncoderError", "BackendError", "DeviceUnavailableError",
@@ -570,3 +570,171 @@ def test_the_log_sink_round_trips_and_can_be_cleared():
     assert cfg.log is not None
     cfg.log = None
     assert cfg.log is None
+
+
+# --- §58.10.4 ownership, and §58.6's mapping in full ------------------------
+
+
+def test_the_arrays_are_released_when_the_encoder_is_done_with_them():
+    """§58.10.4: no reference is leaked by the path that deliberately keeps references.
+
+    `frame_from_planes` does not copy (§58.4), so it must hold the arrays -- and holding
+    them is exactly how a wrapper leaks. The count is read before, during and after, so the
+    test says both halves: that the reference is taken while it is needed, and that it is
+    given back. A test that only checked the second half would pass against a binding that
+    never held one and read freed memory.
+    """
+    import sys
+
+    pl = planes()
+    before = [sys.getrefcount(p) for p in pl]
+
+    frame = sve.frame_from_planes(pl, sve.PixelFormat.YUV420P, WIDTH, HEIGHT)
+    held = [sys.getrefcount(p) for p in pl]
+    assert all(h > b for h, b in zip(held, before)), "the frame does not hold the arrays"
+
+    cfg = config()
+    cfg.log = lambda level, message: None
+    with sve.SmartVideoEncoder(cfg) as enc:
+        meta = sve.FrameMetadata()
+        meta.timestamp = sve.MediaTimestamp(0, sve.Rational(1, 25))
+        assert enc.submit_frame(frame, meta)
+        enc.receive_available()
+        enc.flush()
+        while not enc.at_end:
+            enc.receive_available()
+
+    del frame
+    after = [sys.getrefcount(p) for p in pl]
+    assert after == before, "the encoder kept a reference to the arrays"
+
+
+def test_the_frame_holds_the_planes_and_not_the_list_they_arrived_in():
+    """§58.4: "скрытое использование dangling pointer запрещено".
+
+    The obvious way to write an encode loop is one list reused per frame -- `pl[0] = luma`
+    -- and until 2026-09-02 the Frame held that list rather than the arrays in it, so
+    rebinding an element freed a plane the encoder was still reading. Nothing crashed in the
+    tests, which is what a use-after-free does until it does not.
+    """
+    import sys
+
+    pl = planes()
+    luma = pl[0]
+    frame = sve.frame_from_planes(pl, sve.PixelFormat.YUV420P, WIDTH, HEIGHT)
+    pl[0] = np.zeros((HEIGHT, WIDTH), dtype=np.uint8)   # the caller reuses their list
+
+    # Nothing but the local name and the Frame refers to the old luma now. Dropping the
+    # Frame must be what lowers the count -- if the list had been the only holder, the count
+    # would already be at its floor here and the plane's memory would be free.
+    while_held = sys.getrefcount(luma)
+    del frame
+    assert sys.getrefcount(luma) < while_held, "the Frame did not hold the plane itself"
+
+
+def test_a_log_sink_is_released_with_the_configuration():
+    """§58.10.4 again, for the callbacks: a sink outliving its encoder is a leak too.
+
+    Bound in the same slice as the sink itself (2026-09-02), because a callback held by C++
+    is the other shape of the same defect -- and this one holds a Python object from a
+    thread the encoder made.
+    """
+    import sys
+
+    def sink(level, message):
+        pass
+
+    before = sys.getrefcount(sink)
+    cfg = config()
+    cfg.log = sink
+    cfg.settings.metadata.sidecar_sink = sink
+    assert sys.getrefcount(sink) > before
+    encode(cfg, frames=4)
+    del cfg
+    assert sys.getrefcount(sink) == before, "the configuration kept the sink alive"
+
+
+def test_encoders_can_be_opened_and_closed_repeatedly():
+    """§58.10.4: repeated create/destroy finds double-free and use-after-free, and §58.6
+    asks close() to be idempotent -- so both are exercised in the same loop.
+
+    Not a leak assertion in bytes: RSS on a Python process is not a measurement (§43 does
+    that properly, in C++, over an hour). What this asserts is that the cycle survives, that
+    closing twice is nothing, and that a closed encoder refuses work instead of touching a
+    destroyed one.
+    """
+    cfg = config()
+    cfg.log = lambda level, message: None
+    for _ in range(25):
+        enc = sve.SmartVideoEncoder(cfg)
+        frame = sve.frame_from_planes(planes(), sve.PixelFormat.YUV420P, WIDTH, HEIGHT)
+        meta = sve.FrameMetadata()
+        meta.timestamp = sve.MediaTimestamp(0, sve.Rational(1, 25))
+        assert enc.submit_frame(frame, meta)
+        enc.close()
+        enc.close()   # §58.6: idempotent
+        assert enc.closed
+        # ValueError, as everywhere else in this suite: using a closed encoder is a caller
+        # mistake in Python terms, not a status the library returned.
+        with pytest.raises(ValueError):
+            enc.submit_frame(frame, meta)
+
+
+def test_every_status_code_maps_to_an_exception_or_is_documented_as_not_one():
+    """§58.10's AT-008 asks for exception mapping for *all* StatusCode, not for the three
+    that happen to be reachable from a test.
+
+    The mapping is read from the same function `raise_status` consults, so this cannot
+    agree with a table that the raising path does not use. Two codes had no spelling in the
+    Python enum at all until 2026-09-02 -- TIMEOUT and ERROR -- which is the shape this
+    covers: a code that reaches a caller as `status_code` and matches nothing.
+    """
+    expected = {
+        # Answers, not errors (§58.6): an empty list and a flag say these.
+        sve.StatusCode.OK: None,
+        sve.StatusCode.AGAIN: None,
+        sve.StatusCode.END_OF_STREAM: None,
+        # The three decisions a caller branches on differently.
+        sve.StatusCode.INVALID_ARGUMENT: sve.InvalidArgumentError,
+        sve.StatusCode.UNSUPPORTED: sve.UnsupportedError,
+        sve.StatusCode.DEVICE_UNAVAILABLE: sve.DeviceUnavailableError,
+        # Everything else, with the code kept on the instance.
+        sve.StatusCode.BACKEND_ERROR: sve.BackendError,
+        sve.StatusCode.OUT_OF_MEMORY: sve.BackendError,
+        sve.StatusCode.TIMEOUT: sve.BackendError,
+        sve.StatusCode.ERROR: sve.BackendError,
+    }
+    bound = set(sve.StatusCode.__members__.values())
+    assert bound == set(expected), "a StatusCode with no stated mapping"
+
+    for code, want in expected.items():
+        assert sve.exception_for_status_code(code) is want, sve.status_code_name(code)
+        if want is not None:
+            assert issubclass(want, sve.SmartVideoEncoderError)
+
+
+def test_the_mapping_is_what_actually_gets_raised():
+    """The table above is only worth having if the raising path uses it, so two of its rows
+    are checked through a real failure rather than through the function."""
+    cfg = config()
+    cfg.input.width = cfg.input.height = 0
+    with pytest.raises(sve.InvalidArgumentError) as invalid:
+        sve.SmartVideoEncoder(cfg)
+    assert type(invalid.value) is sve.exception_for_status_code(
+        sve.StatusCode.INVALID_ARGUMENT)
+
+    # x265 cannot produce H.264, and says so rather than encoding something else (§8.4).
+    # Named explicitly it is the backend refusing; reached through a preference list it is
+    # the selection running out of candidates, and §8.4 makes those different answers.
+    named = config(backend=sve.Backend.X265_DIRECT)
+    named.settings.encoder = sve.Backend.X265_DIRECT
+    with pytest.raises(sve.UnsupportedError) as unsupported:
+        sve.SmartVideoEncoder(named)
+    assert type(unsupported.value) is sve.exception_for_status_code(
+        sve.StatusCode.UNSUPPORTED)
+    assert unsupported.value.status_code == sve.StatusCode.UNSUPPORTED.value
+
+    with pytest.raises(sve.DeviceUnavailableError) as unavailable:
+        sve.SmartVideoEncoder(config(backend=sve.Backend.X265_DIRECT))
+    assert type(unavailable.value) is sve.exception_for_status_code(
+        sve.StatusCode.DEVICE_UNAVAILABLE)

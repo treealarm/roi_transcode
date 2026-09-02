@@ -63,9 +63,14 @@ void register_config(py::module_& m)
         .value("X264", sve::Backend::X264)
         .value("X265", sve::Backend::X265)
         .value("X264_DIRECT", sve::Backend::X264Direct)
-        .value("X265_DIRECT", sve::Backend::X265Direct);
+        .value("X265_DIRECT", sve::Backend::X265Direct)
+        .value("INTEL_ONE_VPL_DIRECT", sve::Backend::IntelOneVplDirect);
 
     py::enum_<sve::PixelFormat>(m, "PixelFormat", "Input pixel layouts (§8.3, §17).")
+        // Bound although nobody would ask for it: it is the value a format field holds
+        // before anyone sets one, and an enum that cannot spell what a field contains
+        // hands the reader an int with no name on it.
+        .value("UNKNOWN", sve::PixelFormat::Unknown)
         .value("YUV420P", sve::PixelFormat::YUV420P)
         .value("NV12", sve::PixelFormat::NV12)
         .value("YUV422P", sve::PixelFormat::YUV422P)
@@ -82,7 +87,13 @@ void register_config(py::module_& m)
         .value("AGAIN", sve::StatusCode::Again)
         .value("END_OF_STREAM", sve::StatusCode::EndOfStream)
         .value("BACKEND_ERROR", sve::StatusCode::BackendError)
-        .value("OUT_OF_MEMORY", sve::StatusCode::OutOfMemory);
+        .value("OUT_OF_MEMORY", sve::StatusCode::OutOfMemory)
+        // Neither is produced by the normative API -- Timeout only by §24's optional
+        // blocking variants, Error by whatever has no better name -- but a code that can
+        // reach a caller as `status_code` and has no spelling in the enum is a number the
+        // caller cannot compare against anything.
+        .value("TIMEOUT", sve::StatusCode::Timeout)
+        .value("ERROR", sve::StatusCode::Error);
 
     py::enum_<sve::ObjectPriority>(m, "ObjectPriority", "§11.1's priority ladder.")
         .value("BACKGROUND", sve::ObjectPriority::Background)

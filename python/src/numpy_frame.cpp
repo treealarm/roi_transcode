@@ -150,10 +150,22 @@ sve::Frame frame_from_buffer(const py::object& array, sve::PixelFormat format,
         plane.size = static_cast<std::size_t>(info.strides[0]) * static_cast<std::size_t>(want.rows);
     }
 
-    // The owner: a strong reference to what the caller handed in, released on the Python
-    // side when the last Frame lets go. The deleter takes the GIL because dropping a
-    // reference is a Python operation and the Frame may well die on a C++ thread.
-    auto held = std::make_shared<py::object>(array);
+    // The owner: strong references to the plane objects whose memory was just mapped,
+    // released on the Python side when the last Frame lets go. The deleter takes the GIL
+    // because dropping a reference is a Python operation and the Frame may well die on a
+    // C++ thread.
+    //
+    // The planes and not the container the caller passed them in. Holding the list keeps
+    // the planes alive only for as long as the list still refers to them, and a caller who
+    // reuses one list per frame -- `pl[0] = next_luma`, which is the obvious way to write
+    // that loop -- would free a plane the encoder is still reading. §58.4 forbids exactly
+    // that: "скрытое использование dangling pointer запрещено". Holding what was mapped
+    // makes the guarantee independent of what the caller does with their own container.
+    py::tuple mapped(items.size());
+    for (std::size_t i = 0; i < items.size(); ++i) {
+        mapped[i] = items[i];
+    }
+    auto held = std::make_shared<py::object>(std::move(mapped));
     view.owner = std::shared_ptr<const void>(held, held.get());
 
     sve::Frame frame;

@@ -1378,6 +1378,26 @@ else
     fi
 fi
 
+# §58.3: every enumerator the library has, the wrapper must have. An enum is the part of a
+# binding that goes missing without a symptom -- a value added in C++ compiles, links and
+# passes every C++ test while simply not existing in Python. Three had: the native oneVPL
+# backend and two status codes a caught exception could already carry as `status_code`.
+step "the Python module has every enumerator C++ has (§58.3)"
+if [[ ! -x "${LIBBUILD}/enum_surface" ]]; then
+    skip "enum parity needs SVE_BUILD_TESTS=ON"
+elif ! PYTHONPATH="${ROOT}/python" python3 -c "import smart_video_encoder" >/dev/null 2>&1; then
+    skip "enum parity needs the extension built (SVE_BUILD_PYTHON=ON)"
+else
+    if "${LIBBUILD}/enum_surface" | PYTHONPATH="${ROOT}/python" \
+            python3 "${ROOT}/integration/scripts/python-enum-parity.py" \
+            >"${WORK}/enum_parity.txt" 2>"${WORK}/enum_parity.log"; then
+        pass "$(cat "${WORK}/enum_parity.txt")"
+    else
+        fail "the bound enums and the C++ enums disagree"
+        sed 's/^/      /' "${WORK}/enum_parity.log" >&2
+    fi
+fi
+
 # §58.10.8: "wrapper overhead измеряется отдельно от encode latency; для CPU frame submit
 # без обязательной копии P95 overhead не должен превышать 5% относительно эквивалентного C++
 # вызова на том же профиле". Both halves encode the same 720p30 profile and print the same

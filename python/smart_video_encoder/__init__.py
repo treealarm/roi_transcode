@@ -53,6 +53,7 @@ from ._core import (  # noqa: F401
     TrackEvidence,
     available_backends,
     backend_name,
+    exception_for_status_code,
     get_capabilities,
     log_level_name,
     status_code_name,
