@@ -60,7 +60,12 @@ FrameRoiPipelineOutput FrameRoiPipeline::process(const FrameRoiPipelineInput& in
         out.applied_boxes, in.quality, in.width, in.height);
     m_bitrate.soften_detections(dets);
     // Under target bitrate, the outer loop must be free to move QP aggressively.
-    const int32_t slew = m_bitrate.active() ? 0 : in.temporal.max_qp_delta_per_frame;
+    // Zero under a target bitrate, because the outer loop must be free to move QP
+    // aggressively -- and zero with §13 switched off, because the slew limit is one of the
+    // behaviours TemporalROIConfig::enabled governs.
+    const int32_t slew = (m_bitrate.active() || !in.temporal.enabled)
+        ? 0
+        : in.temporal.max_qp_delta_per_frame;
     m_qp_slew.apply(dets, slew);
     const Quality effective_quality = m_bitrate.apply(in.quality);
     out.rects =

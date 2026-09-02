@@ -183,10 +183,48 @@ void at_attaches_track_evidence_for_importance()
         "a single-sample track has age but no speed");
 }
 
+/// §13's own switch, and the one field of TemporalROIConfig that had no code behind it
+/// until 2026-09-02. Off means the boxes the producer gave, at the times it gave them.
+void switched_off_nothing_is_kept_alive()
+{
+    const std::vector<sve::Box> boxes{box(0.0, 7, 0.10f), box(2.0, 7, 0.30f)};
+
+    sve::TemporalROIConfig off;
+    off.enabled = false;
+    const sve::TemporalRoi cold(boxes, off, 0.5);
+
+    // The miss the whole section exists to cover: with §13 on this is one interpolated
+    // region, and with it off there is nothing between the samples.
+    check(cold.at(1.0).empty(), "nothing bridges a gap when temporal ROI is off");
+    // Past the last sample, where patience and prediction would otherwise hold it.
+    check(cold.at(2.5).empty(), "nothing is held past the last sample when off");
+    // Before the first, the same rule backwards.
+    check(cold.at(-0.5).empty(), "nothing is held before the first sample when off");
+    // And what the producer did say still arrives: switching the feature off must not
+    // switch the detector off with it.
+    check(cold.at(0.0).size() == 1, "the sample itself still arrives when off");
+
+    // The same boxes with the default config, so the difference is the flag and not the
+    // fixture. Without this the test above would pass against a broken TemporalRoi.
+    const sve::TemporalRoi warm(boxes, sve::TemporalROIConfig{}, 0.5);
+    check(warm.at(1.0).size() == 1, "the same gap is bridged when temporal ROI is on");
+    check(warm.at(2.5).size() == 1, "the same box is held past the last sample when on");
+
+    // And the untracked path, which the tracked assertions above cannot reach. It runs on
+    // its own symmetric window rather than on reach, so it is switched off separately in
+    // the code and would stay on unnoticed: the first version of this slice left it on, and
+    // everything above still passed.
+    sve::Box lone = box(1.0, 0, 0.1f);   // track_id 0 == the producer numbered nothing
+    const sve::TemporalRoi cold_untracked({&lone, 1}, off, 0.5);
+    check(cold_untracked.at(1.4).empty(), "an untracked box is not held either when off");
+    check(cold_untracked.at(1.0).size() == 1, "and its own instant still arrives");
+}
+
 } // namespace
 
 int main()
 {
+    switched_off_nothing_is_kept_alive();
     a_gap_is_filled_from_both_ends();
     samples_of_one_track_do_not_pile_up();
     a_track_that_ended_is_let_go();

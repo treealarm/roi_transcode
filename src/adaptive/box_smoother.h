@@ -19,8 +19,14 @@ public:
     /// there is no identity to smooth across frames.
     void apply(std::vector<Box>& boxes, float temporal, float spatial);
 
+    /// Nothing when §13 is switched off: smoothing is one of the behaviours
+    /// TemporalROIConfig::enabled governs, and half of a switched-off feature is a fourth
+    /// behaviour nobody asked for.
     void apply(std::vector<Box>& boxes, const TemporalROIConfig& cfg)
     {
+        if (!cfg.enabled) {
+            return;
+        }
         apply(boxes, cfg.temporal_smoothing, cfg.spatial_smoothing);
     }
 

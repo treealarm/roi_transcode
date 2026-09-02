@@ -46,6 +46,16 @@ const char* quality_policy_name(QualityPolicy p);
 /// keeps moving from the last known velocity instead of freezing. Live frames also get
 /// EMA smoothing (`spatial_smoothing` / `temporal_smoothing`) and a QP step ceiling.
 struct TemporalROIConfig {
+    /// Whether any of this applies at all -- §13's first field, and absent here until
+    /// 2026-09-02.
+    ///
+    /// False means the boxes the producer supplied, at the times it supplied them, and
+    /// nothing else: no patience past the last sample, no bridging of a gap, no prediction,
+    /// no smoothing and no slew limit. Everything this struct governs is off together,
+    /// because a flag that switched off half of it would be a fourth behaviour nobody
+    /// asked for.
+    bool enabled = true;
+
     /// How many of the producer's frames a region survives without a detection before it is
     /// considered gone. Frames, not seconds -- duration is this count times the track's
     /// own sample interval.
@@ -64,6 +74,21 @@ struct TemporalROIConfig {
     int32_t max_qp_delta_per_frame = 2;
     /// Extrapolate from last motion when past the final sample (within patience). TZ v3: true.
     bool use_track_prediction = true;
+
+    // §13 prints one more field, min_roi_tracking_iou = 0.50f, and it is deliberately not
+    // here. In a tracker that number is the threshold for deciding that a detection belongs
+    // to an existing track; this library never makes that decision, because identity
+    // arrives already made in Box::track_id from whoever ran the detector (§9). There is
+    // nothing to associate.
+    //
+    // It was implemented once, on 2026-09-02, read instead as a floor on how far a
+    // predicted box may drift from the last one seen -- and the existing test for §13's
+    // prediction failed immediately: an object moving at a constant velocity, which is
+    // exactly what prediction is for, drifts past 0.50 IoU within one interval. A field
+    // whose own default breaks the behaviour it sits beside is a misreading, not a feature,
+    // so the reading was withdrawn rather than the threshold quietly loosened.
+    //
+    // Recorded in STATUS.md under the divergences named out loud.
 };
 
 /// Where object metadata goes -- TZ v4.2 §19.

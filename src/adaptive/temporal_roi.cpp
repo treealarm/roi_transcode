@@ -164,8 +164,10 @@ std::vector<Box> TemporalRoi::at(double t_sec) const
         // hold_sec said how long a box of theirs applies, and that is a decision rather than a
         // guess to be second-guessed -- the same rule a configured kind gets in the quality
         // table.
-        double reach = m_fallback_hold_sec;
-        if (track.interval > 0.0) {
+        // §13's own switch. Zero reach means a sample covers only its own instant: nothing
+        // is held forwards or backwards, and the gap test below refuses every gap.
+        double reach = m_config.enabled ? m_fallback_hold_sec : 0.0;
+        if (m_config.enabled && track.interval > 0.0) {
             reach = track.interval * static_cast<double>(m_config.max_missing_frames);
             if (m_config.max_hold_sec > 0.0) {
                 reach = std::min(reach, m_config.max_hold_sec);
@@ -230,9 +232,13 @@ std::vector<Box> TemporalRoi::at(double t_sec) const
         out.push_back(live);
     }
 
-    // No track to stitch, so the old symmetric window is all there is.
+    // No track to stitch, so the old symmetric window is all there is -- and the same
+    // switch applies to it. Whether a sample covers more than its own instant must not
+    // depend on the producer having numbered the box: an untracked box is the same feature
+    // with less information, not a different one exempt from being turned off.
+    const double window = m_config.enabled ? m_fallback_hold_sec : 0.0;
     for (const Box& b : m_untracked) {
-        if (std::abs(b.t_sec - t_sec) <= m_fallback_hold_sec) {
+        if (std::abs(b.t_sec - t_sec) <= window) {
             out.push_back(b);
         }
     }
