@@ -653,6 +653,15 @@ if(SVE_BUILD_TESTS)
     sve_add_test_plugin(bad_abi  sve_backend_test_bad_abi  SVE_TEST_PLUGIN_BAD_ABI)
     sve_add_test_plugin(no_entry sve_backend_test_no_entry SVE_TEST_PLUGIN_NO_ENTRY)
 
+    # §43's soak driver. An executable rather than a ctest case with a fixed duration: the
+    # specification asks for an hour in CI, eight overnight and twenty-four on a release
+    # candidate, so how long it runs is the caller's to say. ctest gets a short one so that
+    # the driver itself cannot rot unnoticed between the long runs.
+    add_executable(sve-soak tests/soak/soak.cpp)
+    target_link_libraries(sve-soak PRIVATE sve_all Threads::Threads)
+    target_compile_options(sve-soak PRIVATE ${SVE_WARNINGS})
+    add_test(NAME soak_smoke COMMAND sve-soak --seconds 5)
+
     add_executable(plugin_loader_test tests/unit/plugin_loader_test.cpp)
     # sve_all rather than the core alone, and the link error that says why is worth keeping
     # in mind: BackendRegistry lives in the core, but default_backend_registry() fills

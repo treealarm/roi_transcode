@@ -172,8 +172,8 @@ fi
 # control couples the regions -- spending bits on the plate demonstrably costs
 # the background -- so there the same assertion would be false for a legitimate
 # reason, and only the direction is checked.
-mechanism_checks() { # label cqp   (encoder taken from $ENC, codec from $CODEC)
-    local enc="$1" cqp="$2"
+mechanism_checks() { # label cqp ratio_limit   (encoder from $ENC, codec from $CODEC)
+    local enc="$1" cqp="$2" ratio_limit="$3"
     local backend="${ENC:-cpu}"
     encode "noroi_${enc}"     synth_noroi.json     "$backend" || return
     encode "plateonly_${enc}" synth_plateonly.json "$backend" || return
@@ -192,6 +192,33 @@ mechanism_checks() { # label cqp   (encoder taken from $ENC, codec from $CODEC)
     assert_gt "[${enc}] the halo protects the zone's edge" \
         "${SSIM_RING[roi_${enc}]}" "${SSIM_RING[bgonly_${enc}]}"
 
+    # Everything above is a direction: bigger, smaller, better. Directions cannot notice
+    # the offer shrinking. A change that left ROI saving one percent instead of forty-five
+    # would satisfy every assertion above and destroy the reason this library exists, so
+    # the two numbers that are the offer are asserted as magnitudes.
+    #
+    # The size limit is per backend and per codec, passed in by the caller, because the
+    # paths do not achieve the same thing and one number covering all of them would guard
+    # none of them. Read out of testdata/eval/runs.csv, which has recorded every run since
+    # 2026-08-31, each limit sits about a tenth above what that path actually achieves.
+    #
+    # The spread is itself worth knowing and is why this is not one constant: on HEVC the
+    # CPU paths reach 0.546 and the native oneVPL path only 0.683, because it does not crush
+    # the background as far -- background SSIM 0.872 against 0.672 for the same request.
+    # Zone quality on that path is the best of any (0.9996), so it is a difference in how
+    # much the offer pays there, not a broken path. Recorded in STATUS.md as open.
+    #
+    # The zone floor is one number for everyone: 0.99 against the source. Every path
+    # measures 0.9949 or better today and most are above 0.998.
+    local ratio
+    ratio=$(awk "BEGIN{printf \"%.4f\", ${BYTES[roi_${enc}]} / ${BYTES[noroi_${enc}]}}")
+    assert_lt "[${enc}] ROI is materially smaller, not merely smaller" \
+        "$ratio" "$ratio_limit"
+    # Against the source, not against another encode: this is the "without losing quality"
+    # half of the claim, and it is only meaningful measured against what came in.
+    assert_gt "[${enc}] the zone is still near-lossless against the source" \
+        "${SSIM_ROI[roi_${enc}]}" "0.99"
+
     if [[ "$cqp" == "yes" ]]; then
         assert_eq "[${enc}] a boost leaves the background untouched" \
             "${SSIM_BG[plateonly_${enc}]}" "${SSIM_BG[noroi_${enc}]}"
@@ -206,11 +233,48 @@ mechanism_checks() { # label cqp   (encoder taken from $ENC, codec from $CODEC)
 # Both codecs, because the archive this feeds is H.264 while the module defaults
 # to HEVC: an H.264 path that silently stopped applying ROI would look fine here
 # and cost quality in the only place the feature is actually used.
+# What a transcode is asked to preserve, and what nothing here checked until 2026-09-02.
+# --gop is passed by a dozen steps in this file and no step ever looked at whether the
+# output honoured it: a backend that ignored the keyframe interval entirely would have
+# passed every run. It matters for the archive this feeds -- the keyframe interval is what
+# seeking costs and what an HLS segment can be cut on.
+step "the stream keeps the characteristics it was asked for"
+for _spec in "x264direct h264 25" "x265direct h265 25" "cpu h265 50"; do
+    read -r _enc _codec _gop <<<"$_spec"
+    _out="${WORK}/keep_${_enc}_${_codec}.mp4"
+    if ! "${BUILD}/roi-transcode" --in "$SRC" --roi "${ROOT}/testdata/synth_roi.json" \
+        --out "$_out" --encoder "$_enc" --codec "$_codec" --crf 30 --gop "$_gop" \
+        >"${WORK}/keep_${_enc}.log" 2>&1; then
+        fail "[${_enc}] the encode did not complete"
+        continue
+    fi
+    assert_eq "[${_enc}] resolution kept" \
+        "$(probe stream=width,height "$_out")" "$(probe stream=width,height "$SRC")"
+    assert_eq "[${_enc}] frame rate kept" \
+        "$(probe stream=r_frame_rate "$_out")" "$(probe stream=r_frame_rate "$SRC")"
+    assert_eq "[${_enc}] frame count kept" "$(count_packets "$_out")" "$(count_packets "$SRC")"
+    assert_eq "[${_enc}] pixel format kept" \
+        "$(probe stream=pix_fmt "$_out")" "$(probe stream=pix_fmt "$SRC")"
+    # The keyframe interval, read from the bitstream rather than from what we asked for.
+    # Both ends of the gap, because a stream with one keyframe every frame and a stream
+    # with one at the start both have "no gap larger than the interval".
+    _gaps=$(ffprobe -v error -select_streams v:0 -show_entries frame=key_frame \
+        -of csv=p=0 "$_out" | python3 -c "
+import sys
+vals = [v.strip().rstrip(',') for v in sys.stdin.read().split()]
+pos = [i for i, v in enumerate(vals) if v == '1']
+gaps = [pos[i + 1] - pos[i] for i in range(len(pos) - 1)]
+print(f'{min(gaps)},{max(gaps)}' if gaps else 'none')
+")
+    assert_eq "[${_enc}] keyframe interval is the ${_gop} it was asked for" \
+        "$_gaps" "${_gop},${_gop}"
+done
+
 step "the ROI mechanism does what it claims (CPU, CRF, HEVC)"
-CODEC=h265 mechanism_checks cpu_h265 no
+CODEC=h265 mechanism_checks cpu_h265 no 0.62
 
 step "the ROI mechanism does what it claims (CPU, CRF, H.264)"
-CODEC=h264 mechanism_checks cpu_h264 no
+CODEC=h264 mechanism_checks cpu_h264 no 0.82
 
 # The direct backends of §5.4, which until 2026-08-31 this script did not name once.
 # That was the gap the x265direct crash walked through: it lived on a committed HEAD,
@@ -220,10 +284,10 @@ CODEC=h264 mechanism_checks cpu_h264 no
 # `no` for cqp: both run CRF, where rate control couples the regions, exactly as the
 # libavcodec x265 path does.
 step "the ROI mechanism does what it claims (x264 direct API, CRF, H.264)"
-ENC=x264direct CODEC=h264 mechanism_checks x264direct no
+ENC=x264direct CODEC=h264 mechanism_checks x264direct no 0.82
 
 step "the ROI mechanism does what it claims (x265 direct API, CRF, HEVC)"
-ENC=x265direct CODEC=h265 mechanism_checks x265direct no
+ENC=x265direct CODEC=h265 mechanism_checks x265direct no 0.62
 
 # Metadata whose size changes from frame to frame, which is a different test from the one
 # above and the reason this step exists separately.
@@ -385,10 +449,10 @@ if [[ -e /dev/dri/renderD128 ]]; then
         # QSV is the primary path and it is CQP, so the strict form of the
         # mechanism checks runs here.
         step "the ROI mechanism does what it claims (QSV, CQP, HEVC)"
-        ENC=qsv CODEC=h265 mechanism_checks qsv_h265 yes
+        ENC=qsv CODEC=h265 mechanism_checks qsv_h265 yes 0.65
 
         step "the ROI mechanism does what it claims (QSV, CQP, H.264)"
-        ENC=qsv CODEC=h264 mechanism_checks qsv_h264 yes
+        ENC=qsv CODEC=h264 mechanism_checks qsv_h264 yes 0.72
 
         # §5.2's native backend, on the same assertions as the libavcodec QSV path above.
         # `yes` for cqp: it opens CQP, so per-region offsets are independent per block and
@@ -397,10 +461,10 @@ if [[ -e /dev/dri/renderD128 ]]; then
             --out "${WORK}/onevpl_probe.mp4" --encoder onevpldirect --codec h264 \
             --crf 28 --gop 1 >"${WORK}/onevpl_probe.log" 2>&1; then
             step "the ROI mechanism does what it claims (oneVPL direct, CQP, H.264)"
-            ENC=onevpldirect CODEC=h264 mechanism_checks onevpl_h264 yes
+            ENC=onevpldirect CODEC=h264 mechanism_checks onevpl_h264 yes 0.75
 
             step "the ROI mechanism does what it claims (oneVPL direct, CQP, HEVC)"
-            ENC=onevpldirect CODEC=h265 mechanism_checks onevpl_h265 yes
+            ENC=onevpldirect CODEC=h265 mechanism_checks onevpl_h265 yes 0.75
             # §2.2: block-level quality, and the one assertion that separates it from a
             # rectangle list. testdata/synth_manyroi.json holds six well-separated regions;
             # the iHD driver takes four rectangles on H.264, so on the rectangle path the
@@ -1059,6 +1123,25 @@ if [[ -d "${PLUGINS}/bad_abi" ]]; then
     fi
 else
     skip "test plugins not built (SVE_BUILD_TESTS=OFF)"
+fi
+
+# §43's smoke profile, shortened. The specification's own smallest profile is an hour and
+# this is not it -- SOAK_SECONDS is what makes it one, and the acceptance run cannot afford
+# an hour on every change. What this step is for is that the driver and its five criteria go
+# on working; a soak harness that quietly stopped measuring between nightly runs would be
+# the worst way to find out.
+step "soak: continuous encode, and §43.2's five counts (short profile)"
+if soakout=$(SOAK_SECONDS="${SOAK_SECONDS:-20}" "${ROOT}/integration/scripts/soak-check.sh" \
+        "${LIBBUILD}" 2>&1); then
+    printf '%s\n' "$soakout" | grep -E '^ +(soak:|frame|pts|metadata|memory)' | sed 's/^ */  /'
+    if printf '%s\n' "$soakout" | grep -q '^  skip'; then
+        skip "sve-soak is not built"
+    else
+        pass "$(printf '%s\n' "$soakout" | tail -1)"
+    fi
+else
+    printf '%s\n' "$soakout" | sed 's/^/  /' >&2
+    fail "soak (§43)"
 fi
 
 step "dependency scan: the core declares and links nothing it must not"
