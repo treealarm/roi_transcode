@@ -349,6 +349,7 @@ public:
     bool has_packet = false;
     bool draining = false;
     int64_t frames_converted = 0;
+    int64_t frames_quantiser_clamped = 0;
 };
 
 VplSession& vpl(BackendSession& session)
@@ -721,6 +722,8 @@ public:
         BackendStatistics stats;
         stats.frames_converted =
             static_cast<const VplSession&>(session).frames_converted;
+        stats.frames_quantiser_clamped = static_cast<long>(
+            static_cast<const VplSession&>(session).frames_quantiser_clamped);
         return stats;
     }
 
@@ -923,9 +926,18 @@ private:
         // business knowing -- the merge rule is what is worth sharing, not the arithmetic.
         std::fill(s.mbqp_scratch.begin(), s.mbqp_scratch.end(), int8_t{0});
         QpDeltaMapBuilder().paint(s.width, s.height, kMbqpBlock, regions, s.mbqp_scratch);
+        bool clamped = false;
         for (std::size_t i = 0; i < cells; ++i) {
-            slot.mbqp_cells[i] = static_cast<int8_t>(
-                std::clamp(s.base_qp + s.mbqp_scratch[i], kMinCodedQp, kMaxQp));
+            const int wanted = s.base_qp + s.mbqp_scratch[i];
+            const int given = std::clamp(wanted, kMinCodedQp, kMaxQp);
+            clamped = clamped || given != wanted;
+            slot.mbqp_cells[i] = static_cast<int8_t>(given);
+        }
+        // Counted per frame rather than per cell: what a caller can act on is "the scale
+        // ran out", not how many blocks it ran out in. §50 -- a request that quietly did
+        // less than it asked for has to be visible.
+        if (clamped) {
+            ++s.frames_quantiser_clamped;
         }
 
         slot.mbqp.Header.BufferId = MFX_EXTBUFF_MBQP;

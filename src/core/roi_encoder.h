@@ -53,6 +53,8 @@ public:
     /// tell a factory frame that avoided the copy from one that merely moved it.
     long frames_converted() const { return statistics().frames_converted; }
     long frames_uploaded() const { return statistics().frames_uploaded; }
+    /// Frames whose per-block quantiser map wanted a value outside what the codec has.
+    long frames_quantiser_clamped() const { return statistics().frames_quantiser_clamped; }
 
     /// A frame in memory the encoder reads directly, when the backend can hand one out.
     Result<FrameBufferPtr> create_frame(MemoryType memory);

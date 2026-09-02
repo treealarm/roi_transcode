@@ -77,6 +77,29 @@ inline Status guard_qp_map_quantized(const bool have_map, const EncoderCapabilit
     return Status::Ok();
 }
 
+/// The per-block quality map wanted a quantiser the codec does not have (§50).
+///
+/// Not a capability the backend lacks but a scale that ran out: a delta is added to the
+/// frame's own quantiser, and the sum can fall outside 1..51 whatever the backend. The
+/// caller asked for a degradation and got a smaller one, which is exactly the kind of
+/// quiet shortfall §50 exists to forbid -- measured on the native oneVPL path at crf 28,
+/// where background deltas of 30 and of 40 produce byte-identical output because both
+/// clamp to 51.
+///
+/// Permissive only. There is no Strict form because there is nothing to refuse: the map
+/// was applied, as far as the codec's scale reaches, and no other behaviour is available.
+inline void guard_quantiser_clamped(
+    const int64_t frames, const Logger& log, bool& warned)
+{
+    if (frames <= 0 || warned) {
+        return;
+    }
+    log.warn(std::format(
+        "guard: the quality map ran out of quantiser scale on {} frame(s); the request "
+        "beyond it did nothing", frames));
+    warned = true;
+}
+
 /// A target bitrate was asked for on CPU H.265, where the path is unstable (STATUS.md Р5).
 inline Status guard_cpu_h265_target(const bool requested, const FallbackPolicy policy,
     const Logger& log)

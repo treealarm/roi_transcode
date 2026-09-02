@@ -508,6 +508,43 @@ if [[ -e /dev/dri/renderD128 ]]; then
             # available on this backend and not at once. Asked for a bitrate, it opens VBR
             # and goes back to rectangles -- and says so, rather than accepting a block
             # grid it will discard all but four of, which is what §50 forbids.
+            # §50 again, on the axis nobody had looked at: the quality map is absolute
+            # quantisers on this path, so a delta added to the frame's own quantiser can
+            # fall off the end of the codec's 1..51 scale. Measured 2026-09-02 -- at crf 28
+            # a background delta of 30 and one of 40 produce byte-identical output, because
+            # both clamp to 51. Asking for more than the scale holds has to say so.
+            step "a quality map past the end of the quantiser scale says so (§50)"
+            python3 - "${ROOT}/testdata/synth_roi.json" "${WORK}/roi_clamp.json" <<'CLAMP'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["background_qp_delta"] = 40          # 28 + 40 is 68, and the scale ends at 51
+json.dump(d, open(sys.argv[2], "w"))
+CLAMP
+            if "${BUILD}/roi-transcode" --in "$SRC" --roi "${WORK}/roi_clamp.json" \
+                --out "${WORK}/clamp.mp4" --encoder onevpldirect --codec h265 \
+                --crf 28 --gop 1 >"${WORK}/clamp.log" 2>&1; then
+                if grep -q 'ran out of quantiser scale' "${WORK}/clamp.log"; then
+                    pass "a request past the end of the scale is reported"
+                else
+                    fail "the quantiser scale ran out and nothing said so"
+                fi
+            else
+                fail "the clamped encode did not complete"
+            fi
+            # And the other half, which is what makes the first one mean something: a
+            # request that fits must not produce the warning.
+            if "${BUILD}/roi-transcode" --in "$SRC" --roi "${ROOT}/testdata/synth_roi.json" \
+                --out "${WORK}/noclamp.mp4" --encoder onevpldirect --codec h265 \
+                --crf 28 --gop 1 >"${WORK}/noclamp.log" 2>&1; then
+                if grep -q 'ran out of quantiser scale' "${WORK}/noclamp.log"; then
+                    fail "a request that fits the scale was reported as clamped"
+                else
+                    pass "a request that fits the scale is not reported"
+                fi
+            else
+                fail "the unclamped encode did not complete"
+            fi
+
             step "a target bitrate on Intel trades the block map for rectangles, audibly"
             if "${BUILD}/roi-transcode" --in "$SRC" \
                 --roi "${ROOT}/testdata/synth_manyroi.json" \

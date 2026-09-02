@@ -81,6 +81,7 @@ struct SmartVideoEncoder::Impl : PacketSink {
     bool warned_roi_dropped = false;
     bool warned_sei = false;
     bool warned_qp_map = false;
+    bool warned_qp_clamped = false;
 
     /// Counts a degradation the first time it is applied, so fallbacks_applied is a number
     /// of distinct capabilities worked around rather than of frames.
@@ -552,6 +553,13 @@ Status SmartVideoEncoder::Impl::submit(const FrameMetadata& metadata, const Hand
     ++s.stats.frames_submitted;
     s.stats.frames_converted = s.encoder.frames_converted();
     s.stats.frames_uploaded = s.encoder.frames_uploaded();
+    // After the frame, not before it: whether the map fitted the codec's scale is
+    // something only the backend that applied it can say.
+    s.stats.frames_quantiser_clamped = s.encoder.frames_quantiser_clamped();
+    if (s.stats.frames_quantiser_clamped > 0) {
+        s.count_fallback(s.warned_qp_clamped);
+        guard_quantiser_clamped(s.stats.frames_quantiser_clamped, s.log, s.warned_qp_clamped);
+    }
     return Status::Ok();
 }
 

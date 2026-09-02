@@ -108,6 +108,13 @@ struct EncoderStatistics {
     /// what was asked rather than what the bitstream ended up containing.
     int64_t keyframes_requested = 0;
 
+    /// Frames whose per-block quality map asked for a quantiser the codec does not have.
+    ///
+    /// Non-zero means part of the request did nothing: a delta added to the frame's own
+    /// quantiser fell outside 1..51 and was capped. Worth reading before concluding that a
+    /// larger background penalty had no effect -- past the end of the scale it cannot.
+    int64_t frames_quantiser_clamped = 0;
+
     /// Set when target_bitrate was refused on CPU H.265 and CRF/CQP used instead. A guard
     /// that only appeared in a log would be invisible to anything but a human reading it.
     bool cpu_h265_target_guard = false;

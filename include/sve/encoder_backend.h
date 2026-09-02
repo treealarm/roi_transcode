@@ -138,6 +138,19 @@ struct BackendStatistics {
     long frames_converted = 0;
     /// Frames that had to be uploaded to device memory first.
     long frames_uploaded = 0;
+
+    /// Frames whose per-block quantiser map ran out of scale -- a cell that wanted a
+    /// quantiser outside what the codec has and got the nearest one instead.
+    ///
+    /// It belongs to the backend because only the backend knows the frame's own quantiser,
+    /// and a delta only becomes unreachable once it is added to that. On a path that sends
+    /// deltas rather than absolute values it stays zero, which is the honest answer there.
+    ///
+    /// Measured 2026-09-02 and the reason this field exists: on the native oneVPL path at
+    /// crf 28, a background delta of 30 or of 40 produce byte-identical output, because
+    /// 28+30 and 28+40 both clamp to 51. Asking for more than the scale holds did nothing
+    /// and said nothing, which is what §50 forbids.
+    long frames_quantiser_clamped = 0;
 };
 
 /// One opened encoder. What is inside depends entirely on the backend -- libavcodec's
