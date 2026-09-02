@@ -740,6 +740,13 @@ if(SVE_BUILD_TESTS)
     target_compile_options(logging_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME logging COMMAND logging_test)
 
+    # One half of §58.10.1's C++/Python equivalence. Not an add_test: on its own it proves
+    # nothing, because what it prints only means something beside what the wrapper prints
+    # for the same configuration. check.sh runs the pair and diffs them.
+    add_executable(parity_digest tests/unit/parity_digest.cpp)
+    target_link_libraries(parity_digest PRIVATE sve_all)
+    target_compile_options(parity_digest PRIVATE ${SVE_WARNINGS})
+
     add_executable(push_encoder_test tests/unit/push_encoder_test.cpp)
     target_link_libraries(push_encoder_test PRIVATE sve_all)
     target_compile_options(push_encoder_test PRIVATE ${SVE_WARNINGS})

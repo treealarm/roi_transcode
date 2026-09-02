@@ -1341,6 +1341,43 @@ assert sve.available_backends(), 'no backends in the wheel'
     fi
 fi
 
+# §58.10.1: the C++ and Python paths must give equivalent packets, PTS, metadata and
+# capability reports for the same configuration. Nothing compared them until 2026-09-02 --
+# the C++ suite checked that C++ worked and the Python suite checked that Python worked, so
+# a binding quietly encoding something else passed both. It had drifted in five places by
+# the time anyone looked.
+#
+# Placed after the python step because it needs the extension that step builds. The digest
+# carries a hash of the input frames, so a difference says which of the two things it is:
+# the two sides encoding different pixels, or the same pixels differently.
+step "C++ and Python encode the same thing (§58.10.1)"
+if [[ ! -x "${LIBBUILD}/parity_digest" ]]; then
+    skip "parity digest needs SVE_BUILD_TESTS=ON"
+elif ! python3 -c "import numpy" >/dev/null 2>&1; then
+    skip "python parity needs numpy"
+elif ! PYTHONPATH="${ROOT}/python" python3 -c "import smart_video_encoder" >/dev/null 2>&1; then
+    skip "python parity needs the extension built (SVE_BUILD_PYTHON=ON)"
+else
+    "${LIBBUILD}/parity_digest" >"${WORK}/parity_cpp.txt" 2>"${WORK}/parity_cpp.log"
+    cpp_rc=$?
+    PYTHONPATH="${ROOT}/python" python3 "${ROOT}/integration/scripts/python-parity.py" \
+        >"${WORK}/parity_py.txt" 2>"${WORK}/parity_py.log"
+    py_rc=$?
+    if [[ "$cpp_rc" -ne 0 || "$py_rc" -ne 0 ]]; then
+        fail "parity digest did not run (cpp=${cpp_rc}, py=${py_rc})"
+        tail -3 "${WORK}/parity_cpp.log" "${WORK}/parity_py.log" | sed 's/^/      /' >&2
+    elif diff -u "${WORK}/parity_cpp.txt" "${WORK}/parity_py.txt" >"${WORK}/parity.diff"; then
+        pass "same capability, packets, PTS and statistics from both languages"
+        # Named separately, because a digest that matched on two empty encodes would also
+        # be identical and would mean nothing.
+        assert_eq "packets compared" \
+            "$(grep -c '^packet ' "${WORK}/parity_cpp.txt")" "25"
+    else
+        fail "C++ and Python do not encode the same thing"
+        head -30 "${WORK}/parity.diff" | sed 's/^/      /' >&2
+    fi
+fi
+
 step "the library builds on its own"
 # Configures the project with the integration switched off -- no JSON, no protos, no gRPC,
 # no CLI. This is the claim the layout makes: TZ v2.0 §52 describes the library, and what
