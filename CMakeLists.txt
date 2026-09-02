@@ -44,14 +44,25 @@ option(SVE_INSTALL           "Install the C++ package (headers, libs, pkg-config
 # DYNAMIC and BOTH additionally build each shippable component a second time as a shared
 # module, from the same sources, exporting the one C entry point §26.4 names.
 #
-# The plugin does not link the core, and that is the arrangement rather than an oversight.
-# A module carrying its own copy of libsve would carry its own copy of every function-local
-# static in it -- default_backend_registry() among them -- so the registry a plugin
-# registered into would not be the registry the process asks. Its references to the core
-# stay undefined and bind to the host at load time, which is what ENABLE_EXPORTS (-rdynamic)
-# on an executable is for. That keeps the core static, as it is for ta_vms, and makes
-# exporting one's own symbols a property of an application that wants plugins rather than a
-# change forced on every consumer of the library.
+# A plugin links the core, and in the profiles that build plugins the core is shared, so
+# there is exactly one copy of it in the process. Both halves of that are necessary and the
+# reason is measured rather than argued.
+#
+# A module carrying its *own* copy of the core would carry its own copy of every
+# function-local static in it -- default_backend_registry() among them -- so the registry a
+# plugin registered into would not be the registry the process asks.
+#
+# Leaving the references undefined and binding them to the host at load time was tried
+# first, on 2026-09-01, and does not hold: -rdynamic exports only what is already in the
+# executable, and a static archive contributes only the object files something referenced.
+# The parity check caught it at once -- libsve.a contains sve::pixel_format_name and
+# roi-transcode did not, so every plugin was refused with "undefined symbol" and the
+# deployment had no backends at all. Forcing hosts to --whole-archive the core would fix it
+# by pushing a linker flag onto everyone who embeds us, including ta_vms, and §26.4 names
+# that flag as something not to lean on.
+#
+# So the core is SHARED under DYNAMIC and BOTH, and only there. STATIC is untouched: the
+# default build and ta_vms keep the static core they have always had.
 set(SVE_BACKEND_PACKAGING "STATIC" CACHE STRING
     "How backend components are delivered: STATIC, DYNAMIC or BOTH (TZ v4.2 §26.4)")
 set_property(CACHE SVE_BACKEND_PACKAGING PROPERTY STRINGS STATIC DYNAMIC BOTH)
@@ -61,8 +72,10 @@ if(NOT SVE_BACKEND_PACKAGING MATCHES "^(STATIC|DYNAMIC|BOTH)$")
 endif()
 if(SVE_BACKEND_PACKAGING STREQUAL "STATIC")
     set(SVE_BUILD_PLUGINS OFF)
+    set(SVE_CORE_LIBRARY_TYPE "")
 else()
     set(SVE_BUILD_PLUGINS ON)
+    set(SVE_CORE_LIBRARY_TYPE SHARED)
 endif()
 
 option(SVE_BUILD_BACKEND_X264   "Build the direct libx264 backend component"      ON)
@@ -140,7 +153,7 @@ pkg_check_modules(X265 x265)
 # link without dragging FFmpeg along; now that the core itself drags nothing, the split has
 # nothing left to protect.
 # ---------------------------------------------------------------------------
-add_library(sve
+add_library(sve ${SVE_CORE_LIBRARY_TYPE}
     src/adaptive/importance.cpp
     src/adaptive/object_normalizer.cpp
     src/adaptive/object_geometry.cpp
@@ -232,8 +245,9 @@ endfunction()
 # components carrying it would put two definitions of one symbol on a deployment's link
 # line and it would not link at all.
 #
-# Hidden visibility so that the module exports that one symbol and nothing else. The core's
-# symbols are left undefined here on purpose -- see SVE_BACKEND_PACKAGING above.
+# Hidden visibility so that the module exports that one symbol and nothing else, and the
+# core linked in the ordinary way -- shared in these profiles, so the process holds one copy
+# of it. See SVE_BACKEND_PACKAGING above for why neither half is optional.
 function(sve_add_backend_plugin base source)
     if(NOT SVE_BUILD_PLUGINS)
         return()
@@ -247,6 +261,7 @@ function(sve_add_backend_plugin base source)
     target_compile_options(${plugin} PRIVATE ${SVE_WARNINGS})
     target_compile_definitions(${plugin}
         PRIVATE SVE_BACKEND_AS_PLUGIN _CRT_SECURE_NO_WARNINGS)
+    target_link_libraries(${plugin} PRIVATE sve)
     set_target_properties(${plugin} PROPERTIES
         OUTPUT_NAME "${base}"
         PREFIX "lib"
@@ -612,6 +627,11 @@ if(SVE_BUILD_TESTS)
         target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
         target_compile_options(${target} PRIVATE ${SVE_WARNINGS})
         target_compile_definitions(${target} PRIVATE ${ARGN})
+        # The same rule the shipped plugins follow: a plugin links the core. In this
+        # profile the core is an archive, so each test module gets its own copy -- which is
+        # harmless here (these stubs touch no shared state) and makes the loader test about
+        # the loader rather than about how the host was linked.
+        target_link_libraries(${target} PRIVATE sve)
         set_target_properties(${target} PROPERTIES
             OUTPUT_NAME "${output}"
             PREFIX "lib"
@@ -643,12 +663,6 @@ if(SVE_BUILD_TESTS)
     target_compile_options(plugin_loader_test PRIVATE ${SVE_WARNINGS})
     target_compile_definitions(plugin_loader_test PRIVATE
         SVE_TEST_PLUGIN_DIR="${CMAKE_CURRENT_BINARY_DIR}/test-plugins")
-    # The arrangement of §26.4 in this project, stated where it is used: a plugin carries no
-    # copy of the core, so its references to the core bind to the program that loaded it,
-    # and that only works if the program exports its own symbols. ENABLE_EXPORTS is
-    # -rdynamic. Without it dlopen fails outright -- loudly, which is the design, and this
-    # test is where the requirement on a host is written down.
-    set_target_properties(plugin_loader_test PROPERTIES ENABLE_EXPORTS ON)
     add_dependencies(plugin_loader_test
         test_plugin_good test_plugin_dup test_plugin_bad_abi test_plugin_no_entry)
     add_test(NAME plugin_loader COMMAND plugin_loader_test)

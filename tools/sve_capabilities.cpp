@@ -1,6 +1,6 @@
 // sve-capabilities -- what this build can do on this machine. TZ v4.2 §23.
 //
-//     sve-capabilities [--json]
+//     sve-capabilities [--json] [--plugin-dir DIR]...
 //
 // Built with SVE_BUILD_TOOLS=ON and linked against the public library, as §23 requires.
 // It uses nothing but include/: the registry of §26.4 lists what was linked, and
@@ -19,6 +19,7 @@
 //     is nothing to fill it with. Printing the backend's own name there would look like an
 //     answer; an empty string says plainly that we do not know yet.
 
+#include "sve/backend_loader.h"
 #include "sve/backend_registry.h"
 #include "sve/capabilities.h"
 #include "sve/encoder_backend.h"
@@ -26,6 +27,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -148,21 +150,43 @@ void print_text(const std::vector<std::pair<sve::Backend, std::vector<CodecRepor
 int main(int argc, char** argv)
 {
     bool json = false;
+    std::vector<std::filesystem::path> plugin_dirs;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--json") == 0) {
             json = true;
+        } else if (std::strcmp(argv[i], "--plugin-dir") == 0 && i + 1 < argc) {
+            plugin_dirs.emplace_back(argv[++i]);
         } else if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
             std::fprintf(stderr,
-                "Usage: sve-capabilities [--json]\n"
+                "Usage: sve-capabilities [--json] [--plugin-dir DIR]...\n"
                 "\n"
                 "What this build of the library can do on this machine (TZ §23): the\n"
                 "backends linked into it, the codecs each can produce here, and the ROI\n"
                 "controls each offers. Reported per codec, because on Intel the region\n"
-                "limit differs between H.264 and H.265.\n");
+                "limit differs between H.264 and H.265.\n"
+                "\n"
+                "--plugin-dir adds a directory of backend plugins, and may be repeated.\n"
+                "§23 asks what this deployment can do, and under §26.4's DYNAMIC profile\n"
+                "the answer is not in the executable: a report that listed only what was\n"
+                "linked would describe a different deployment than the one running.\n");
             return 0;
         } else {
             std::fprintf(stderr, "unknown argument: %s\n", argv[i]);
             return 2;
+        }
+    }
+
+    // Before anything is asked of the registry, and from this one thread -- the contract
+    // LoadBackendPlugins states. Refusals go to stderr so that the report on stdout stays
+    // the report; a parity comparison diffs stdout, and a warning in the middle of it
+    // would be a difference between two deployments that are in fact the same.
+    {
+        sve::PluginSearch search;
+        search.paths = plugin_dirs;
+        const sve::PluginLoadReport report =
+            sve::LoadBackendPlugins(sve::default_backend_registry(), search);
+        for (const std::string& line : report.rejected) {
+            std::fprintf(stderr, "plugin refused: %s\n", line.c_str());
         }
     }
 
