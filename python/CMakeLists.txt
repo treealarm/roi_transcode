@@ -70,44 +70,7 @@ target_compile_definitions(sve_python_core PRIVATE SVE_VERSION="${PROJECT_VERSIO
 # licence, from which commit" is exactly what a bug report needs and exactly what nobody
 # can recover from a binary. Every field is read from the build rather than typed in, so it
 # cannot describe a build that did not happen.
-find_package(Git QUIET)
-set(SVE_BUILD_COMMIT "unknown")
-if(GIT_FOUND)
-    execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        OUTPUT_VARIABLE SVE_BUILD_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-    execute_process(COMMAND "${GIT_EXECUTABLE}" status --porcelain
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        OUTPUT_VARIABLE SVE_GIT_DIRTY OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-    if(NOT SVE_GIT_DIRTY STREQUAL "")
-        # Said plainly. A manifest that reports a commit for a tree with uncommitted changes
-        # names a build that does not exist anywhere.
-        string(APPEND SVE_BUILD_COMMIT "-dirty")
-    endif()
-endif()
-
-# Which backends this artefact actually carries. §5.5 makes that a build-time decision, so
-# it is a property of the wheel rather than of the project.
-set(SVE_MANIFEST_FEATURES "")
-foreach(pair "x264:${SVE_BUILD_BACKEND_X264}" "x265:${SVE_BUILD_BACKEND_X265}"
-             "ffmpeg_backends:${SVE_BUILD_BACKEND_FFMPEG}"
-             "ffmpeg_interop:${SVE_BUILD_FFMPEG_INTEROP}")
-    string(REPLACE ":" ";" parts "${pair}")
-    list(GET parts 0 feature_name)
-    list(GET parts 1 feature_on)
-    if(feature_on)
-        list(APPEND SVE_MANIFEST_FEATURES "${feature_name}")
-    endif()
-endforeach()
-string(JOIN "," SVE_MANIFEST_FEATURES_TEXT ${SVE_MANIFEST_FEATURES})
-
-target_compile_definitions(sve_python_core PRIVATE
-    SVE_BUILD_COMMIT="${SVE_BUILD_COMMIT}"
-    SVE_BUILD_COMPILER="${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}"
-    SVE_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
-    SVE_BUILD_CXX_STANDARD="${CMAKE_CXX_STANDARD}"
-    SVE_BUILD_X264_VERSION="${X264_VERSION}"
-    SVE_BUILD_X265_VERSION="${X265_VERSION}"
-    SVE_BUILD_FFMPEG_VERSION="${FFMPEG_libavutil_VERSION}"
-    SVE_BUILD_FEATURES="${SVE_MANIFEST_FEATURES_TEXT}"
-)
+#
+# The values are gathered by cmake/build_manifest.cmake at the top level, because §38's
+# baseline profiles pin the same encoder versions and two copies of these facts would drift.
+target_include_directories(sve_python_core PRIVATE "${SVE_BUILD_MANIFEST_DIR}")

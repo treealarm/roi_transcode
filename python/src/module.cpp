@@ -6,6 +6,8 @@
 
 #include "bindings.h"
 
+#include "sve_build_manifest.h"
+
 #include <string>
 
 namespace py = pybind11;
@@ -14,10 +16,10 @@ PYBIND11_MODULE(_core, m)
 {
     m.doc() = "smart-video-encoder: adaptive ROI video encoding (TZ v4.2 §58).";
 
-    // §58.7: the Python and C++ versions come from one source. SVE_VERSION is set by the
-    // build from the same vcpkg.json the C++ project version is read from, so the two
-    // cannot drift.
-    m.attr("__version__") = SVE_VERSION;
+    // §58.7: the Python and C++ versions come from one source -- vcpkg.json, read by the
+    // top-level build and written into the generated manifest header, so the two cannot
+    // drift.
+    m.attr("__version__") = sve::build::kVersion;
 
     // §58.7's build manifest. A wheel is opaque: which libx264 went into it, built by which
     // compiler, from which commit, under which licence terms -- none of that survives into
@@ -28,18 +30,22 @@ PYBIND11_MODULE(_core, m)
     // this artefact under the GPL, which the FFmpeg-mediated path used to hide behind
     // ffmpeg[gpl]; §55 wants a license review before release and this is where a packager
     // finds out there is one to do.
+    //
+    // The values come from the generated header rather than from this file's own compile
+    // definitions: §38's baseline profiles pin the same encoder versions, and one source is
+    // what stops a field being added here and missed there.
     py::dict manifest;
-    manifest["version"] = SVE_VERSION;
-    manifest["commit"] = SVE_BUILD_COMMIT;
-    manifest["compiler"] = SVE_BUILD_COMPILER;
-    manifest["build_type"] = SVE_BUILD_TYPE;
-    manifest["cxx_standard"] = SVE_BUILD_CXX_STANDARD;
+    manifest["version"] = sve::build::kVersion;
+    manifest["commit"] = sve::build::kCommit;
+    manifest["compiler"] = sve::build::kCompiler;
+    manifest["build_type"] = sve::build::kBuildType;
+    manifest["cxx_standard"] = sve::build::kCxxStandard;
     manifest["cxx_abi"] = std::to_string(_GLIBCXX_USE_CXX11_ABI);
-    manifest["libx264"] = SVE_BUILD_X264_VERSION;
-    manifest["libx265"] = SVE_BUILD_X265_VERSION;
-    manifest["ffmpeg_libavutil"] = SVE_BUILD_FFMPEG_VERSION;
-    manifest["features"] = SVE_BUILD_FEATURES;
-    manifest["license"] = "GPL-2.0-or-later (libx264/libx265 are linked directly)";
+    manifest["libx264"] = sve::build::kX264Version;
+    manifest["libx265"] = sve::build::kX265Version;
+    manifest["ffmpeg_libavutil"] = sve::build::kFfmpegLibavutilVersion;
+    manifest["features"] = sve::build::kFeatures;
+    manifest["license"] = sve::build::kLicense;
     m.attr("build_manifest") = manifest;
 
     sve_python::register_exceptions(m);

@@ -1190,6 +1190,19 @@ else
     fail "dependency scan (§26.4, §44)"
 fi
 
+# §38's calibration, and the "baseline profiles versioned" line of §55. The profiles are
+# committed under baselines/, so this step is a comparison rather than a measurement: it
+# regenerates each one and fails on any difference. That is the whole point of a baseline --
+# a configuration change that nobody meant is otherwise invisible until the numbers move.
+step "baseline calibration: the committed profiles still describe this build"
+if baseout=$("${ROOT}/integration/scripts/baseline-check.sh" "${LIBBUILD}" 2>&1); then
+    printf '%s\n' "$baseout" | grep -E '^  (ok|skip)' | sed 's/^/  /'
+    pass "$(printf '%s\n' "$baseout" | tail -1)"
+else
+    printf '%s\n' "$baseout" | grep -E '^  (FAIL|skip)' | sed 's/^/  /' >&2
+    fail "baseline calibration (§38)"
+fi
+
 # §58.9's Python suite. It needs its own build directory: a Python extension is a shared
 # object, and the libavcodec-backed components this build uses link a static FFmpeg without
 # -fPIC. The configuration below is §5.5's graph, which is what §58.9 asks the tests to run

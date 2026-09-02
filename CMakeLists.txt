@@ -141,6 +141,9 @@ message(STATUS "smart-video-encoder FFmpeg: ${FFMPEG_INCLUDE_DIRS}")
 pkg_check_modules(X264 x264)
 pkg_check_modules(X265 x265)
 
+# Build provenance for §58.7 and §38, gathered once for everything that needs it.
+include(cmake/build_manifest.cmake)
+
 # ---------------------------------------------------------------------------
 # sve -- the core of §5.5's dependency graph
 #
@@ -493,8 +496,17 @@ if(SVE_BUILD_TOOLS)
     add_executable(sve-capabilities tools/sve_capabilities.cpp)
     target_link_libraries(sve-capabilities PRIVATE sve_all)
     target_compile_options(sve-capabilities PRIVATE ${SVE_WARNINGS})
+
+    # §38's calibration run. It reads the build manifest for the exact encoder version a
+    # profile is pinned to, which is why the generated header is on its include path.
+    add_executable(sve-baseline tools/sve_baseline.cpp)
+    target_link_libraries(sve-baseline PRIVATE sve_all)
+    target_include_directories(sve-baseline PRIVATE "${SVE_BUILD_MANIFEST_DIR}")
+    target_compile_options(sve-baseline PRIVATE ${SVE_WARNINGS})
+
     if(SVE_INSTALL)
-        install(TARGETS sve-capabilities RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+        install(TARGETS sve-capabilities sve-baseline
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     endif()
 endif()
 
