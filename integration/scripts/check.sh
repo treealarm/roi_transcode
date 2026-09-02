@@ -1378,6 +1378,59 @@ else
     fi
 fi
 
+# §58.10.8: "wrapper overhead измеряется отдельно от encode latency; для CPU frame submit
+# без обязательной копии P95 overhead не должен превышать 5% относительно эквивалентного C++
+# вызова на том же профиле". Both halves encode the same 720p30 profile and print the same
+# three regions; what is compared is `wrap` -- the part with no encoder in it, which is the
+# wrapper's own cost -- against 5% of what the whole C++ per-frame call costs.
+#
+# Why not simply compare the two `total` figures: on a loaded machine the submit region is
+# the encode, and the encode's P95 moves by tens of percent between runs, so that ratio says
+# more about the machine than about the binding -- it has come out with Python ahead. The
+# subtraction is also what §58.10.8 asks for in as many words: encode latency is not the
+# wrapper's, so it is not counted against it.
+#
+# Each side is run several times and the smallest P95 of each is kept. Noise only ever adds.
+step "the Python wrapper costs no more than §58.10.8 allows"
+if [[ ! -x "${LIBBUILD}/submit_overhead" ]]; then
+    skip "overhead budget needs SVE_BUILD_TESTS=ON"
+elif ! python3 -c "import numpy" >/dev/null 2>&1; then
+    skip "overhead budget needs numpy"
+elif ! PYTHONPATH="${ROOT}/python" python3 -c "import smart_video_encoder" >/dev/null 2>&1; then
+    skip "overhead budget needs the extension built (SVE_BUILD_PYTHON=ON)"
+else
+    overhead_reps=3
+    overhead_rc=0
+    for rep in $(seq "$overhead_reps"); do
+        "${LIBBUILD}/submit_overhead" >"${WORK}/overhead_cpp_${rep}.txt" \
+            2>"${WORK}/overhead_cpp_${rep}.log" || overhead_rc=1
+        PYTHONPATH="${ROOT}/python" python3 "${ROOT}/integration/scripts/python-overhead.py" \
+            >"${WORK}/overhead_py_${rep}.txt" 2>"${WORK}/overhead_py_${rep}.log" \
+            || overhead_rc=1
+    done
+    # Smallest P95 across the repetitions of one side.
+    best() { awk -v k="$1" '$1 == k { if (m == "" || $2 < m) m = $2 } END { print m }' "${@:2}"; }
+    cpp_wrap=$(best wrap_p95_ns "${WORK}"/overhead_cpp_*.txt)
+    cpp_total=$(best total_p95_ns "${WORK}"/overhead_cpp_*.txt)
+    py_wrap=$(best wrap_p95_ns "${WORK}"/overhead_py_*.txt)
+    # A run that died early prints fewer samples, and its percentiles would be of whatever it
+    # managed. Checked rather than assumed, because a smaller number passes this budget.
+    short=$(cat "${WORK}"/overhead_cpp_*.txt "${WORK}"/overhead_py_*.txt \
+        | awk '$1 == "samples" && $2 != 300' | wc -l)
+    if [[ "$overhead_rc" -ne 0 || -z "$cpp_wrap" || -z "$cpp_total" || -z "$py_wrap" ]]; then
+        fail "overhead measurement did not run"
+        tail -3 "${WORK}"/overhead_cpp_*.log "${WORK}"/overhead_py_*.log | sed 's/^/      /' >&2
+    elif [[ "$short" -ne 0 ]]; then
+        fail "an overhead run measured fewer than 300 samples (${short} of them)"
+    else
+        overhead=$(awk -v a="$py_wrap" -v b="$cpp_wrap" 'BEGIN { d = a - b; print (d < 0 ? 0 : d) }')
+        budget=$(awk -v t="$cpp_total" 'BEGIN { printf "%.0f", t * 0.05 }')
+        printf '      wrapper P95 %s ns vs C++ %s ns; C++ per-frame call %s ns\n' \
+            "$py_wrap" "$cpp_wrap" "$cpp_total"
+        assert_lt "wrapper overhead P95 within 5% of the C++ call (ns)" "$overhead" "$budget"
+    fi
+fi
+
 step "the library builds on its own"
 # Configures the project with the integration switched off -- no JSON, no protos, no gRPC,
 # no CLI. This is the claim the layout makes: TZ v2.0 §52 describes the library, and what

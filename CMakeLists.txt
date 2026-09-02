@@ -747,6 +747,13 @@ if(SVE_BUILD_TESTS)
     target_link_libraries(parity_digest PRIVATE sve_all)
     target_compile_options(parity_digest PRIVATE ${SVE_WARNINGS})
 
+    # The C++ reference for §58.10.8's overhead budget, and not an add_test for the same
+    # reason parity_digest is not: a submit time on its own is a number without a claim in
+    # it. check.sh runs this beside the wrapper and compares the two P95s.
+    add_executable(submit_overhead tests/unit/submit_overhead.cpp)
+    target_link_libraries(submit_overhead PRIVATE sve_all)
+    target_compile_options(submit_overhead PRIVATE ${SVE_WARNINGS})
+
     add_executable(push_encoder_test tests/unit/push_encoder_test.cpp)
     target_link_libraries(push_encoder_test PRIVATE sve_all)
     target_compile_options(push_encoder_test PRIVATE ${SVE_WARNINGS})

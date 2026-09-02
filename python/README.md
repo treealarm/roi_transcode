@@ -156,6 +156,18 @@ In `examples/`, and all three run against a build of this package:
 | `encode_with_roi.py` | the same clip with and without a declared object, so the difference is the ROI |
 | `capability_report.py` | what this build can do here, without opening an encoder |
 
+## What the wrapper costs (§58.10.8)
+
+Frames are not copied (§58.4), so what the wrapper adds per frame is a constant: building
+the `Frame` and the `FrameMetadata` and crossing into C++. Measured on 720p30 with x264
+direct, that is a few tens of microseconds against a per-frame C++ call of a few
+milliseconds -- under 1%, where §58.10.8 allows 5%.
+
+The two halves of the measurement are `tests/unit/submit_overhead.cpp` and
+`integration/scripts/python-overhead.py`; `check.sh` runs both and compares them. The
+resolution decides the answer: the same wrapper on a 160x120 frame is a 9% tax, because the
+constant has not changed and the encode it is compared against has almost vanished.
+
 ## Building
 
 ```bash
