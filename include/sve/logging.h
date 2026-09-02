@@ -21,6 +21,10 @@
 namespace sve {
 
 enum class LogLevel {
+    /// Per-frame detail, and the level §29 names below Debug. Off by default in the
+    /// built-in sink: at a frame's granularity this is a firehose, and the only honest
+    /// destination for it is a sink the application chose on purpose.
+    Trace,
     /// Detail useful while chasing something. Off by default in the built-in sink.
     Debug,
     /// Something worth knowing that is not a problem: which backend opened.
@@ -32,6 +36,23 @@ enum class LogLevel {
 };
 
 const char* log_level_name(LogLevel level);
+
+/// The events §29 requires a library to emit, so that the list is in the code rather than
+/// only in the specification. Every one of them is emitted through a Logger, and
+/// tests/unit/logging_test.cpp holds one encoder to each.
+///
+///   * backend selected          -- which one opened and how many declined first
+///   * capability report         -- what the one that opened says it can do
+///   * fallback                  -- a degradation was applied (§50)
+///   * unsupported feature       -- something was refused rather than worked around
+///   * encoder reset/reconfigure -- Reconfigure and Stop
+///   * frame drop                -- see below
+///   * metadata failure          -- a metadata channel could not carry what was asked
+///
+/// On frame drop: this library never drops a submitted frame. Back pressure is `Again`
+/// from SubmitFrame, which is the caller's frame still in the caller's hands, not a loss.
+/// What can happen instead is a frame whose packet never arrives to claim it, and that is
+/// the event reported under this name.
 
 /// Called from whichever thread produced the message, and possibly from the encoder's own
 /// worker -- an implementation that touches shared state must say so itself. Must not

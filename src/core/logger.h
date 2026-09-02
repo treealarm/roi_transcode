@@ -30,14 +30,15 @@ public:
         //
         // The lack of a prefix is not an oversight. These exact lines are what
         // integration/scripts/check.sh reads to prove a guard fired, and they are what a
-        // person running the CLI sees. Debug is dropped rather than printed, because the
-        // built-in sink has no way to be turned down.
-        if (level == LogLevel::Debug) {
+        // person running the CLI sees. Trace and Debug are dropped rather than printed,
+        // because the built-in sink has no way to be turned down.
+        if (level == LogLevel::Trace || level == LogLevel::Debug) {
             return;
         }
         std::fprintf(stderr, "%.*s\n", static_cast<int>(message.size()), message.data());
     }
 
+    void debug(std::string_view m) const { write(LogLevel::Debug, m); }
     void info(std::string_view m) const { write(LogLevel::Info, m); }
     void warn(std::string_view m) const { write(LogLevel::Warning, m); }
     void error(std::string_view m) const { write(LogLevel::Error, m); }

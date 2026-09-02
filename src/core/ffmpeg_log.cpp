@@ -1,0 +1,118 @@
+// Routing FFmpeg's diagnostics into a LogSink -- TZ v4.2 §29. See sve/ffmpeg_log.h for why
+// this is process-wide and why that is the application's decision rather than an encoder's.
+
+#include "sve/ffmpeg_log.h"
+
+#include <cstdarg>
+#include <mutex>
+#include <string>
+#include <vector>
+
+extern "C" {
+#include <libavutil/log.h>
+}
+
+namespace sve {
+
+namespace {
+
+std::mutex g_mutex;
+LogSink g_sink;
+
+/// What av_log_format_line2 is given to write into before it says how much it wanted.
+/// Chosen to hold FFmpeg's own longest ordinary lines without a second pass; anything
+/// longer takes the resize below, so the number is a starting point rather than a limit.
+constexpr int kInitialLineBytes = 1024;
+
+LogLevel level_from_av(int av_level)
+{
+    // libavutil/log.h: PANIC 0, FATAL 8, ERROR 16, WARNING 24, INFO 32, VERBOSE 40,
+    // DEBUG 48, TRACE 56. Compared rather than switched, because FFmpeg's own macros put
+    // levels between those values and a switch would drop them on the floor.
+    if (av_level <= AV_LOG_ERROR) {
+        return LogLevel::Error;
+    }
+    if (av_level <= AV_LOG_WARNING) {
+        return LogLevel::Warning;
+    }
+    if (av_level <= AV_LOG_INFO) {
+        return LogLevel::Info;
+    }
+    if (av_level <= AV_LOG_DEBUG) {
+        return LogLevel::Debug;
+    }
+    return LogLevel::Trace;
+}
+
+void forward(void* avcl, int level, const char* fmt, va_list args)
+{
+    // Asked before anything is formatted: FFmpeg calls this for every message it considers,
+    // including the ones the current av_log level discards, and formatting one only to drop
+    // it costs the encode for nothing.
+    if (level > av_log_get_level()) {
+        return;
+    }
+
+    LogSink sink;
+    {
+        const std::lock_guard<std::mutex> lock(g_mutex);
+        if (!g_sink) {
+            return;
+        }
+        sink = g_sink;
+    }
+
+    // FFmpeg's own formatter, so that the "[libx264 @ 0x...]" prefix and the line-continuation
+    // handling are the ones a reader already recognises. `print_prefix` is per-call state
+    // that FFmpeg carries between fragments of one line; a fresh one each time means every
+    // message arrives with its prefix, which is what a structured sink wants -- it has no
+    // way to reassemble fragments it never asked for.
+    std::vector<char> line(kInitialLineBytes);
+    int print_prefix = 1;
+    // The formatter consumes the argument list, and there is a second call below, so it is
+    // copied rather than passed twice -- reusing a va_list after it has been walked is
+    // undefined and happens to work until it does not.
+    va_list retry;
+    va_copy(retry, args);
+    const int wanted = av_log_format_line2(
+        avcl, level, fmt, args, line.data(), static_cast<int>(line.size()), &print_prefix);
+    if (wanted >= static_cast<int>(line.size())) {
+        line.resize(static_cast<std::size_t>(wanted) + 1);
+        print_prefix = 1;
+        av_log_format_line2(avcl, level, fmt, retry, line.data(),
+            static_cast<int>(line.size()), &print_prefix);
+    }
+    va_end(retry);
+    if (wanted <= 0) {
+        return;
+    }
+
+    std::string text(line.data());
+    // FFmpeg ends its lines; a sink frames its own. Trailing rather than all, so a message
+    // that is genuinely several lines stays several lines.
+    while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) {
+        text.pop_back();
+    }
+    if (text.empty()) {
+        return;
+    }
+    sink(level_from_av(level), text);
+}
+
+} // namespace
+
+void SetFFmpegLogSink(LogSink sink)
+{
+    const bool wanted = static_cast<bool>(sink);
+    {
+        const std::lock_guard<std::mutex> lock(g_mutex);
+        g_sink = std::move(sink);
+    }
+    // The sink is swapped under the lock first, then the callback. A message arriving from
+    // another thread mid-swap therefore finds a consistent sink or none -- never a dangling
+    // one. Clearing can lose a message in that window, which is the right trade: the
+    // alternative is holding the lock across a call into application code.
+    av_log_set_callback(wanted ? &forward : &av_log_default_callback);
+}
+
+} // namespace sve

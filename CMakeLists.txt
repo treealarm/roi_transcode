@@ -371,6 +371,7 @@ endif()
 if(SVE_BUILD_FFMPEG_INTEROP)
     add_library(sve_ffmpeg_interop
         src/core/av_frame_adapter.cpp
+        src/core/ffmpeg_log.cpp
         src/backend/common/av_pixel_format.cpp
     )
     target_include_directories(sve_ffmpeg_interop
@@ -728,6 +729,16 @@ if(SVE_BUILD_TESTS)
     target_link_libraries(encoder_test PRIVATE sve_all)
     target_compile_options(encoder_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME encoder COMMAND encoder_test)
+
+    # §29's mandatory events and levels, plus the FFmpeg routing that carries the other
+    # half of them. Reaches encoder_runtime_warnings.h directly: the guards are where the
+    # fallback and refusal events are emitted, and provoking each one through the public
+    # API would need a backend that lacks the capability rather than a test that says so.
+    add_executable(logging_test tests/unit/logging_test.cpp)
+    target_link_libraries(logging_test PRIVATE sve_all)
+    target_include_directories(logging_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
+    target_compile_options(logging_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME logging COMMAND logging_test)
 
     add_executable(push_encoder_test tests/unit/push_encoder_test.cpp)
     target_link_libraries(push_encoder_test PRIVATE sve_all)

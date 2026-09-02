@@ -1,5 +1,6 @@
 #include "sve/backend_loader.h"
 #include "sve/backend_registry.h"
+#include "sve/ffmpeg_log.h"
 #include "sve/sve.h"
 #include "roi_json.h"
 
@@ -8,6 +9,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -162,6 +164,18 @@ int main(int argc, char** argv)
                 std::fprintf(stderr, "plugin loaded: %s\n", sve::backend_name(kind));
             }
         }
+
+        // §29: FFmpeg's own diagnostics belong wherever this application's do, not on
+        // stderr behind its back. Process-wide by nature, so it is the application that
+        // installs it -- see sve/ffmpeg_log.h on why an encoder could not.
+        //
+        // The prefix is the point of doing it here rather than leaving FFmpeg to print:
+        // "[libx264 @ 0x...]" beside this tool's own lines gives a reader no way to tell
+        // which of the two libraries is speaking.
+        sve::SetFFmpegLogSink([](sve::LogLevel level, std::string_view message) {
+            std::fprintf(stderr, "ffmpeg [%s]: %.*s\n", sve::log_level_name(level),
+                static_cast<int>(message.size()), message.data());
+        });
 
         settings.quality = roi_doc.quality;
         sve::transcode_file(input_path, output_path, roi_doc.boxes, settings);

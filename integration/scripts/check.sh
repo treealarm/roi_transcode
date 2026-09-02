@@ -1181,6 +1181,36 @@ else
     fail "soak (§43)"
 fi
 
+# §29. FFmpeg writes to stderr on its own, from inside libavformat and from the codec
+# libraries below it, and an application that named a destination for this library's
+# diagnostics still had no say over those. The provocation is a file that is not media: it
+# makes libavformat say two things, at two levels, deterministically.
+#
+# The assertion is on the prefix, not on the words. FFmpeg's own line would be on stderr
+# either way -- what proves it went through the application's sink is that the application's
+# framing is around it.
+step "FFmpeg's own diagnostics reach the application's sink (§29)"
+printf 'this is not a media file at all\n' > "${WORK}/notmedia.mp4"
+ffmpeg_log_out=$("${BUILD}/roi-transcode" --in "${WORK}/notmedia.mp4" \
+    --roi "${ROOT}/testdata/synth_roi.json" --out "${WORK}/notmedia-out.mp4" \
+    --encoder x264direct --codec h264 2>&1)
+if [[ -n "$ffmpeg_log_out" ]] && printf '%s' "$ffmpeg_log_out" | grep -q '^ffmpeg \[error\]: '; then
+    pass "an FFmpeg error arrives through the sink, framed by the application"
+else
+    fail "FFmpeg diagnostics did not reach the sink"
+    printf '%s\n' "$ffmpeg_log_out" | head -5 | sed 's/^/      /' >&2
+fi
+if printf '%s' "$ffmpeg_log_out" | grep -q '^ffmpeg \[warning\]: '; then
+    pass "and so does an FFmpeg warning, at its own level"
+else
+    fail "the level mapping lost the warning"
+fi
+if printf '%s' "$ffmpeg_log_out" | grep -q 'moov atom not found'; then
+    pass "the message itself survives the routing intact"
+else
+    fail "the routed message lost its text"
+fi
+
 step "dependency scan: the core declares and links nothing it must not"
 if depscan=$("${ROOT}/integration/scripts/dependency-scan.sh" "${WORK}/depscan" 2>&1); then
     printf '%s\n' "$depscan" | grep -E '^  (ok|skip)' | sed 's/^/  /'

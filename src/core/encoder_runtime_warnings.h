@@ -17,8 +17,29 @@
 #include "sve/types.h"
 
 #include <format>
+#include <string>
+#include <utility>
 
 namespace sve {
+
+/// A refusal under FallbackPolicy::Strict -- §29's "unsupported feature" event.
+///
+/// The Status on its own does not make one: it reaches the caller and nobody else, so a
+/// refusal that stopped an encode was invisible to whoever reads the log afterwards to
+/// find out why. One text serves both, so the log and the Status can never describe
+/// different refusals.
+///
+/// Announced once, on the same flag the permissive path uses. A guard consulted per frame
+/// would otherwise say it sixty times a second, which is the noise the rest of this file is
+/// written to avoid; `warned` is set here so that the two paths cannot both announce.
+inline Status refuse_unsupported(const Logger& log, std::string message, bool& warned)
+{
+    if (!warned) {
+        log.error("unsupported: " + message);
+        warned = true;
+    }
+    return Status::Unsupported(std::move(message));
+}
 
 /// Bitstream metadata was asked for and the encoder cannot carry it (§19.2).
 inline Status guard_sei_unsupported(const bool requested, const EncoderCapabilities& caps,
@@ -28,8 +49,8 @@ inline Status guard_sei_unsupported(const bool requested, const EncoderCapabilit
         return Status::Ok();
     }
     if (policy == FallbackPolicy::Strict) {
-        return Status::Unsupported(
-            "bitstream SEI requested but not supported by encoder capabilities");
+        return refuse_unsupported(log,
+            "bitstream SEI requested but not supported by encoder capabilities", warned);
     }
     if (!warned) {
         log.warn("warning: bitstream SEI requested but not supported by encoder capabilities");
@@ -46,9 +67,10 @@ inline Status guard_roi_regions_dropped(const int64_t dropped, const EncoderCapa
         return Status::Ok();
     }
     if (policy == FallbackPolicy::Strict) {
-        return Status::Unsupported(std::format(
-            "{} roi region(s) do not fit the {} backend limit of {}",
-            dropped, codec == Codec::H264 ? "h264" : "h265", caps.max_roi_regions));
+        return refuse_unsupported(log,
+            std::format("{} roi region(s) do not fit the {} backend limit of {}", dropped,
+                codec == Codec::H264 ? "h264" : "h265", caps.max_roi_regions),
+            warned);
     }
     if (!warned) {
         log.warn(std::format("guard: {} roi region(s) dropped; {} backend takes {}",
@@ -67,8 +89,9 @@ inline Status guard_qp_map_quantized(const bool have_map, const EncoderCapabilit
         return Status::Ok();
     }
     if (policy == FallbackPolicy::Strict) {
-        return Status::Unsupported(
-            "a per-block quality map was supplied and this backend takes rectangles only");
+        return refuse_unsupported(log,
+            "a per-block quality map was supplied and this backend takes rectangles only",
+            warned);
     }
     if (!warned) {
         log.warn("guard: per-block quality map quantized to rectangles for this backend");
@@ -108,8 +131,13 @@ inline Status guard_cpu_h265_target(const bool requested, const FallbackPolicy p
         return Status::Ok();
     }
     if (policy == FallbackPolicy::Strict) {
-        return Status::Unsupported(
-            "cpu h265 has no target-bitrate mode in this build; see STATUS.md Р5");
+        // Announced every time, unlike the per-frame guards above, and deliberately.
+        // Those fire again without the caller having done anything; this one is reached
+        // only from open and from Reconfigure, which is the caller asking again. Answering
+        // each ask is not repetition.
+        bool once = false;
+        return refuse_unsupported(log,
+            "cpu h265 has no target-bitrate mode in this build; see STATUS.md Р5", once);
     }
     log.warn("guard: cpu h265 target-bitrate disabled; using CRF/CQP");
     return Status::Ok();

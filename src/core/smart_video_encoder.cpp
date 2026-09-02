@@ -488,6 +488,22 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const EncoderConfig& confi
     impl->log.info(std::format("backend: {} ({}) opened; {} declined before it",
         backend_name(impl->stats.encoder_used), impl->encoder.label(),
         impl->stats.backends_declined));
+
+    // §29's "capability report", which until 2026-09-02 existed only as a number a caller
+    // could fetch. It is the answer every fallback below is decided against, so a log that
+    // records the fallbacks and not the capabilities they came from is a log that cannot be
+    // read back to a cause. At Debug: it is one line per encode, not per frame, but it is
+    // detail rather than news, and the built-in sink stays as quiet as it was.
+    {
+        const EncoderCapabilities& c = impl->encoder.capabilities();
+        impl->log.debug(std::format(
+            "capabilities: regions={} roi_rect={} qp_map={} ({}x{}) ctu_qp={} "
+            "emphasis={} runtime_roi={} sei={} native_bitrate={} main10={} p010={}",
+            c.max_roi_regions, c.roi_rectangles, c.qp_map, c.qp_map_block_width,
+            c.qp_map_block_height, c.ctu_qp, c.emphasis_map, c.runtime_roi_update, c.sei,
+            c.native_bitrate, c.main10, c.p010_input));
+    }
+
     impl->state = EncoderState::Configured;
     return std::unique_ptr<SmartVideoEncoder>(new SmartVideoEncoder(std::move(impl)));
 }
@@ -619,6 +635,14 @@ Status SmartVideoEncoder::Stop()
     if (s.state == EncoderState::Stopped) {
         return Status::Ok();
     }
+    // §29's "encoder reset". Said at Info because it is the end of an encode and the
+    // counts beside it are what a reader wants when the next line is from a different
+    // encoder: how much came out, and how much of it was degraded.
+    s.log.info(std::format(
+        "encoder stopped from {}: {} frames in, {} packets out, {} bytes, "
+        "{} fallback(s), {} region(s) dropped",
+        encoder_state_name(s.state), s.stats.frames_submitted, s.stats.packets_received,
+        s.stats.bytes_encoded, s.stats.fallbacks_applied, s.stats.regions_dropped));
     s.queued.clear();
     s.state = EncoderState::Stopped;
     return Status::Ok();
@@ -673,6 +697,12 @@ Status SmartVideoEncoder::Reconfigure(const RuntimeEncoderSettings& settings)
         // target takes effect from the next frame without reopening anything.
         s.bitrate = BitrateBudget(rc);
     }
+    // §29's "reconfigure", and it names what actually changed rather than that a call
+    // happened: §8.2 lets three things move and a caller may set any subset, so "reconfigured"
+    // on its own would leave a reader to guess which.
+    s.log.info(std::format("reconfigured:{}{}{}",
+        settings.frame_rate ? " frame_rate" : "", settings.quality ? " quality" : "",
+        settings.target_bitrate ? " target_bitrate" : ""));
     return Status::Ok();
 }
 
