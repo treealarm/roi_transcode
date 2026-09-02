@@ -301,12 +301,13 @@ def test_the_public_surface_is_the_one_we_intend():
         # library is for -- meant reaching into a private module until then.
         "Quality", "KindQuality",
         "Codec", "Backend", "BackendSelection", "ObjectPriority", "StatusCode",
-        "PixelFormat", "SidecarFormat", "EncoderState",
+        "PixelFormat", "SidecarFormat", "EncoderState", "LogLevel",
         "BoundingBox", "Point", "TrackEvidence", "FrameMetadata", "MediaTimestamp",
         "Rational", "Frame", "EncodedPacket",
         "EncoderCapabilities", "EncoderStatistics",
         # Free functions and module-level values.
         "available_backends", "backend_name", "get_capabilities", "status_code_name",
+        "log_level_name",
         "frame_from_planes", "build_manifest",
         # The exception hierarchy of §58.6.
         "SmartVideoEncoderError", "BackendError", "DeviceUnavailableError",
@@ -512,3 +513,60 @@ def test_a_raised_error_carries_the_status_code_the_stubs_promise():
     assert err.status_code == sve.StatusCode.INVALID_ARGUMENT.value
     assert err.status_name == sve.status_code_name(sve.StatusCode.INVALID_ARGUMENT)
     assert str(err)   # and the original message is not lost either
+
+
+# --- §29 through the wrapper -------------------------------------------------
+
+
+def test_the_library_diagnostics_reach_a_sink_the_application_named():
+    """§29: where the library's own diagnostics go is the application's decision.
+
+    Unbound until 2026-09-02, so a Python application had no say at all -- the C++ half of
+    integration/scripts/python-parity.py silences its log in one line and the Python half
+    could not, which is how this was noticed.
+    """
+    seen: list[tuple[str, str]] = []
+    cfg = config()
+    cfg.log = lambda level, message: seen.append((sve.log_level_name(level), message))
+    assert encode(cfg, frames=4)
+
+    levels = {level for level, _ in seen}
+    text = " | ".join(message for _, message in seen)
+    # §29's mandatory events, as they arrive here: which backend opened, what it can do,
+    # and the encoder being stopped by the context manager on the way out.
+    assert "backend: x264direct" in text
+    assert "capabilities:" in text
+    assert "encoder stopped" in text
+    # And the levels are the library's own, not flattened to one. The capability report is
+    # Debug, which the built-in stderr sink drops -- so a sink genuinely sees more, rather
+    # than seeing the same lines somewhere else.
+    assert {"info", "debug"} <= levels
+
+
+def test_a_sink_that_raises_does_not_unwind_into_the_encoder():
+    """The C++ contract says a sink must not throw; in Python raising is ordinary.
+
+    Without the guard the exception travels out of the log call into code that has a frame
+    in flight. With it, the encode finishes and the failure is reported on stderr -- the one
+    place that cannot recurse into the sink that just failed.
+    """
+    calls = []
+
+    def angry(level, message):
+        calls.append(message)
+        raise RuntimeError("this sink is broken")
+
+    cfg = config()
+    cfg.log = angry
+    packets = encode(cfg, frames=4)
+    assert packets, "the encode completed despite the sink"
+    assert calls, "and the sink really was called"
+
+
+def test_the_log_sink_round_trips_and_can_be_cleared():
+    cfg = config()
+    assert cfg.log is None
+    cfg.log = lambda level, message: None
+    assert cfg.log is not None
+    cfg.log = None
+    assert cfg.log is None

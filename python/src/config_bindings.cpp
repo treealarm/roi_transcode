@@ -8,11 +8,44 @@
 #include "bindings.h"
 
 #include <pybind11/functional.h>
+
+#include <cstdio>
 #include <pybind11/stl.h>
 
 namespace py = pybind11;
 
 namespace sve_python {
+
+namespace {
+
+/// Stops a Python callable from unwinding into the library.
+///
+/// The C++ contract for a LogSink says it must not throw: an exception escaping it travels
+/// through code that has a frame in flight, and there is nothing sensible to do with it
+/// there. In Python raising is ordinary, so a sink that raises is a matter of when rather
+/// than whether. The exception stops here and is reported the one way that cannot recurse
+/// into the sink that just failed -- on stderr.
+///
+/// `sink` arrives already converted by pybind11, which is what makes this safe: its holder
+/// takes the GIL both to call the callable and to release it, so this wrapper may be copied
+/// into the encoder and destroyed on whichever thread gets there last.
+sve::LogSink guarded(sve::LogSink sink, const char* what)
+{
+    if (!sink) {
+        return {};
+    }
+    return [sink = std::move(sink), what](sve::LogLevel level, std::string_view message) {
+        try {
+            sink(level, message);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "sve: %s raised: %s\n", what, e.what());
+        } catch (...) {
+            std::fprintf(stderr, "sve: %s raised\n", what);
+        }
+    };
+}
+
+} // namespace
 
 void register_config(py::module_& m)
 {
@@ -67,6 +100,17 @@ void register_config(py::module_& m)
         .value("STOPPED", sve::EncoderState::Stopped)
         .value("FAILED", sve::EncoderState::Failed);
 
+    // §29's five levels. Bound because EncoderConfig.log hands one to the sink, and a
+    // sink that received an opaque value it could not name would not be much of a channel.
+    py::enum_<sve::LogLevel>(m, "LogLevel", "§29's severity levels.")
+        .value("TRACE", sve::LogLevel::Trace)
+        .value("DEBUG", sve::LogLevel::Debug)
+        .value("INFO", sve::LogLevel::Info)
+        .value("WARNING", sve::LogLevel::Warning)
+        .value("ERROR", sve::LogLevel::Error);
+    m.def("log_level_name", &sve::log_level_name, py::arg("level"),
+        "The level's own name, the same spelling the C++ side prints (§29).");
+
     py::enum_<sve::SidecarFormat>(m, "SidecarFormat", "§19.3's sidecar channel.")
         .value("NONE", sve::SidecarFormat::None)
         .value("NDJSON", sve::SidecarFormat::NDJSON);
@@ -101,7 +145,26 @@ void register_config(py::module_& m)
         .def_readwrite("bitstream_sei", &sve::MetadataConfig::bitstream_sei)
         .def_readwrite("max_objects", &sve::MetadataConfig::max_objects)
         .def_readwrite("sidecar", &sve::MetadataConfig::sidecar)
-        .def_readwrite("sidecar_sink", &sve::MetadataConfig::sidecar_sink);
+        // Guarded for the same reason as EncoderConfig.log, and it was not before: this one
+        // is called once per emitted packet, so a raising sink here unwinds through the
+        // encoder with a frame in flight rather than merely at open.
+        .def_property("sidecar_sink",
+            [](const sve::MetadataConfig& cfg) { return cfg.sidecar_sink; },
+            [](sve::MetadataConfig& cfg, sve::SidecarSink sink) {
+                if (!sink) {
+                    cfg.sidecar_sink = {};
+                    return;
+                }
+                cfg.sidecar_sink = [sink = std::move(sink)](std::string_view record) {
+                    try {
+                        sink(record);
+                    } catch (const std::exception& e) {
+                        std::fprintf(stderr, "sve: sidecar sink raised: %s\n", e.what());
+                    } catch (...) {
+                        std::fprintf(stderr, "sve: sidecar sink raised\n");
+                    }
+                };
+            });
 
     py::class_<sve::TemporalROIConfig>(m, "TemporalROIConfig", "§13's anti-flicker.")
         .def(py::init<>())
@@ -167,7 +230,20 @@ void register_config(py::module_& m)
     py::class_<sve::EncoderConfig>(m, "EncoderConfig", "§8.2's public configuration.")
         .def(py::init<>())
         .def_readwrite("input", &sve::EncoderConfig::input)
-        .def_readwrite("settings", &sve::EncoderConfig::settings);
+        .def_readwrite("settings", &sve::EncoderConfig::settings)
+        // §29's log sink, absent from the binding until 2026-09-02: a Python application
+        // could not send the library's diagnostics anywhere of its own choosing, which is
+        // the one thing sve/logging.h exists to allow. Left unset they go to stderr, as
+        // they do in C++.
+        //
+        // A property rather than def_readwrite because of the guard below. pybind11 does
+        // the hard half: the callable it hands us is GIL-safe both to call from a thread
+        // the encoder made and to destroy, which is what §58.5 asks for.
+        .def_property("log",
+            [](const sve::EncoderConfig& cfg) { return cfg.log; },
+            [](sve::EncoderConfig& cfg, sve::LogSink sink) {
+                cfg.log = guarded(std::move(sink), "log sink");
+            });
 
     py::class_<sve::EncoderCapabilities>(m, "EncoderCapabilities", "§7.2, §23.")
         .def(py::init<>())

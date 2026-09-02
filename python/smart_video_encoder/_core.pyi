@@ -78,6 +78,18 @@ class ObjectPriority:
     @property
     def value(self) -> int: ...
 
+class LogLevel:
+    TRACE: LogLevel
+    DEBUG: LogLevel
+    INFO: LogLevel
+    WARNING: LogLevel
+    ERROR: LogLevel
+    __members__: dict[str, LogLevel]
+    @property
+    def name(self) -> str: ...
+    @property
+    def value(self) -> int: ...
+
 class SidecarFormat:
     NONE: SidecarFormat
     NDJSON: SidecarFormat
@@ -237,6 +249,10 @@ class Settings:
 class EncoderConfig:
     input: InputVideoFormat
     settings: Settings
+    # §29. Left unset, diagnostics go to stderr one line each, as they do in C++. A sink
+    # that raises does not unwind into the encoder: the exception is caught and reported on
+    # stderr instead.
+    log: Callable[[LogLevel, str], None] | None
     def __init__(self) -> None: ...
 
 # --- what comes back --------------------------------------------------------
@@ -358,3 +374,4 @@ def available_backends() -> list[Backend]: ...
 def backend_name(backend: Backend) -> str: ...
 def get_capabilities(backend: Backend, codec: Codec) -> EncoderCapabilities: ...
 def status_code_name(code: StatusCode) -> str: ...
+def log_level_name(level: LogLevel) -> str: ...

@@ -67,7 +67,18 @@ are the way to encode several streams at once.
 
 ### Configuration
 
-`EncoderConfig` has two halves: `input` (`InputVideoFormat`) and `settings` (`Settings`).
+`EncoderConfig` has two halves -- `input` (`InputVideoFormat`) and `settings` (`Settings`) --
+plus `log`.
+
+`log: Callable[[LogLevel, str], None] | None` is §29's sink: where the library's own
+diagnostics go. Left unset they go to stderr, one line each, which is what a command-line
+tool wants. A sink sees more than stderr does, because the built-in one drops `DEBUG` and
+`TRACE` and has no way to be turned down -- the capability report at open is `DEBUG`. It may
+be called from a thread the encoder made, and a sink that raises does not unwind into the
+encoder: the exception is caught and reported on stderr instead.
+
+The events §29 requires are backend selected, capability report, fallback, unsupported
+feature, encoder reset/reconfigure, frame drop and metadata failure.
 
 * `InputVideoFormat` — `width`, `height`, `pixel_format`, `frame_rate`, `time_base`.
 * `Settings` — `encoder`, `backend_selection`, `codec`, `crf`, `gop`, `quality`, `temporal`,
@@ -118,7 +129,8 @@ are the way to encode several streams at once.
 ### Capability discovery, without opening an encoder
 
 `available_backends() -> list[Backend]`, `get_capabilities(backend, codec) ->
-EncoderCapabilities`, `backend_name(backend) -> str`, `status_code_name(code) -> str`.
+EncoderCapabilities`, `backend_name(backend) -> str`, `status_code_name(code) -> str`,
+`log_level_name(level) -> str`.
 §58.3 asks for this at module level because choosing a backend and finding out afterwards
 that it cannot do what you need is a failed encode, while asking first is a branch.
 

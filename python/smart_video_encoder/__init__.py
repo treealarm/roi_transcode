@@ -36,6 +36,7 @@ from ._core import (  # noqa: F401
     FrameMetadata,
     InputVideoFormat,
     KindQuality,
+    LogLevel,
     MediaTimestamp,
     MetadataConfig,
     ObjectPriority,
@@ -53,6 +54,7 @@ from ._core import (  # noqa: F401
     available_backends,
     backend_name,
     get_capabilities,
+    log_level_name,
     status_code_name,
 )
 from ._core import (  # noqa: F401

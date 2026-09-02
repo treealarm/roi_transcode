@@ -73,6 +73,11 @@ def main() -> int:
     cfg.settings.crf = CRF
     cfg.settings.gop = GOP
     cfg.settings.metadata.bitstream_sei = False
+    # Silenced, exactly as the C++ half silences its own. Until the log sink was bound
+    # (2026-09-02) this side could not, and its diagnostics went to stderr while the other
+    # side's went nowhere -- an asymmetry between two halves that are supposed to differ in
+    # nothing. The digest is on stdout either way, so this changes no comparison.
+    cfg.log = lambda level, message: None
 
     try:
         enc = sve.SmartVideoEncoder(cfg)
