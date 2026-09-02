@@ -37,6 +37,113 @@ Three things worth knowing before the first surprise:
 * the arrays you pass are held for as long as the encoder needs them, which is past the
   submit that took them: codecs buffer. You may drop your own references immediately.
 
+## API reference
+
+Everything below is importable from `smart_video_encoder`. The package ships `py.typed` and
+stubs beside the extension, so a type checker sees these signatures rather than `Any`;
+`tests/test_bindings.py` compares the stubs against the built module in both directions, so
+they cannot describe a surface that is not there.
+
+### The encoder
+
+`SmartVideoEncoder(config: EncoderConfig)` — a context manager, and `close()` is idempotent
+(§58.6). After closing, every operation raises rather than touching a dead encoder.
+
+| Member | Returns | Notes |
+|---|---|---|
+| `submit_frame(frame, metadata)` | `bool` | `False` is backpressure (§24), not an error |
+| `receive_available()` | `list[EncodedPacket]` | `[]` means nothing ready yet |
+| `flush()` | `None` | no more frames; drain until `at_end` |
+| `at_end` | `bool` | end of stream reached |
+| `closed` | `bool` | |
+| `close()` | `None` | idempotent |
+| `get_capabilities()` | `EncoderCapabilities` | what the backend that opened can do |
+| `get_statistics()` | `EncoderStatistics` | counts, degradations, which backend ran |
+
+The GIL is released across `submit_frame`, `receive_available` and `flush` (§58.5), so
+another Python thread runs while the encoder works. One encoder is driven by one thread at a
+time, exactly as the C++ API states; separate encoders on separate threads are supported and
+are the way to encode several streams at once.
+
+### Configuration
+
+`EncoderConfig` has two halves: `input` (`InputVideoFormat`) and `settings` (`Settings`).
+
+* `InputVideoFormat` — `width`, `height`, `pixel_format`, `frame_rate`, `time_base`.
+* `Settings` — `encoder`, `backend_selection`, `codec`, `crf`, `gop`, `quality`, `temporal`,
+  `rate_control`, `metadata`.
+* `BackendSelection` — `preferred: list[Backend]`, `allow_unlisted: bool`. Under
+  `Backend.AUTO` the order is walked; a named backend is tried alone, so asking for one and
+  silently getting another cannot happen (§8.4).
+* `Quality` (§11) — `kinds: dict[str, KindQuality]`, `background_qp_delta`, `pad`,
+  `margin_px`, `min_roi_side`, `max_regions`, `max_protected_fraction`, `hold_sec`,
+  `mask_levels`, `mask_qp_delta_at_255`. `KindQuality` is `qp_delta` and `pad`: what one
+  class of object is worth.
+* `TemporalROIConfig` (§13) — `enabled`, `max_missing_frames`, `max_hold_sec`,
+  `confidence_decay`, `spatial_smoothing`, `temporal_smoothing`, `max_qp_delta_per_frame`,
+  `use_track_prediction`. `enabled=False` means the boxes the producer supplied at the times
+  it supplied them, and nothing else.
+* `RateControl` (§15) — `target_bitrate`, `max_average_overshoot`, `max_peak_overshoot`,
+  `recovery_window_ms`.
+* `MetadataConfig` (§19) — `bitstream_sei`, `max_objects`, `sidecar`, `sidecar_sink`. The
+  sink is called once per emitted packet, in emission order, with one complete record and no
+  trailing newline.
+
+### Objects and frames
+
+* `frame_from_planes(planes, pixel_format, width, height) -> Frame` — wraps arrays without
+  copying (§58.4). Rows may be padded; anything whose dtype, shape or strides do not fit
+  raises `ValueError` or `TypeError` rather than being read wrongly later. The `Frame` holds
+  a reference to the arrays, so you may drop yours.
+* `FrameMetadata` — `timestamp`, `force_key_frame`, `objects: list[BoundingBox]`.
+* `BoundingBox` (§9) — `kind`, `label`, `x`, `y`, `width`, `height` (normalized 0..1),
+  `confidence`, `track_id`, `t_sec`, `polygon: list[Point]`, `track: TrackEvidence`. Three
+  or more polygon points and the encoder protects the outline rather than the box.
+* `TrackEvidence` (§11) — `present`, `age_sec`, `speed`, `sample_count`.
+
+### What comes back
+
+* `EncodedPacket` — `data: bytes`, `pts`, `dts`, `duration`, `time_base`, `key_frame`,
+  `codec`.
+* `EncoderStatistics` — counts (`frames_submitted`, `packets_received`, `bytes_encoded`),
+  zero-copy evidence (`frames_converted`, `frames_uploaded`: both zero is what it means),
+  which backend ran (`encoder_used`, `backend_name`, `backends_declined`), and the
+  degradations §50 forbids applying silently: `regions_dropped`, `fallbacks_applied`,
+  `frames_quantiser_clamped`, `cpu_h265_target_guard`. §14's ROI lag arrives in the
+  `roi_lag_*` fields when the boxes carried track ids to measure it from.
+* `EncoderCapabilities` — `h264`, `h265`, `roi_rectangles`, `qp_map` with
+  `qp_map_block_width`/`_height`, `ctu_qp`, `emphasis_map`, `runtime_roi_update`, `sei`,
+  `native_bitrate`, `main10`, `p010_input`, `max_roi_regions` (0 means no limit it can name).
+
+### Capability discovery, without opening an encoder
+
+`available_backends() -> list[Backend]`, `get_capabilities(backend, codec) ->
+EncoderCapabilities`, `backend_name(backend) -> str`, `status_code_name(code) -> str`.
+§58.3 asks for this at module level because choosing a backend and finding out afterwards
+that it cannot do what you need is a failed encode, while asking first is a branch.
+
+`__version__` and `build_manifest` say what this artefact is: version, commit, compiler,
+the libx264/libx265 versions inside it, and its licence terms.
+
+### Exceptions (§58.6)
+
+`SmartVideoEncoderError` is the base; `InvalidArgumentError`, `UnsupportedError`,
+`DeviceUnavailableError` and `BackendError` derive from it. Each carries the originating
+status as `status_code` (the enumerator's integer value) and `status_name` (its spelling),
+so the C++ answer survives the crossing rather than being flattened into a message string.
+`Again` and `EndOfStream` are **not** exceptions -- they are the `False` from
+`submit_frame` and the `at_end` property, because neither is a failure.
+
+## Examples
+
+In `examples/`, and all three run against a build of this package:
+
+| File | Shows |
+|---|---|
+| `encode_numpy_cpu.py` | the plainest path: NumPy frames in, packets out, no copy |
+| `encode_with_roi.py` | the same clip with and without a declared object, so the difference is the ROI |
+| `capability_report.py` | what this build can do here, without opening an encoder |
+
 ## Building
 
 ```bash

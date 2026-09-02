@@ -105,6 +105,14 @@ void register_config(py::module_& m)
 
     py::class_<sve::TemporalROIConfig>(m, "TemporalROIConfig", "§13's anti-flicker.")
         .def(py::init<>())
+        // The three that were missing until 2026-09-02. `enabled` is §13's own switch and
+        // was added to the C++ struct the same day this gap was found -- a Python caller
+        // could not turn the section off at all. The other two are the patience: how many
+        // of the producer's frames a region survives unseen, and the seconds that caps it.
+        // Without them the anti-flicker was configurable in name only.
+        .def_readwrite("enabled", &sve::TemporalROIConfig::enabled)
+        .def_readwrite("max_missing_frames", &sve::TemporalROIConfig::max_missing_frames)
+        .def_readwrite("max_hold_sec", &sve::TemporalROIConfig::max_hold_sec)
         .def_readwrite("confidence_decay", &sve::TemporalROIConfig::confidence_decay)
         .def_readwrite("spatial_smoothing", &sve::TemporalROIConfig::spatial_smoothing)
         .def_readwrite("temporal_smoothing", &sve::TemporalROIConfig::temporal_smoothing)
@@ -188,7 +196,28 @@ void register_config(py::module_& m)
         .def_readonly("regions_dropped", &sve::EncoderStatistics::regions_dropped)
         .def_readonly("backends_declined", &sve::EncoderStatistics::backends_declined)
         .def_readonly("fallbacks_applied", &sve::EncoderStatistics::fallbacks_applied)
-        .def_readonly("encoder_used", &sve::EncoderStatistics::encoder_used);
+        .def_readonly("encoder_used", &sve::EncoderStatistics::encoder_used)
+        // Everything below was absent until 2026-09-02, and the first three are why it
+        // mattered. §50 forbids a silent degradation, and these are how two of them become
+        // visible: a quality map that ran off the end of the quantiser scale, and a target
+        // bitrate refused on CPU H.265. A Python caller could read neither, so §50 was
+        // satisfied in C++ and not in the binding. `backend_name` is the prose name of what
+        // opened, which under Backend::AUTO is the only way to find out.
+        .def_readonly("frames_quantiser_clamped",
+            &sve::EncoderStatistics::frames_quantiser_clamped)
+        .def_readonly("cpu_h265_target_guard",
+            &sve::EncoderStatistics::cpu_h265_target_guard)
+        .def_readonly("keyframes_requested", &sve::EncoderStatistics::keyframes_requested)
+        .def_readonly("backend_name", &sve::EncoderStatistics::backend_name)
+        // §14's ROI lag, reported when the boxes carried track ids to measure it from.
+        .def_readonly("roi_lag_measured", &sve::EncoderStatistics::roi_lag_measured)
+        .def_readonly("roi_lag_samples", &sve::EncoderStatistics::roi_lag_samples)
+        .def_readonly("roi_lag_min_iou", &sve::EncoderStatistics::roi_lag_min_iou)
+        .def_readonly("roi_lag_p95_frames", &sve::EncoderStatistics::roi_lag_p95_frames)
+        .def_readonly("roi_lag_p99_frames", &sve::EncoderStatistics::roi_lag_p99_frames)
+        .def_readonly("roi_lag_p95_ms", &sve::EncoderStatistics::roi_lag_p95_ms)
+        .def_readonly("roi_lag_p99_ms", &sve::EncoderStatistics::roi_lag_p99_ms)
+        .def_readonly("roi_lag_acceptance", &sve::EncoderStatistics::roi_lag_acceptance);
 }
 
 } // namespace sve_python

@@ -1293,6 +1293,21 @@ names = zipfile.ZipFile(sys.argv[1]).namelist()
 print(' '.join(sorted({n.split('/')[0] for n in names}
                       - {'smart_video_encoder', 'smart_video_encoder-2.0.0.dist-info'})))
 " "$whl" 2>/dev/null)
+                # §58.10.9 asks for type hints to be delivered *with the package*. The
+                # marker and the stubs have to be inside the wheel to mean anything: a
+                # py.typed that ships without stubs promises types the caller then does not
+                # get, and stubs that stay in the source tree reach nobody who pip-installs.
+                typed=$(python3 -c "
+import sys, zipfile
+names = set(zipfile.ZipFile(sys.argv[1]).namelist())
+want = {'smart_video_encoder/py.typed', 'smart_video_encoder/_core.pyi'}
+print(' '.join(sorted(want - names)))
+" "$whl" 2>/dev/null)
+                if [[ -z "${typed// }" ]]; then
+                    pass "wheel carries py.typed and the stubs beside it (§58.10.9)"
+                else
+                    fail "wheel is missing: ${typed}"
+                fi
                 if [[ -z "${stray// }" ]]; then
                     pass "wheel carries only the package ($(basename "$whl"))"
                 else

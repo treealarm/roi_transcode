@@ -275,3 +275,240 @@ def test_another_thread_runs_while_the_encoder_works():
         spinner.join()
 
     assert ticks > 10, f"the interpreter only advanced {ticks} times during the encode"
+
+
+# --- the bound surface, and keeping it the same shape as the C++ one --------
+#
+# Everything below was added on 2026-09-02, after a sweep against §58.3 found that the
+# binding had drifted from the C++ structs it mirrors. Three of them mattered: §13's own
+# `enabled` switch was unreachable from Python, so the section could not be turned off at
+# all; and two of §50's degradation counters were unreadable, so a Python caller could not
+# see a quality map that ran off the quantiser scale or a target bitrate refused on CPU
+# H.265. Both languages were meant to be the same encoder and were not.
+#
+# Nothing can make this drift impossible: C++ has no reflection, so no test here can know
+# that a field was added to a struct over there. What these do is pin the surface, so that
+# a change to it is a deliberate edit to a list somebody reads rather than a silent gap.
+
+
+def test_the_public_surface_is_the_one_we_intend():
+    expected = {
+        # §58.3's mandatory bindings.
+        "SmartVideoEncoder", "EncoderConfig", "Settings", "TemporalROIConfig",
+        "MetadataConfig", "InputVideoFormat", "RateControl",
+        # §11's quality model. Bound in _core all along and exported from the package only
+        # on 2026-09-02: configuring what a class of object is worth -- the thing this
+        # library is for -- meant reaching into a private module until then.
+        "Quality", "KindQuality",
+        "Codec", "Backend", "BackendSelection", "ObjectPriority", "StatusCode",
+        "PixelFormat", "SidecarFormat", "EncoderState",
+        "BoundingBox", "Point", "TrackEvidence", "FrameMetadata", "MediaTimestamp",
+        "Rational", "Frame", "EncodedPacket",
+        "EncoderCapabilities", "EncoderStatistics",
+        # Free functions and module-level values.
+        "available_backends", "backend_name", "get_capabilities", "status_code_name",
+        "frame_from_planes", "build_manifest",
+        # The exception hierarchy of §58.6.
+        "SmartVideoEncoderError", "BackendError", "DeviceUnavailableError",
+        "InvalidArgumentError", "UnsupportedError",
+    }
+    actual = {name for name in dir(sve) if not name.startswith("_")}
+    assert actual == expected
+
+
+@pytest.mark.parametrize("cls,fields", [
+    (sve.TemporalROIConfig, {
+        "enabled", "max_missing_frames", "max_hold_sec", "confidence_decay",
+        "spatial_smoothing", "temporal_smoothing", "max_qp_delta_per_frame",
+        "use_track_prediction",
+    }),
+    (sve.BoundingBox, {
+        "t_sec", "kind", "x", "y", "width", "height", "track_id", "confidence",
+        "label", "polygon", "track",
+    }),
+    (sve.TrackEvidence, {"present", "age_sec", "speed", "sample_count"}),
+    (sve.RateControl, {
+        "target_bitrate", "max_average_overshoot", "max_peak_overshoot",
+        "recovery_window_ms",
+    }),
+])
+def test_a_mirrored_struct_exposes_every_field_it_should(cls, fields):
+    """These classes mirror a C++ struct field for field, so a missing name is a gap."""
+    assert {a for a in dir(cls) if not a.startswith("_")} == fields
+
+
+def test_temporal_roi_switch_and_patience_round_trip():
+    """§13's switch reaches C++ and comes back, rather than being accepted and dropped."""
+    cfg = config()
+    assert cfg.settings.temporal.enabled is True   # the library's default, not Python's
+    cfg.settings.temporal.enabled = False
+    cfg.settings.temporal.max_missing_frames = 7
+    cfg.settings.temporal.max_hold_sec = 1.5
+    assert cfg.settings.temporal.enabled is False
+    assert cfg.settings.temporal.max_missing_frames == 7
+    assert cfg.settings.temporal.max_hold_sec == pytest.approx(1.5)
+    # And the encoder takes it: a value that round-trips through a struct nobody reads
+    # would pass the assertions above and mean nothing.
+    assert encode(cfg, frames=4)
+
+
+def test_statistics_expose_the_degradations_section_50_requires():
+    """§50 forbids a silent degradation, and these are how two of them become visible."""
+    cfg = config()
+    with sve.SmartVideoEncoder(cfg) as enc:
+        for i in range(4):
+            frame = sve.frame_from_planes(planes(16 + i * 5), sve.PixelFormat.YUV420P,
+                                          WIDTH, HEIGHT)
+            meta = sve.FrameMetadata()
+            meta.timestamp = sve.MediaTimestamp(i, sve.Rational(1, 25))
+            assert enc.submit_frame(frame, meta)
+            enc.receive_available()
+        enc.flush()
+        while not enc.at_end:
+            enc.receive_available()
+        stats = enc.get_statistics()
+
+    # Zero on this path, and readable, which is the point: a counter a caller cannot read
+    # reports nothing whatever its value.
+    assert stats.frames_quantiser_clamped == 0
+    assert stats.cpu_h265_target_guard is False
+    assert stats.keyframes_requested == 0
+    # Under Backend.AUTO this is the only way to find out what actually opened.
+    assert "libx264" in stats.backend_name
+    assert stats.roi_lag_measured is False   # no tracked boxes were supplied
+
+
+def test_the_quality_table_is_configurable_without_touching_a_private_module():
+    """§11's per-kind table, reachable as sve.KindQuality rather than sve._core.KindQuality."""
+    cfg = config()
+    plate = sve.KindQuality()
+    plate.qp_delta = -8
+    plate.pad = 0.05
+    cfg.settings.quality.kinds = {"plate": plate}
+    cfg.settings.quality.background_qp_delta = 12
+    assert cfg.settings.quality.kinds["plate"].qp_delta == -8
+
+    box = sve.BoundingBox()
+    box.kind = "plate"
+    box.x, box.y, box.width, box.height = 0.4, 0.4, 0.2, 0.15
+    with sve.SmartVideoEncoder(cfg) as enc:
+        frame = sve.frame_from_planes(planes(), sve.PixelFormat.YUV420P, WIDTH, HEIGHT)
+        meta = sve.FrameMetadata()
+        meta.timestamp = sve.MediaTimestamp(0, sve.Rational(1, 25))
+        meta.objects = [box]
+        assert enc.submit_frame(frame, meta)
+        enc.flush()
+        while not enc.at_end:
+            enc.receive_available()
+        assert enc.get_statistics().frames_submitted == 1
+
+
+def test_a_polygon_and_its_track_evidence_survive_the_round_trip():
+    """§9's outline and §11's track factors, neither of which Python could reach before."""
+    box = sve.BoundingBox()
+    box.kind = "plate"
+    box.x, box.y, box.width, box.height = 0.3, 0.3, 0.2, 0.1
+    outline = []
+    for x, y in ((0.30, 0.30), (0.50, 0.30), (0.50, 0.40), (0.30, 0.40)):
+        p = sve.Point()
+        p.x, p.y = x, y
+        outline.append(p)
+    box.polygon = outline
+    assert len(box.polygon) == 4
+    assert box.polygon[1].x == pytest.approx(0.50)
+
+    evidence = sve.TrackEvidence()
+    evidence.present = True
+    evidence.age_sec = 2.5
+    evidence.speed = 0.07
+    evidence.sample_count = 12
+    box.track = evidence
+    assert box.track.present and box.track.sample_count == 12
+
+    # And an encode takes the box with its outline: three points or more make the encoder
+    # protect the polygon instead of the axis-aligned box (§9), so this is not decoration.
+    cfg = config()
+    with sve.SmartVideoEncoder(cfg) as enc:
+        frame = sve.frame_from_planes(planes(), sve.PixelFormat.YUV420P, WIDTH, HEIGHT)
+        meta = sve.FrameMetadata()
+        meta.timestamp = sve.MediaTimestamp(0, sve.Rational(1, 25))
+        meta.objects = [box]
+        assert enc.submit_frame(frame, meta)
+        enc.flush()
+        while not enc.at_end:
+            enc.receive_available()
+        assert enc.get_statistics().frames_submitted == 1
+
+
+# --- the stubs (§58.10.9) ---------------------------------------------------
+
+
+def test_the_type_stubs_describe_the_module_that_is_actually_there():
+    """py.typed claims this package is typed; this is what keeps the claim true.
+
+    The surface is a compiled extension, so a type checker reading the .so finds Any. The
+    stubs are hand-written -- pybind11 emits none and this project carries no stub generator
+    on purpose -- which means they can drift in two directions, and both are checked here: a
+    binding with no stub leaves a caller with Any while the package promises otherwise, and
+    a stub for a binding that no longer exists promises something that will fail at runtime.
+
+    What this does not check is whether the types are *right*. `crf: int` being an int is a
+    human claim, the same as any comment. Completeness is the part a machine can hold.
+    """
+    import ast
+    import pathlib
+
+    from smart_video_encoder import _core
+
+    stub_path = pathlib.Path(_core.__file__).with_name("_core.pyi")
+    assert stub_path.is_file(), "the package ships py.typed but no stubs"
+    tree = ast.parse(stub_path.read_text(encoding="utf-8"))
+
+    declared_top: set[str] = set()
+    declared_members: dict[str, set[str]] = {}
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            declared_top.add(node.name)
+            names = set()
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and not item.name.startswith("_"):
+                    names.add(item.name)
+                elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                    if not item.target.id.startswith("_"):
+                        names.add(item.target.id)
+            declared_members[node.name] = names
+        elif isinstance(node, ast.FunctionDef):
+            declared_top.add(node.name)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            declared_top.add(node.target.id)
+
+    actual_top = {n for n in dir(_core) if not n.startswith("_")} | {"__version__"}
+    assert actual_top - declared_top == set(), "bound but not in the stubs"
+    assert declared_top - actual_top == set(), "in the stubs but not bound"
+
+    for name, declared in sorted(declared_members.items()):
+        cls = getattr(_core, name)
+        if isinstance(cls, type) and issubclass(cls, BaseException):
+            # Not comparable this way, and the reason is worth writing down: status_code and
+            # status_name are set on the instance by the translator when the exception is
+            # raised, so they are not on the class and dir() cannot see them. The stub
+            # declares them anyway, which is how a stub says "instance attribute" -- and
+            # what makes that declaration true is the test below, which raises one and looks.
+            continue
+        actual = {a for a in dir(cls) if not a.startswith("_")}
+        assert actual == declared, f"{name}: stub and binding disagree"
+
+
+def test_a_raised_error_carries_the_status_code_the_stubs_promise():
+    """§58.6: the C++ answer survives the crossing instead of becoming a message string."""
+    cfg = config()
+    cfg.input.width = cfg.input.height = 0
+    with pytest.raises(sve.InvalidArgumentError) as caught:
+        sve.SmartVideoEncoder(cfg)
+    err = caught.value
+    # Declared on the base class in _core.pyi, set on the instance by the translator. The
+    # stub test cannot see instance attributes, so this is what holds that declaration up.
+    assert isinstance(err.status_code, int)
+    assert err.status_code == sve.StatusCode.INVALID_ARGUMENT.value
+    assert err.status_name == sve.status_code_name(sve.StatusCode.INVALID_ARGUMENT)
+    assert str(err)   # and the original message is not lost either

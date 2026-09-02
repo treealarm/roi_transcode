@@ -28,6 +28,27 @@ void register_metadata(py::module_& m)
         .def_readwrite("time_base", &sve::MediaTimestamp::time_base)
         .def("valid", &sve::MediaTimestamp::valid);
 
+    // §58.3 lists `Polygon` among the mandatory bindings. There is no Polygon type in the
+    // C++ library: an outline is a std::vector<Point> on the box, and inventing a wrapper
+    // class here would give Python a type the library does not have and that nothing on the
+    // C++ side could be handed. So the point is bound and the outline is a list of them,
+    // which is the same thing under the name the library actually uses.
+    py::class_<sve::Point>(m, "Point", "One vertex of an outline, normalized 0..1 (§9).")
+        .def(py::init<>())
+        .def_readwrite("x", &sve::Point::x)
+        .def_readwrite("y", &sve::Point::y);
+
+    // §11's last two factors read off a track. Supplied rather than computed on this path:
+    // a caller pushing frames has whatever its own tracker knows, and leaving `present`
+    // false is how it says it has none.
+    py::class_<sve::TrackEvidence>(m, "TrackEvidence",
+        "What a track says about an object beyond where it is (§11).")
+        .def(py::init<>())
+        .def_readwrite("present", &sve::TrackEvidence::present)
+        .def_readwrite("age_sec", &sve::TrackEvidence::age_sec)
+        .def_readwrite("speed", &sve::TrackEvidence::speed)
+        .def_readwrite("sample_count", &sve::TrackEvidence::sample_count);
+
     py::class_<sve::Box>(m, "BoundingBox",
         "One detected object, in normalized frame coordinates (§9).")
         .def(py::init<>())
@@ -39,7 +60,13 @@ void register_metadata(py::module_& m)
         .def_readwrite("height", &sve::Box::height)
         .def_readwrite("track_id", &sve::Box::track_id)
         .def_readwrite("confidence", &sve::Box::confidence)
-        .def_readwrite("label", &sve::Box::label);
+        .def_readwrite("label", &sve::Box::label)
+        // Both absent until 2026-09-02, and both are decisions the encoder makes: with three
+        // or more points the polygon is protected instead of the axis-aligned box, and the
+        // track evidence feeds two of §11's five factors. A Python caller could reach
+        // neither, so the two paths were not the same encoder.
+        .def_readwrite("polygon", &sve::Box::polygon)
+        .def_readwrite("track", &sve::Box::track);
 
     // FrameMetadata with owned boxes. The C++ struct holds a span into the caller's
     // storage; Python has no such storage to point at, so this owns it and hands the
