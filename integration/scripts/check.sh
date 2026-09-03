@@ -1378,6 +1378,31 @@ else
     fi
 fi
 
+# A clip is stored in one orientation and displayed in another, and the difference lives in
+# the stream's display matrix. The decoder hands over the stored pixels, so an application
+# that drops the matrix writes a file that plays rotated against its source -- which is what
+# roi-transcode did until 2026-09-03. No fixture in this repository has a display matrix
+# (synthetic clips are written the way they are shown), so this makes one: ffmpeg can attach
+# a rotation to a stream copy without touching a pixel.
+step "a rotated source stays rotated (display matrix)"
+if ! ffmpeg -v error -y -display_rotation 90 -i "$SRC" -c copy "${WORK}/rotated_src.mp4" \
+        >/dev/null 2>&1; then
+    skip "this ffmpeg cannot attach a display matrix to a stream copy"
+else
+    src_rotation=$(probe stream_side_data=rotation "${WORK}/rotated_src.mp4" | head -1)
+    if [[ "$src_rotation" != "90" ]]; then
+        skip "the rotated fixture did not come out rotated (got '${src_rotation}')"
+    elif ! "${BUILD}/roi-transcode" --in "${WORK}/rotated_src.mp4" \
+            --roi "${ROOT}/testdata/synth_roi.json" --out "${WORK}/rotated_out.mp4" \
+            --encoder x264direct --codec h264 --crf 30 --gop 1 \
+            >"${WORK}/rotated.log" 2>&1; then
+        fail "the rotated clip did not transcode (see ${WORK}/rotated.log)"
+    else
+        assert_eq "the output keeps the source's rotation" \
+            "$(probe stream_side_data=rotation "${WORK}/rotated_out.mp4" | head -1)" "90"
+    fi
+fi
+
 # §16's two numbers, on the only path in this build that has an outer loop to measure.
 #
 # The loop runs when the backend has no native bitrate control of its own; on this project

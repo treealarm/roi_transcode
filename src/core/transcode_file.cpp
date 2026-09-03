@@ -94,6 +94,14 @@ Report transcode_file(const std::string& input_path,
         file_sink.declare_audio(
             in.p->streams[aindex]->codecpar, in.p->streams[aindex]->time_base);
     }
+    // The picture is stored in one orientation and displayed in another; the decoder gives
+    // us the stored one, so the matrix has to travel with it or the transcode comes out
+    // rotated against its source.
+    if (const AVPacketSideData* rotation = av_packet_side_data_get(
+            in_v->codecpar->coded_side_data, in_v->codecpar->nb_coded_side_data,
+            AV_PKT_DATA_DISPLAYMATRIX)) {
+        file_sink.declare_display_matrix(rotation->data, rotation->size);
+    }
 
     EncoderConfig cfg;
     cfg.input.width = dec.p->width;

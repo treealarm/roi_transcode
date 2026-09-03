@@ -7,6 +7,7 @@
 #include <utility>
 
 extern "C" {
+#include <libavcodec/packet.h>
 #include <libavutil/dict.h>
 }
 namespace sve {
@@ -24,6 +25,14 @@ void FileMuxSink::declare_audio(const AVCodecParameters* par, AVRational time_ba
 {
     m_audio_par = par;
     m_audio_tb = time_base;
+}
+
+void FileMuxSink::declare_display_matrix(const uint8_t* data, std::size_t size)
+{
+    if (data == nullptr || size == 0) {
+        return;
+    }
+    m_display_matrix.assign(data, data + size);
 }
 
 void FileMuxSink::begin(const CodecParameters& params)
@@ -47,6 +56,17 @@ void FileMuxSink::begin(const CodecParameters& params)
         m_video->codecpar->extradata_size = static_cast<int>(params.extradata.size());
     }
     m_video->time_base = AVRational{params.time_base.num, params.time_base.den};
+    if (!m_display_matrix.empty()) {
+        // Carried through as opaque bytes: this is the input's own matrix, and re-deriving
+        // an angle from it and a matrix from the angle would lose a flip.
+        AVPacketSideData* sd = av_packet_side_data_new(&m_video->codecpar->coded_side_data,
+            &m_video->codecpar->nb_coded_side_data, AV_PKT_DATA_DISPLAYMATRIX,
+            m_display_matrix.size(), 0);
+        if (sd == nullptr) {
+            roiav::fail("allocate display matrix side data");
+        }
+        std::memcpy(sd->data, m_display_matrix.data(), m_display_matrix.size());
+    }
     finish_begin();
 }
 

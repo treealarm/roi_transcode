@@ -52,10 +52,19 @@ using namespace sve;
 
 namespace {
 
-/// Big enough that the encoder does real work per frame, small enough that an hour of this
-/// costs an hour of one core rather than of the machine.
-constexpr int32_t kWidth = 320;
-constexpr int32_t kHeight = 240;
+/// The default frame size: big enough that the encoder does real work per frame, small
+/// enough that an hour of this costs an hour of one core rather than of the machine.
+///
+/// Overridable since 2026-09-03, because §43's memory criterion is the one thing here that
+/// scales with the frame: a leak of one buffer a cycle is 115 kB at 320x240 and 2.3 MB at
+/// 1440x1440, and only one of those is visible against the noise of an allocator. Real
+/// deployments run the second size -- the clips this was checked against are 1440x1440 --
+/// so the driver has to be able to.
+constexpr int32_t kDefaultWidth = 320;
+constexpr int32_t kDefaultHeight = 240;
+/// Both dimensions must divide by this: chroma is half resolution in each direction, and an
+/// odd side would make the plane sizes below wrong rather than merely unusual.
+constexpr int32_t kSizeMultiple = 2;
 
 /// Frames per cycle. A batch rather than a single frame so that lookahead, reordering and
 /// the drain path are all exercised inside one open.
@@ -111,6 +120,8 @@ constexpr int64_t kMinCyclesToGateMemory = 2000;
 
 struct Options {
     int seconds = kDefaultSeconds;
+    int32_t width = kDefaultWidth;
+    int32_t height = kDefaultHeight;
     int64_t frames_per_cycle = kDefaultFramesPerCycle;
     Backend encoder = Backend::X264Direct;
     BackendSelection selection;
@@ -165,18 +176,25 @@ std::size_t resident_bytes()
 }
 
 struct Pixels {
-    std::vector<uint8_t> y = std::vector<uint8_t>(kWidth * kHeight);
-    std::vector<uint8_t> u = std::vector<uint8_t>(kWidth * kHeight / 4, 128);
-    std::vector<uint8_t> v = std::vector<uint8_t>(kWidth * kHeight / 4, 128);
+    int32_t width = 0;
+    int32_t height = 0;
+    std::vector<uint8_t> y;
+    std::vector<uint8_t> u;
+    std::vector<uint8_t> v;
 
     /// Moving content, because a flat frame compresses to nothing and would soak the drain
     /// path rather than the encoder.
-    explicit Pixels(int64_t n)
+    Pixels(int64_t n, int32_t w, int32_t h)
+        : width(w)
+        , height(h)
+        , y(static_cast<std::size_t>(w) * h)
+        , u(static_cast<std::size_t>(w) * h / 4, 128)
+        , v(static_cast<std::size_t>(w) * h / 4, 128)
     {
-        for (int32_t row = 0; row < kHeight; ++row) {
-            for (int32_t col = 0; col < kWidth; ++col) {
+        for (int32_t row = 0; row < height; ++row) {
+            for (int32_t col = 0; col < width; ++col) {
                 const bool lit = ((col + static_cast<int32_t>(n) * 5) / 16 + row / 16) % 2 == 0;
-                y[static_cast<std::size_t>(row) * kWidth + col] = lit ? 210 : 45;
+                y[static_cast<std::size_t>(row) * width + col] = lit ? 210 : 45;
             }
         }
     }
@@ -185,8 +203,8 @@ struct Pixels {
 EncoderConfig config_for(const Options& options, SidecarSink sink)
 {
     EncoderConfig cfg;
-    cfg.input.width = kWidth;
-    cfg.input.height = kHeight;
+    cfg.input.width = options.width;
+    cfg.input.height = options.height;
     cfg.input.frame_rate = Rational{25, 1};
     cfg.input.pixel_format = PixelFormat::YUV420P;
     cfg.settings.encoder = options.encoder;
@@ -262,15 +280,15 @@ void run_cycle(const Options& options, Findings& out, std::atomic<int64_t>& hear
     };
 
     for (int64_t i = 0; i < options.frames_per_cycle; ++i) {
-        auto pixels = std::make_shared<Pixels>(i);
+        auto pixels = std::make_shared<Pixels>(i, options.width, options.height);
         RawFrameView view;
-        view.format.width = kWidth;
-        view.format.height = kHeight;
+        view.format.width = pixels->width;
+        view.format.height = pixels->height;
         view.format.pixel_format = PixelFormat::YUV420P;
         view.plane_count = 3;
-        view.planes[0] = {pixels->y.data(), kWidth, pixels->y.size()};
-        view.planes[1] = {pixels->u.data(), kWidth / 2, pixels->u.size()};
-        view.planes[2] = {pixels->v.data(), kWidth / 2, pixels->v.size()};
+        view.planes[0] = {pixels->y.data(), pixels->width, pixels->y.size()};
+        view.planes[1] = {pixels->u.data(), pixels->width / 2, pixels->u.size()};
+        view.planes[2] = {pixels->v.data(), pixels->width / 2, pixels->v.size()};
         view.timestamp = MediaTimestamp{i, Rational{1, 25}};
         view.owner = pixels;
 
@@ -423,6 +441,7 @@ int usage()
 {
     std::fprintf(stderr,
         "Usage: sve-soak [--seconds N] [--encoder NAME] [--codec h264|h265] [--frames N]\n"
+        "                [--width N] [--height N]\n"
         "\n"
         "Continuous encoding for N seconds, opening and closing the encoder every batch,\n"
         "and the six checks of TZ §43.1 over it. Prints §43.2's five counts and exits 0\n"
@@ -446,6 +465,10 @@ int main(int argc, char** argv)
         };
         if (std::strcmp(a, "--seconds") == 0) {
             options.seconds = std::atoi(need("--seconds"));
+        } else if (std::strcmp(a, "--width") == 0) {
+            options.width = std::atoi(need("--width"));
+        } else if (std::strcmp(a, "--height") == 0) {
+            options.height = std::atoi(need("--height"));
         } else if (std::strcmp(a, "--frames") == 0) {
             options.frames_per_cycle = std::atoll(need("--frames"));
         } else if (std::strcmp(a, "--codec") == 0) {
@@ -465,6 +488,13 @@ int main(int argc, char** argv)
         }
     }
     if (options.seconds <= 0 || options.frames_per_cycle <= 0) {
+        return usage();
+    }
+    if (options.width <= 0 || options.height <= 0
+        || options.width % kSizeMultiple != 0 || options.height % kSizeMultiple != 0) {
+        std::fprintf(stderr,
+            "sve-soak: --width and --height must be positive and divide by %d\n",
+            kSizeMultiple);
         return usage();
     }
 
