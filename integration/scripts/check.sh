@@ -1384,6 +1384,54 @@ else
     fi
 fi
 
+# AT-009, §32's ten-bit functional test: "для каждого backend с capability main10 --
+# encode/decode P010/Main10 (H.265), 300 frames; frame count, monotonic PTS, EOS; отсутствие
+# capability -- documented SKIP с capability evidence".
+#
+# Never run until 2026-09-03, and the first run found that a Main10 source was being encoded
+# as eight-bit: the example application never told the encoder what depth its input was, so
+# the library's ten-bit branch could not fire and every frame was silently converted down.
+#
+# The fixture is built here rather than committed: a ten-bit clip is a transcode of the
+# synthetic one, and generating it costs less than carrying it.
+step "ten-bit encode, end to end (§15.3, AT-009)"
+tenbit_src="${WORK}/ten_src.mp4"
+if ! ffmpeg -v error -y -i "$SRC" -pix_fmt yuv420p10le -c:v libx265 \
+        -x265-params log-level=none -crf 20 "$tenbit_src" >/dev/null 2>&1; then
+    skip "this ffmpeg cannot produce a ten-bit fixture"
+else
+    # The capability evidence AT-009 asks for, read from the library rather than assumed.
+    tenbit_backend=""
+    if "${LIBBUILD}/sve-capabilities" --json 2>/dev/null \
+            | grep -q '"main10": true' && [[ -e /dev/dri/renderD128 ]] \
+            && source "${ROOT}/integration/scripts/qsv-env.sh" 2>/dev/null; then
+        tenbit_backend="qsv"
+    fi
+    if [[ -z "$tenbit_backend" ]]; then
+        skip "no backend in this build reports main10 (sve-capabilities: none) -- AT-009 N/A"
+    elif ! "${BUILD}/roi-transcode" --in "$tenbit_src" \
+            --roi "${ROOT}/testdata/synth_roi.json" --out "${WORK}/ten_out.mp4" \
+            --encoder "$tenbit_backend" --codec h265 --crf 28 --gop 50 \
+            >"${WORK}/ten.log" 2>&1; then
+        fail "the ten-bit encode did not complete (see ${WORK}/ten.log)"
+    else
+        # Main10 and ten bits per sample, not merely "it produced a file". An eight-bit
+        # file with the right frame count is exactly what this used to produce.
+        assert_eq "the output is Main 10" \
+            "$(probe stream=profile "${WORK}/ten_out.mp4")" "Main 10"
+        assert_eq "the output carries ten bits a sample" \
+            "$(probe stream=pix_fmt "${WORK}/ten_out.mp4")" "yuv420p10le"
+        assert_eq "every frame came out (§32: 300)" \
+            "$(count_packets "${WORK}/ten_out.mp4")" "300"
+        # Monotonic PTS and a real end of stream: the packets are read in presentation
+        # order, and a stream that stopped early would have fewer of them than frames.
+        ten_pts_ok=$(ffprobe -v error -select_streams v:0 -show_entries packet=pts \
+            -of csv=p=0 "${WORK}/ten_out.mp4" \
+            | awk 'BEGIN{prev=-1; bad=0} {if ($1 <= prev) bad++; prev=$1} END{print bad}')
+        assert_eq "PTS is monotonic" "$ten_pts_ok" "0"
+    fi
+fi
+
 # A clip is stored in one orientation and displayed in another, and the difference lives in
 # the stream's display matrix. The decoder hands over the stored pixels, so an application
 # that drops the matrix writes a file that plays rotated against its source -- which is what

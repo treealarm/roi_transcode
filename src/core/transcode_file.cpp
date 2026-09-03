@@ -1,11 +1,16 @@
 #include "sve/sve.h"
 
 #include "av_raii.h"
+#include "backend/common/av_pixel_format.h"
 #include "codec_id.h"
 #include "file_mux_sink.h"
 #include "temporal_roi.h"
 #include "sve/encoder.h"
 #include "sve/frame.h"
+
+extern "C" {
+#include <libavutil/pixdesc.h>
+}
 
 #include <cstdio>
 #include <filesystem>
@@ -16,6 +21,30 @@
 namespace sve {
 
 namespace {
+
+/// What to tell the encoder its input is.
+///
+/// Left unset until 2026-09-03, so it stayed at the default and a ten-bit source was encoded
+/// as if it were eight: measured on a Main10 clip through hevc_qsv, which reports main10 and
+/// still produced an 8-bit Main file with every frame counted as converted. §15.3 makes the
+/// ten-bit profile mandatory for exactly those backends.
+///
+/// The decoder's own format when the library has a name for it. Otherwise the depth is what
+/// matters: ten bits become P010, §17's ten-bit input format, because what the encoder needs
+/// here is the depth and the profile that follows from it -- the pixels arrive as an AVFrame
+/// and the backend converts the layout if it must, counting it as §21 requires.
+PixelFormat input_format_of(const AVCodecContext& dec)
+{
+    const PixelFormat named = from_av_pix_fmt(dec.pix_fmt);
+    if (named != PixelFormat::Unknown) {
+        return named;
+    }
+    const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(dec.pix_fmt);
+    if (desc != nullptr && desc->nb_components > 0 && desc->comp[0].depth > 8) {
+        return PixelFormat::P010;
+    }
+    return PixelFormat::YUV420P;
+}
 
 /// Codec::SameAsSource, answered from the input. Anything that is neither H.264 nor HEVC becomes
 /// H.264: it is the codec every player handles, and guessing a niche one back at the caller would
@@ -106,6 +135,7 @@ Report transcode_file(const std::string& input_path,
     EncoderConfig cfg;
     cfg.input.width = dec.p->width;
     cfg.input.height = dec.p->height;
+    cfg.input.pixel_format = input_format_of(*dec.p);
     cfg.input.frame_rate = Rational{fps.num, fps.den};
     // One tick per frame, said rather than left to a default. InputVideoFormat's own
     // default is §8.3's 1/90000, which is right for a pushed source carrying its own clock
