@@ -351,6 +351,25 @@ public:
         return out;
     }
 
+    /// Read back from the encoder, for the same reason the block size above is: a preset
+    /// moves several of these, and what a calibration profile has to pin is what ran.
+    EffectiveSettings GetEffectiveSettings(const BackendSession& session) const override
+    {
+        const X265Session& s = static_cast<const X265Session&>(session);
+        EffectiveSettings out;
+        if (s.enc == nullptr) {
+            return out;
+        }
+        x265_param p{};
+        x265_encoder_parameters(s.enc, &p);
+        out.b_frames = p.bframes;
+        out.lookahead_frames = p.lookaheadDepth;
+        out.spatial_aq = p.rc.aqMode != X265_AQ_NONE;
+        // cu-tree is x265's spelling of the same idea as x264's mb-tree.
+        out.temporal_aq = p.rc.cuTree != 0;
+        return out;
+    }
+
     BackendStatistics Statistics(const BackendSession&) const override
     {
         // Nothing is converted here: anything but YUV420P is refused rather than converted

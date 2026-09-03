@@ -9,6 +9,7 @@
 // region limit at all because it works from a per-macroblock offset map.
 
 #include <cstdint>
+#include <optional>
 
 namespace sve {
 
@@ -87,5 +88,35 @@ inline int32_t qp_map_block(const EncoderCapabilities& c)
     }
     return static_cast<int32_t>(c.qp_map_block_height);
 }
+
+/// What an opened encoder actually settled on -- the other half of EncoderCapabilities.
+///
+/// Capabilities say what a backend could do before it opened; this says what it did. §38's
+/// calibration profile prints `b_frames`, `lookahead`, `spatial_aq` and `temporal_aq`, and
+/// until 2026-09-03 no interface asked for them, so the committed profiles left the four
+/// fields out rather than write a plausible number nobody chose. A backend settles them
+/// itself and not always the way the caller might assume -- libx264 forces adaptive
+/// quantisation on regardless, because its per-macroblock offsets do nothing without it,
+/// which is exactly the kind of thing a calibration profile exists to pin.
+///
+/// Every field is optional, and absent means "this backend cannot say" rather than "off".
+/// A calibration that recorded a default where the answer was unknown would be pinning our
+/// assumption instead of the encoder's behaviour, and the next driver release would move it
+/// silently.
+struct EffectiveSettings {
+    /// Consecutive B-frames the encoder will use. 0 is a real answer (§15.1's primary
+    /// profile asks for exactly that); nullopt means it was not asked or not answered.
+    std::optional<int32_t> b_frames;
+
+    /// Lookahead depth in frames, 0 when the encoder decides frame by frame.
+    std::optional<int32_t> lookahead_frames;
+
+    /// Quantiser varied within a frame by local detail.
+    std::optional<bool> spatial_aq;
+
+    /// Quantiser varied by how much later frames will refer to this one -- x264's mb-tree
+    /// and x265's cu-tree are this.
+    std::optional<bool> temporal_aq;
+};
 
 } // namespace sve

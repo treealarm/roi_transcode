@@ -1140,7 +1140,13 @@ if [[ -d "${PLUGINS}/bad_abi" ]]; then
     else
         fail "the encode with plugin directories produced nothing"
     fi
-    if grep -q 'abi version 1001 does not match' "${WORK}/plugins.log"; then
+    # The number the bad plugin carries is derived, not written here: tests/plugins builds it
+    # as kBackendPluginAbiVersion + 1000, and a literal in this script is the same value in a
+    # second place. It was one, and the step broke on the first bump of the header -- which is
+    # the failure this kind of duplication always has, one commit after the copy is made.
+    plugin_abi=$(sed -n 's/.*kBackendPluginAbiVersion = \([0-9][0-9]*\);.*/\1/p' \
+        "${ROOT}/include/sve/backend_plugin.h" | head -1)
+    if grep -q "abi version $((plugin_abi + 1000)) does not match" "${WORK}/plugins.log"; then
         pass "a plugin from another abi is refused by version"
     else
         fail "the bad-abi plugin was not refused by version"

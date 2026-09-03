@@ -28,6 +28,7 @@ from ._core import (  # noqa: F401
     BoundingBox,
     Codec,
     EncodedPacket,
+    EffectiveSettings,
     EncoderCapabilities,
     EncoderConfig,
     EncoderState,

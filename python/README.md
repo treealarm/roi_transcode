@@ -59,6 +59,7 @@ they cannot describe a surface that is not there.
 | `close()` | `None` | idempotent |
 | `get_capabilities()` | `EncoderCapabilities` | what the backend that opened can do |
 | `get_statistics()` | `EncoderStatistics` | counts, degradations, which backend ran |
+| `get_effective_settings()` | `EffectiveSettings` | what the backend settled on (§15.1) |
 
 The GIL is released across `submit_frame`, `receive_available` and `flush` (§58.5), so
 another Python thread runs while the encoder works. One encoder is driven by one thread at a

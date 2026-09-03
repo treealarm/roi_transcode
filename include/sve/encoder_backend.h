@@ -272,6 +272,17 @@ public:
     /// Some backends open successfully and only fail on the first frame. Those ask for a
     /// probe: the caller encodes one throwaway frame, and reopens if it worked.
     virtual bool NeedsProbe() const { return false; }
+
+    /// What this session actually settled on, for §38's calibration profile.
+    ///
+    /// Defaulted rather than pure: a backend that cannot read its own settings back says
+    /// nothing, and nothing is a truthful answer here -- every field is optional and absent
+    /// means "cannot say". A pure virtual would have forced every backend to invent one.
+    virtual EffectiveSettings GetEffectiveSettings(const BackendSession& session) const
+    {
+        (void)session;
+        return {};
+    }
 };
 
 /// A backend, borrowed. Never null, never owned, and outliving any caller: the backends are

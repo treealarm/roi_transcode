@@ -40,7 +40,12 @@ class IEncoderBackend;
 /// Bumped whenever a field moves, changes meaning, or is added, and checked before any
 /// other field is read. It is the first field for that reason: a descriptor from a build
 /// that disagrees with this one about the layout must still be able to say so.
-inline constexpr uint32_t kBackendPluginAbiVersion = 1;
+///
+/// It guards the interface behind the descriptor as well, not only the descriptor's own
+/// fields. What a plugin hands over is an IEncoderBackend, so a virtual added to that class
+/// changes the table a plugin built against the older header produces -- a mismatch that no
+/// field of this struct would show. Version 2 is that: `GetEffectiveSettings` (2026-09-03).
+inline constexpr uint32_t kBackendPluginAbiVersion = 2;
 
 /// Hands over the component's backend, or null if it cannot be had.
 ///

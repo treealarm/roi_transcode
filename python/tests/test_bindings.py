@@ -304,7 +304,7 @@ def test_the_public_surface_is_the_one_we_intend():
         "PixelFormat", "SidecarFormat", "EncoderState", "LogLevel",
         "BoundingBox", "Point", "TrackEvidence", "FrameMetadata", "MediaTimestamp",
         "Rational", "Frame", "EncodedPacket",
-        "EncoderCapabilities", "EncoderStatistics",
+        "EncoderCapabilities", "EncoderStatistics", "EffectiveSettings",
         # Free functions and module-level values.
         "available_backends", "backend_name", "get_capabilities", "status_code_name",
         "log_level_name", "exception_for_status_code",

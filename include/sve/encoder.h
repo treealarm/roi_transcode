@@ -241,6 +241,12 @@ public:
     Status GetCodecParameters(CodecParameters* parameters) const;
 
     EncoderCapabilities GetCapabilities() const;
+
+    /// What the backend that opened actually settled on -- §15.1's b_frames, lookahead and
+    /// the two adaptive-quantisation switches, as they ended up rather than as they were
+    /// asked for. §38's calibration profile pins these; a field left unset means the
+    /// backend cannot report it, which is not the same as it being off.
+    EffectiveSettings GetEffectiveSettings() const;
     EncoderStatistics GetStatistics() const;
     EncoderState State() const;
 

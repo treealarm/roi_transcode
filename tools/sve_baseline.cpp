@@ -43,6 +43,7 @@
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -177,6 +178,18 @@ void usage()
         "\n"
         "Exit codes: 0 wrote a manifest, 2 bad command line, 3 this build cannot version\n"
         "this backend's encoder, 4 this machine cannot open it.\n");
+}
+
+/// A field the backend could report, or the word that says it could not. §38 pins what ran,
+/// and a missing answer written as a default would pin our assumption instead.
+std::string number_or_unknown(const std::optional<int32_t>& value)
+{
+    return value ? std::to_string(*value) : std::string("unknown");
+}
+
+std::string flag_or_unknown(const std::optional<bool>& value)
+{
+    return value ? std::string(*value ? "true" : "false") : std::string("unknown");
 }
 
 } // namespace
@@ -342,6 +355,9 @@ int main(int argc, char** argv)
     }
 
     const sve::EncoderStatistics stats = enc->GetStatistics();
+    // Asked of the encoder while it is still open: these come from the backend's own
+    // session, and after the unique_ptr goes there is nothing left to ask.
+    const sve::EffectiveSettings effective = enc->GetEffectiveSettings();
     if (stats.packets_received == 0) {
         std::fprintf(stderr, "%s produced no packets; nothing to pin a baseline to\n",
             opt.backend.c_str());
@@ -383,12 +399,14 @@ int main(int argc, char** argv)
         "  gop_size: %d\n"
         "  quality_policy: %s\n"
         "  fallback_policy: %s\n"
-        "  # §38's example also prints b_frames, lookahead, spatial_aq and temporal_aq.\n"
-        "  # They are absent because nothing can report them: each backend configures them\n"
-        "  # itself -- x264 forces aq on, because its quant_offsets do not work without it --\n"
-        "  # and no public interface asks a backend what it settled on. Pinning them needs\n"
-        "  # that query first; docs/STATUS.md records it under §38 rather than writing a\n"
-        "  # plausible value here that nobody chose.\n"
+        "  # The four §15.1 fields, read back from the encoder rather than from the\n"
+        "  # request: a backend settles them itself, and x264 forces adaptive quantisation\n"
+        "  # on whatever the caller said, because its quant_offsets do nothing without it.\n"
+        "  # \"unknown\" means this backend cannot report the field, which is not \"off\".\n"
+        "  b_frames: %s\n"
+        "  lookahead: %s\n"
+        "  spatial_aq: %s\n"
+        "  temporal_aq: %s\n"
         "\n"
         "input:\n"
         "  width: %d\n"
@@ -402,6 +420,10 @@ int main(int argc, char** argv)
         rate_control, static_cast<unsigned long long>(target_bitrate), gop,
         sve::quality_policy_name(cfg.settings.policy),
         sve::fallback_policy_name(cfg.settings.fallback),
+        number_or_unknown(effective.b_frames).c_str(),
+        number_or_unknown(effective.lookahead_frames).c_str(),
+        flag_or_unknown(effective.spatial_aq).c_str(),
+        flag_or_unknown(effective.temporal_aq).c_str(),
         opt.width, opt.height, opt.fps, points->resolution, bpppf);
     if (written < 0 || written >= static_cast<int>(sizeof(body))) {
         std::fprintf(stderr, "manifest does not fit; widen the buffer\n");

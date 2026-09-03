@@ -770,6 +770,11 @@ EncoderCapabilities SmartVideoEncoder::GetCapabilities() const
     return m_impl->encoder.capabilities();
 }
 
+EffectiveSettings SmartVideoEncoder::GetEffectiveSettings() const
+{
+    return m_impl->encoder.effective_settings();
+}
+
 EncoderState SmartVideoEncoder::State() const { return m_impl->state; }
 
 EncoderStatistics SmartVideoEncoder::GetStatistics() const

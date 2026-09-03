@@ -154,6 +154,11 @@ void register_encoder(py::module_& m)
         .def_property_readonly("at_end", [](Encoder& self) { return self.ended; },
             "True once the encoder has reported end of stream.")
 
+        .def("get_effective_settings", [](Encoder& self) {
+            return self.live().GetEffectiveSettings();
+        }, "What the backend that opened actually settled on (§15.1, §38). Fields that "
+           "are None are ones this backend cannot report.")
+
         .def("get_capabilities", [](Encoder& self) {
             return self.live().GetCapabilities();
         }, "What the backend that opened can do (§7.2).")

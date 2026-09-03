@@ -440,6 +440,27 @@ public:
         return BackendStatistics{static_cast<const X264Session&>(session).frames_converted, 0};
     }
 
+    /// Read back from the encoder rather than from the request, because x264 does not
+    /// always take what it was handed: it forces adaptive quantisation on whenever
+    /// quant_offsets are in play, and a preset can move the lookahead. §38 pins what ran.
+    EffectiveSettings GetEffectiveSettings(const BackendSession& session) const override
+    {
+        const X264Session& s = static_cast<const X264Session&>(session);
+        EffectiveSettings out;
+        if (s.enc == nullptr) {
+            return out;
+        }
+        x264_param_t p{};
+        x264_encoder_parameters(s.enc, &p);
+        out.b_frames = p.i_bframe;
+        out.lookahead_frames = p.rc.i_lookahead;
+        out.spatial_aq = p.rc.i_aq_mode != X264_AQ_NONE;
+        // mb-tree is x264's temporal adaptive quantisation: it spends bits where later
+        // frames will refer back, which is what §15.1 means by temporal_aq.
+        out.temporal_aq = p.rc.b_mb_tree != 0;
+        return out;
+    }
+
     // NeedsProbe stays at its default false: the probe exists because Ubuntu's older iHD
     // opens a QSV encoder and then returns empty packets. libx264 either opens or does not.
 

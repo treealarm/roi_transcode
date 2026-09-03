@@ -41,6 +41,9 @@ public:
     /// What the backend that actually opened is able to do. Only meaningful after open;
     /// before that there is no backend to ask.
     EncoderCapabilities capabilities() const;
+    /// What the opened backend settled on -- §38's calibration reads this. Empty before
+    /// open, and empty afterwards from a backend that cannot read its own settings back.
+    EffectiveSettings effective_settings() const;
     // Human-readable name of the backend that actually opened, codec included.
     const char* label() const;
     /// What the opened encoder produces -- codec, geometry, time base, extradata. Read

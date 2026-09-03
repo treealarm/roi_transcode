@@ -307,6 +307,17 @@ void register_config(py::module_& m)
         .def_readonly("roi_lag_p95_ms", &sve::EncoderStatistics::roi_lag_p95_ms)
         .def_readonly("roi_lag_p99_ms", &sve::EncoderStatistics::roi_lag_p99_ms)
         .def_readonly("roi_lag_acceptance", &sve::EncoderStatistics::roi_lag_acceptance);
+
+    // §38's other half of the capability story: what the encoder settled on, not what it
+    // could have done. Optional fields, and None means "this backend cannot say" -- which
+    // is not the same as the feature being off.
+    py::class_<sve::EffectiveSettings>(m, "EffectiveSettings",
+        "What the opened encoder actually configured (§15.1, §38).")
+        .def(py::init<>())
+        .def_readonly("b_frames", &sve::EffectiveSettings::b_frames)
+        .def_readonly("lookahead_frames", &sve::EffectiveSettings::lookahead_frames)
+        .def_readonly("spatial_aq", &sve::EffectiveSettings::spatial_aq)
+        .def_readonly("temporal_aq", &sve::EffectiveSettings::temporal_aq);
 }
 
 } // namespace sve_python

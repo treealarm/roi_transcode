@@ -103,6 +103,12 @@ EncoderCapabilities RoiEncoder::capabilities() const
         : EncoderCapabilities{};
 }
 
+EffectiveSettings RoiEncoder::effective_settings() const
+{
+    return m_backend && m_session ? m_backend->GetEffectiveSettings(*m_session)
+                                  : EffectiveSettings{};
+}
+
 Result<FrameBufferPtr> RoiEncoder::create_frame(MemoryType memory)
 {
     if (!m_backend || !m_session) {
