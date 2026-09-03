@@ -8,8 +8,13 @@ what to pick up next. A chat is not shared state and does not survive a new wind
 file is what does, and the repository's rule is that anything which must outlive a session
 gets written there and committed.
 
-The pair is deliberate and there are exactly two documents in `docs/`: the customer's
-specification, which says where we are going, and `STATUS.md`, which says where we are.
+The set is deliberate and there are exactly three documents in `docs/`: the customer's
+specification, which says where we are going; `STATUS.md`, which says where we are; and
+`tuning.md`, which says how to use what already works -- which settings suit which material,
+with a number and a date beside every recommendation. That third one is written in Russian
+for the same reason `STATUS.md` is: it is addressed to whoever operates the encoder, not to
+the codebase. Nothing but a measurement goes into it; a guess either becomes a measured line
+or stays in its "не измерено" section.
 
 When you finish a piece of work, update `STATUS.md` in the same commit — its "Где мы
 сейчас" and "Что дальше" sections above all. A stale status file is worse than none: the
