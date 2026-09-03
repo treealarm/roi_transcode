@@ -1378,6 +1378,54 @@ else
     fi
 fi
 
+# §16's two numbers, on the only path in this build that has an outer loop to measure.
+#
+# The loop runs when the backend has no native bitrate control of its own; on this project
+# that is qsv and vaapi for H.264. It is not reachable on CPU at all: x264 honours a target
+# itself, and for H.265 the §50 guard zeroes the target before the loop ever sees it. So a
+# machine with no Intel GPU cannot check this, and says so rather than passing quietly.
+#
+# The fixture is built here rather than committed: the crowd scene three times over, for
+# §16's own rule that the rolling criterion applies only from 30 seconds, and one small
+# protected region. The region size is the point -- with the scene's own roi.json, which
+# protects 38% of the frame including everything expensive in it, no background-only
+# actuator can reach any target, and what the step would then measure is the fixture.
+step "§16's bitrate acceptance, measured on the outer loop"
+scene_src="${ROOT}/testdata/scenes/crowded/source.mp4"
+if [[ ! -f "$scene_src" ]]; then
+    skip "§16 needs testdata/scenes (benchmarks/synthetic/make-scenes.py)"
+elif [[ ! -e /dev/dri/renderD128 ]] || ! source "${ROOT}/integration/scripts/qsv-env.sh" 2>/dev/null; then
+    skip "§16's outer loop needs a backend without native bitrate control (qsv h264 here)"
+else
+    printf "file '%s'\n" "$scene_src" "$scene_src" "$scene_src" >"${WORK}/rc36.txt"
+    cat >"${WORK}/rc36_roi.json" <<'JSON'
+{
+ "background_qp_delta": 6,
+ "hold_sec": 40,
+ "samples": [
+  {"t": 0, "kind": "person", "bbox_x": 0.42, "bbox_y": 0.40,
+   "bbox_w": 0.16, "bbox_h": 0.20, "track_id": 1, "confidence": 0.9}
+ ]
+}
+JSON
+    rc_target=2000000
+    if ! ffmpeg -v error -y -f concat -safe 0 -i "${WORK}/rc36.txt" -c copy \
+            "${WORK}/rc36.mp4" >/dev/null 2>&1; then
+        fail "could not build the 36 s fixture §16 needs"
+    elif ! "${BUILD}/roi-transcode" --in "${WORK}/rc36.mp4" --roi "${WORK}/rc36_roi.json" \
+            --out "${WORK}/rc36_out.mp4" --encoder qsv --codec h264 --crf 28 --gop 50 \
+            --target-bitrate "$rc_target" >"${WORK}/rc36.log" 2>&1; then
+        fail "the §16 encode failed (see ${WORK}/rc36.log)"
+    elif python3 "${ROOT}/integration/scripts/bitrate-check.py" "${WORK}/rc36_out.mp4" \
+            "$rc_target" >"${WORK}/rc36_check.txt" 2>&1; then
+        pass "average and 1 s rolling P95 both inside §16"
+        sed -n '2,4p' "${WORK}/rc36_check.txt" | sed 's/^/      /'
+    else
+        fail "§16 not met by the outer loop"
+        sed 's/^/      /' "${WORK}/rc36_check.txt" >&2
+    fi
+fi
+
 # §58.3: every enumerator the library has, the wrapper must have. An enum is the part of a
 # binding that goes missing without a symptom -- a value added in C++ compiles, links and
 # passes every C++ test while simply not existing in Python. Three had: the native oneVPL

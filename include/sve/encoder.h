@@ -119,6 +119,18 @@ struct EncoderStatistics {
     /// that only appeared in a log would be invisible to anything but a human reading it.
     bool cpu_h265_target_guard = false;
 
+    /// Set when the outer bitrate loop (§15) ran out of authority: it has been holding its
+    /// whole range -- background crushed, low-importance regions softened -- and the stream
+    /// is still above the target band.
+    ///
+    /// This is §50's rule applied to a case that used to be silent. It happens when the
+    /// expensive part of the frame is inside a protected region: measured on a crowd scene
+    /// whose protected box covers 38% of the frame and all of its detail, moving the
+    /// background penalty from +6 to +30 changed the rate by four percent, so no setting of
+    /// this loop could have reached the target. A caller who asked for a bitrate and is
+    /// missing it deserves to know it was arithmetic and not a knob left unturned.
+    bool bitrate_target_unreachable = false;
+
     /// Backends that were tried and declined before one opened. Non-zero is normal on a
     /// machine without the hardware; it is here so "which one opened, and what did it beat"
     /// can be answered without reading a log (§22).

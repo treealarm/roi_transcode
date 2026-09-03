@@ -1,15 +1,28 @@
 #pragma once
 
-// Outer bitrate controller for TZ v2.0 §15 -- a layer *above* the encoder, not a
-// pass-through into its own rate control.
+// Outer bitrate controller for §15 -- a layer *above* the encoder, not a pass-through into
+// its own rate control.
 //
-// Under CQP/CRF the per-region QP deltas stay honest only while the global quantizer is
+// Under CQP/CRF the per-region QP deltas stay honest only while the global quantiser is
 // fixed. A target bitrate forces a second loop: watch the average bits out, and when the
 // stream runs hot crush the background first, then soften low-importance ROI. High-
 // importance regions (faces, plates) are left alone -- that is the object-first part.
 //
+// **Proportional, since 2026-09-02.** The correction is sized from the miss: rate against
+// quantiser is a doubling every six steps in both H.264 and H.265, so being 2.4x over the
+// target asks for about eight steps and being 10% over asks for less than one. What it
+// replaced was a ladder of fixed rungs, which is a relay: it could only be walking up or
+// walking down, and where it stopped was decided by the edge of the tolerance band rather
+// than by the target. Two consequences were measured rather than argued -- see
+// docs/STATUS.md, срез Z13 -- a steady state at 109% of target where §16 allows 105%, and
+// fifty rungs of travel that took fifteen seconds to give back.
+//
 // Peak overshoot (short window) and a recovery debt (give-back within recovery_window_ms)
-// ride on the same ladder. This is still not encoder-side VBR/VBV.
+// feed the same correction: the peak aims at the 1 s ceiling, and the debt lowers the aim
+// point so an overshoot is returned rather than merely stopped. This is still not
+// encoder-side VBR/VBV, and §16 remains out of reach where the actuator has no authority --
+// a frame whose expensive part is inside a protected region cannot be made cheaper by
+// crushing what is left.
 
 #include "sve/policy.h"
 #include "sve/types.h"
@@ -41,6 +54,11 @@ public:
     /// Outstanding bit debt the recovery window is trying to pay back. Test/diagnostics.
     double debt_bits() const { return m_debt_bits; }
 
+    /// The loop has held its whole range for kUnreachableSec and the average is still above
+    /// the band -- there is no correction left to make. §50: a degradation that is applied
+    /// has to be reported, and missing a target the caller asked for is one.
+    bool target_unreachable() const { return m_unreachable; }
+
     /// Copy of `base` with background_qp_delta raised by the current extra.
     Quality apply(const Quality& base) const;
 
@@ -55,8 +73,10 @@ private:
     };
 
     void recompute();
-    void step_up();
-    void step_down();
+    /// Move the actuator by a signed number of quantiser steps, bounded and clamped.
+    void move_level(double quantiser_steps, double bound);
+    /// The correction one measured rate asks for, in quantiser steps.
+    double correction_for(double measured_bps, double aim_bps) const;
     void trim(std::vector<Chunk>& chunks, double& sec, int64_t& bytes, double limit);
 
     uint64_t m_target_bps = 0;
@@ -78,6 +98,15 @@ private:
     double m_last_peak_step_sec = 0.0;
     double m_debt_bits = 0.0;
 
+    /// The actuator, as one continuous quantity: 0 .. kMaxBackgroundExtra + kMaxRoiSoften.
+    /// Continuous because a proportional correction is a size, and rounding it to a rung
+    /// before applying it would put the relay back one step at a time.
+    double m_level = 0.0;
+    /// How long the loop has spent at its ceiling with the average still above the band.
+    /// Time, not a single sample: a burst saturates the loop for a moment on any content,
+    /// and that is it working.
+    double m_saturated_sec = 0.0;
+    bool m_unreachable = false;
     int32_t m_background_extra = 0;
     int32_t m_roi_soften = 0;
 };

@@ -121,7 +121,7 @@ feature, encoder reset/reconfigure, frame drop and metadata failure.
   zero-copy evidence (`frames_converted`, `frames_uploaded`: both zero is what it means),
   which backend ran (`encoder_used`, `backend_name`, `backends_declined`), and the
   degradations §50 forbids applying silently: `regions_dropped`, `fallbacks_applied`,
-  `frames_quantiser_clamped`, `cpu_h265_target_guard`. §14's ROI lag arrives in the
+  `frames_quantiser_clamped`, `cpu_h265_target_guard`, `bitrate_target_unreachable`. §14's ROI lag arrives in the
   `roi_lag_*` fields when the boxes carried track ids to measure it from.
 * `EncoderCapabilities` — `h264`, `h265`, `roi_rectangles`, `qp_map` with
   `qp_map_block_width`/`_height`, `ctu_qp`, `emphasis_map`, `runtime_roi_update`, `sei`,

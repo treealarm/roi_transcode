@@ -103,8 +103,10 @@ void undershoot_releases_only_after_debt_is_paid()
 /// against a 2 Mbps target. Measured here: 22.00 s to let go before the fix, 15.28 s after.
 /// The bound below sits between them, so this fails outright if the escalation comes back.
 ///
-/// What it does not claim: 15 s is still slow, and most of it is the ladder itself walking
-/// fifty steps at one per 0.25 s. That is tuning, and it is open -- see срез Q.
+/// What it claims after 2026-09-02: the release is proportional too, so how fast the loop
+/// lets go depends on how far under the target the stream has fallen. A stream at two
+/// percent of target is released in a few seconds; a stream fifteen percent under barely
+/// moves, which is what stops the oscillation the first proportional version had.
 void a_quiet_stream_is_released_in_bounded_time()
 {
     sve::RateControlPolicy policy;
@@ -184,6 +186,138 @@ void apply_and_soften_respect_critical_objects()
         "a non-critical vehicle is softened (may go positive under pressure)");
 }
 
+
+/// A proportional loop answers a big miss with a big correction and a small miss with a
+/// small one. That is the whole difference from the ladder it replaced, which answered both
+/// with one rung and let the size of the error decide only how long it kept stepping.
+void the_correction_is_sized_from_the_miss()
+{
+    const auto level_after_one_correction = [](double bps_multiple) {
+        sve::RateControlPolicy policy;
+        policy.target_bitrate = 1'000'000;
+        sve::BitrateBudget b(policy);
+        // Two observations to pass kMinSeconds, then the one that carries the miss.
+        const int64_t bytes = static_cast<int64_t>(bps_multiple * 1'000'000.0 * 0.25 / 8.0);
+        for (int32_t i = 0; i < 3; ++i) {
+            b.observe(bytes, 0.25);
+        }
+        return b.background_extra() + b.roi_soften();
+    };
+
+    const int32_t small_miss = level_after_one_correction(1.1);
+    const int32_t large_miss = level_after_one_correction(4.0);
+    check(large_miss > small_miss,
+        "four times over the target commands a larger correction than ten percent over");
+    check(small_miss <= 1, "a ten-percent miss is answered by about one quantiser step");
+}
+
+/// Releasing is deliberately slower than tightening, and this is where that is stated. It
+/// is the property that stopped the oscillation: measured on a 36 s crowd scene, a loop
+/// that let go as fast as it clamped down reached a P95 of 170% of target where this one
+/// reaches 114% (docs/STATUS.md, срез Z13).
+void the_loop_lets_go_more_slowly_than_it_clamps_down()
+{
+    sve::RateControlPolicy policy;
+    policy.target_bitrate = 1'000'000;
+    sve::BitrateBudget b(policy);
+
+    // 1.5x over for one tick: how far one correction climbs.
+    for (int32_t i = 0; i < 3; ++i) {
+        b.observe(46875, 0.25);
+    }
+    const int32_t climbed = b.background_extra() + b.roi_soften();
+    check(climbed > 0, "precondition: being over the target climbs");
+
+    // The mirror image: 1/1.5 of the target, the same distance in the other direction.
+    sve::RateControlPolicy same = policy;
+    sve::BitrateBudget under(same);
+    for (int32_t i = 0; i < 3; ++i) {
+        under.observe(46875, 0.25);
+    }
+    const int32_t before = under.background_extra() + under.roi_soften();
+    for (int32_t i = 0; i < 1; ++i) {
+        under.observe(20833, 0.25);   // 0.67 Mbps
+    }
+    const int32_t after = under.background_extra() + under.roi_soften();
+    check(before - after < climbed,
+        "one tick of undershoot gives back less than one tick of overshoot took");
+}
+
+/// The plant is not the model. The loop assumes six quantiser steps to a doubling and that
+/// half of a correction reaches the output; a real encoder obeys neither exactly. This runs
+/// it against a plant with a different exponent and asks only that it converges and stays
+/// converged -- which is what separates a controller from a lookup table.
+void it_converges_against_a_plant_it_does_not_model_exactly()
+{
+    constexpr double kTarget = 2'000'000.0;
+    constexpr double kFreeRunBps = 8'000'000.0;
+    /// The plant: every kPlantStepsPerDoubling quantiser steps halve the rate, and only
+    /// kPlantShare of the frame responds at all. Both differ from what the loop assumes.
+    constexpr double kPlantStepsPerDoubling = 9.0;
+    constexpr double kPlantShare = 0.7;
+
+    sve::RateControlPolicy policy;
+    policy.target_bitrate = static_cast<uint64_t>(kTarget);
+    sve::BitrateBudget b(policy);
+
+    constexpr double dt = 1.0 / 25.0;
+    double worst_late_ratio = 0.0;
+    for (int32_t frame = 0; frame < 25 * 30; ++frame) {
+        const double level = b.background_extra() + b.roi_soften();
+        const double bps = kFreeRunBps
+            * std::pow(2.0, -kPlantShare * level / kPlantStepsPerDoubling);
+        b.observe(static_cast<int64_t>(bps * dt / 8.0), dt);
+        // The last ten seconds: by then a converged loop is holding, not hunting.
+        if (frame > 25 * 20) {
+            worst_late_ratio = std::max(worst_late_ratio, bps / kTarget);
+        }
+    }
+    check(worst_late_ratio < 1.2,
+        "after twenty seconds the plant is held inside §16's rolling bound");
+    check(worst_late_ratio > 0.0, "and the loop did not simply stop the stream");
+}
+
+/// §50: a target the loop cannot reach has to be reported, not merely missed. It happens
+/// when the expensive part of the frame is inside a protected region -- measured on a crowd
+/// scene whose box covers 38% of the frame and all of its detail, moving the background
+/// penalty from +6 to +30 changed the rate by four percent.
+void an_unreachable_target_is_reported_rather_than_missed_quietly()
+{
+    sve::RateControlPolicy policy;
+    policy.target_bitrate = 1'000'000;
+    sve::BitrateBudget b(policy);
+    check(!b.target_unreachable(), "nothing to report before anything is encoded");
+
+    // Three times the target, and it stays there whatever the loop does: a plant the
+    // actuator has no grip on at all.
+    constexpr double dt = 1.0 / 25.0;
+    for (int32_t i = 0; i < 25 * 10; ++i) {
+        b.observe(15'000, dt);
+    }
+    check(b.background_extra() == 30 && b.roi_soften() == 20,
+        "precondition: the loop has spent its whole range");
+    check(b.target_unreachable(), "and says so");
+}
+
+/// The other half of that claim, and the one that keeps it useful: a burst that the loop
+/// does absorb must not be reported as an unreachable target. Saturating for a moment is
+/// the loop working, not the loop failing.
+void a_burst_the_loop_absorbs_is_not_reported()
+{
+    sve::RateControlPolicy policy;
+    policy.target_bitrate = 1'000'000;
+    sve::BitrateBudget b(policy);
+
+    constexpr double dt = 1.0 / 25.0;
+    for (int32_t i = 0; i < 25; ++i) {
+        b.observe(15'000, dt);            // one second at three times the target
+    }
+    for (int32_t i = 0; i < 25 * 10; ++i) {
+        b.observe(5'000, dt);             // and then on target for ten
+    }
+    check(!b.target_unreachable(), "a burst that the stream comes back from is not a miss");
+}
+
 } // namespace
 
 int main()
@@ -194,6 +328,11 @@ int main()
     a_quiet_stream_is_released_in_bounded_time();
     peak_overshoot_climbs_inside_a_wide_average_deadband();
     apply_and_soften_respect_critical_objects();
+    the_correction_is_sized_from_the_miss();
+    the_loop_lets_go_more_slowly_than_it_clamps_down();
+    it_converges_against_a_plant_it_does_not_model_exactly();
+    an_unreachable_target_is_reported_rather_than_missed_quietly();
+    a_burst_the_loop_absorbs_is_not_reported();
 
     if (failures > 0) {
         std::fprintf(stderr, "bitrate_budget_test: %d failure(s)\n", failures);

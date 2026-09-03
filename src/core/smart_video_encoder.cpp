@@ -25,6 +25,21 @@ namespace sve {
 
 namespace {
 
+/// The policy the outer loop should run under, given what the backend does for itself.
+///
+/// §15's loop exists for encoders that have no bitrate mode of their own. Where one does,
+/// the target belongs to it: this returns the same policy with the target cleared, which is
+/// how `BitrateBudget` is told to stand down (`active()` is a non-zero target).
+RateControlPolicy outer_loop_policy(const RateControlPolicy& policy, bool native_bitrate)
+{
+    if (!native_bitrate) {
+        return policy;
+    }
+    RateControlPolicy off = policy;
+    off.target_bitrate = 0;
+    return off;
+}
+
 /// Depth of the packet queue between the backend and the caller (§24 asks for a bounded
 /// one). Generous rather than tight: a backend with lookahead can hand back a burst after
 /// a quiet stretch, and the caller drains between frames anyway.
@@ -109,6 +124,17 @@ struct SmartVideoEncoder::Impl : PacketSink {
             }
             bitrate.observe(static_cast<int64_t>(packet.payload.size()),
                 dt > 0.0 ? dt : frame_sec);
+            // §50: said once, and counted, the moment the loop runs out of authority. A
+            // target that cannot be reached because the expensive part of the frame is
+            // protected is a degradation the caller is entitled to hear about -- until now
+            // the only evidence was the file being the wrong size.
+            if (bitrate.target_unreachable() && !stats.bitrate_target_unreachable) {
+                stats.bitrate_target_unreachable = true;
+                ++stats.fallbacks_applied;
+                log.warn("bitrate target unreachable: the outer loop is at its limit and "
+                    "the stream is still above the target band -- the protected regions "
+                    "carry more of the frame's cost than the background can pay back");
+            }
         }
 
         EncodedPacket out = packet;
@@ -473,7 +499,16 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const EncoderConfig& confi
     // After the guard, so a target it disallowed does not reach the budget loop. The
     // backend has already been configured, and ignores the target for HEVC anyway: for
     // libx265 the rate is CRF plus this outer loop, never the encoder's own bitrate mode.
-    impl->bitrate = BitrateBudget(ep.rate_control);
+    //
+    // And only where there is no rate control underneath. A backend that reports
+    // `native_bitrate` is already holding the target with its own ABR and VBV, and this
+    // loop's actuator -- a quantiser offset on the background -- then acts on top of an
+    // allocator that is itself reacting to the result. Two controllers on one plant, each
+    // treating the other's correction as content: measured on a 36 s crowd scene at 3 Mbps,
+    // x265direct came out at P95 120% of target with both running and 108% with only its
+    // own (docs/STATUS.md, срез Z14).
+    impl->bitrate = BitrateBudget(outer_loop_policy(ep.rate_control,
+        impl->encoder.capabilities().native_bitrate));
 
     impl->stats.encoder_used = impl->encoder.kind();
     impl->stats.backend_name = impl->encoder.label();
@@ -694,8 +729,11 @@ Status SmartVideoEncoder::Reconfigure(const RuntimeEncoderSettings& settings)
         }
         s.config.settings.rate_control = rc;
         // The budget is an outer loop over the encoder's constant quantizer, so a new
-        // target takes effect from the next frame without reopening anything.
-        s.bitrate = BitrateBudget(rc);
+        // target takes effect from the next frame without reopening anything -- and it is
+        // left switched off under a backend that runs its own, for the reason spelled out
+        // at Create.
+        s.bitrate = BitrateBudget(
+            outer_loop_policy(rc, s.encoder.capabilities().native_bitrate));
     }
     // §29's "reconfigure", and it names what actually changed rather than that a call
     // happened: §8.2 lets three things move and a caller may set any subset, so "reconfigured"

@@ -294,6 +294,8 @@ void register_config(py::module_& m)
             &sve::EncoderStatistics::frames_quantiser_clamped)
         .def_readonly("cpu_h265_target_guard",
             &sve::EncoderStatistics::cpu_h265_target_guard)
+        .def_readonly("bitrate_target_unreachable",
+            &sve::EncoderStatistics::bitrate_target_unreachable)
         .def_readonly("keyframes_requested", &sve::EncoderStatistics::keyframes_requested)
         .def_readonly("backend_name", &sve::EncoderStatistics::backend_name)
         // §14's ROI lag, reported when the boxes carried track ids to measure it from.

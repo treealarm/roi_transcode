@@ -150,7 +150,12 @@ struct MetadataConfig {
 /// default is read in two places that must agree: the outer BitrateBudget loop, and any
 /// backend wiring the policy onto its own rate control. Two copies of 0.2f is the kind of
 /// duplication that only shows up as a behaviour difference between two backends.
-inline constexpr float kDefaultAverageOvershoot = 0.1f;
+/// 105% of target on average, which is §16's acceptance bound ("average bitrate overshoot
+/// <= 5%"). It was 0.1 until 2026-09-02, with no provenance written beside it -- a default
+/// that could not pass the acceptance it exists for, and with the old relay controller it
+/// decided the steady state: a loop that stops correcting at the edge of its tolerance band
+/// sits at that edge.
+inline constexpr float kDefaultAverageOvershoot = 0.05f;
 /// 120% of target over a ~1 s window, which is §16's rolling acceptance bound.
 inline constexpr float kDefaultPeakOvershoot = 0.2f;
 inline constexpr uint32_t kDefaultRecoveryWindowMs = 1000;

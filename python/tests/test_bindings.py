@@ -373,6 +373,8 @@ def test_statistics_expose_the_degradations_section_50_requires():
     # reports nothing whatever its value.
     assert stats.frames_quantiser_clamped == 0
     assert stats.cpu_h265_target_guard is False
+    # §50 again, and the newest of them: the outer bitrate loop running out of authority.
+    assert stats.bitrate_target_unreachable is False
     assert stats.keyframes_requested == 0
     # Under Backend.AUTO this is the only way to find out what actually opened.
     assert "libx264" in stats.backend_name
