@@ -405,8 +405,29 @@ void to_nv12(const IFrameBuffer& src, mfxFrameSurface1& dst, int width, int heig
 {
     const PlaneView y = const_cast<IFrameBuffer&>(src).plane(0);
     const PlaneView u = const_cast<IFrameBuffer&>(src).plane(1);
-    const PlaneView v = const_cast<IFrameBuffer&>(src).plane(2);
     const mfxU16 pitch = dst.Data.Pitch;
+
+    // A caller who already has NV12 is handing over the layout the encoder wants, and there
+    // is nothing to interleave: the second plane *is* the chroma. Reading a third one --
+    // which this did until 2026-09-03, while the check at SubmitFrame admitted NV12 in as
+    // many words -- takes an empty PlaneView and dereferences its null pointer. Found by
+    // reading the two together rather than by any test: nothing in the suite submitted NV12.
+    if (const_cast<IFrameBuffer&>(src).format() == PixelFormat::NV12) {
+        for (int row = 0; row < height; ++row) {
+            std::memcpy(dst.Data.Y + static_cast<std::size_t>(row) * pitch,
+                y.bytes.data() + static_cast<std::size_t>(row) * y.stride,
+                static_cast<std::size_t>(width));
+        }
+        const int chroma_rows = (height + 1) / 2;
+        for (int row = 0; row < chroma_rows; ++row) {
+            std::memcpy(dst.Data.UV + static_cast<std::size_t>(row) * pitch,
+                u.bytes.data() + static_cast<std::size_t>(row) * u.stride,
+                static_cast<std::size_t>(width));
+        }
+        return;
+    }
+
+    const PlaneView v = const_cast<IFrameBuffer&>(src).plane(2);
 
     for (int row = 0; row < height; ++row) {
         std::memcpy(dst.Data.Y + static_cast<std::size_t>(row) * pitch,

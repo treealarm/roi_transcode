@@ -451,6 +451,54 @@ struct Candidate {
     const char* name;
 };
 
+/// §17 lists NV12 among the P0 input formats, so every backend has to give an answer to
+/// one: encode it, or refuse it with Unsupported. What none of them may do is take it and
+/// then read a plane it does not have.
+///
+/// The native oneVPL backend did exactly that until 2026-09-03 -- its check at SubmitFrame
+/// admitted NV12 and its copy read three planes, so the third came back as an empty view
+/// and the code dereferenced its null pointer. Nothing in the suite had ever submitted NV12:
+/// every test here builds YUV420P, which is why reading the two lines together found it and
+/// a green suite did not.
+void nv12_input_is_answered_and_never_crashes(Backend backend, const char* label)
+{
+    EncoderConfig cfg = config_for(backend, Codec::H264);
+    cfg.input.pixel_format = PixelFormat::NV12;
+
+    std::unique_ptr<SmartVideoEncoder> enc;
+    try {
+        enc = CreateVideoEncoder(cfg);
+    } catch (const std::exception& e) {
+        // No device, or the backend refuses NV12 at open. Both are answers.
+        std::printf("  skip  %s: %s\n", label, e.what());
+        return;
+    }
+
+    // Two planes, which is what NV12 is. A backend that reaches for a third finds nothing.
+    auto luma = std::make_shared<std::vector<uint8_t>>(
+        static_cast<std::size_t>(kWidth) * kHeight, 128);
+    auto chroma = std::make_shared<std::vector<uint8_t>>(
+        static_cast<std::size_t>(kWidth) * ((kHeight + 1) / 2), 128);
+
+    RawFrameView view;
+    view.format = cfg.input;
+    view.plane_count = 2;
+    view.planes[0] = {luma->data(), kWidth, luma->size()};
+    view.planes[1] = {chroma->data(), kWidth, chroma->size()};
+    view.timestamp = MediaTimestamp{0, Rational{1, kTimeBase}};
+    view.owner = luma;
+
+    Frame frame;
+    check(WrapRawFrame(view, &frame).ok(), std::string(label) + ": WrapRawFrame(NV12)");
+
+    FrameMetadata meta;
+    meta.timestamp = view.timestamp;
+    const Status s = enc->SubmitFrame(TimedFrame{std::move(frame), meta});
+    check(s.ok() || s.code() == StatusCode::Unsupported || s.code() == StatusCode::Again,
+        std::string(label) + ": NV12 is encoded or refused, not mishandled -- " + s.message());
+    std::printf("  ok    %s: %s\n", label, s.ok() ? "encoded" : s.message().c_str());
+}
+
 } // namespace
 
 int main()
@@ -482,6 +530,11 @@ int main()
     std::printf("AT-007 (capability fallback is answered, never absorbed):\n");
     for (const Candidate& c : candidates) {
         at_007_capability_fallback(c.backend, Codec::H265, c.name);
+    }
+
+    std::printf("§17 (NV12 in: answered, never mishandled):\n");
+    for (const Candidate& c : candidates) {
+        nv12_input_is_answered_and_never_crashes(c.backend, c.name);
     }
 
     if (failures > 0) {

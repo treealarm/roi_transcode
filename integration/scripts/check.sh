@@ -1177,7 +1177,11 @@ step "soak: continuous encode, and §43.2's five counts (short profile)"
 if soakout=$(SOAK_SECONDS="${SOAK_SECONDS:-20}" "${ROOT}/integration/scripts/soak-check.sh" \
         "${LIBBUILD}" 2>&1); then
     printf '%s\n' "$soakout" | grep -E '^ +(soak:|frame|pts|metadata|memory)' | sed 's/^ */  /'
-    if printf '%s\n' "$soakout" | grep -q '^  skip'; then
+    # A here-string rather than `printf ... | grep -q`: under `set -o pipefail` the producer's
+# SIGPIPE becomes the pipeline's status when grep leaves early, and a condition that reads
+# "did this output contain X" then answers no for the wrong reason. One step lost a day to
+# exactly that on 2026-09-03.
+if grep -q '^  skip' <<<"$soakout"; then
         skip "sve-soak is not built"
     else
         pass "$(printf '%s\n' "$soakout" | tail -1)"
@@ -1200,7 +1204,7 @@ printf 'this is not a media file at all\n' > "${WORK}/notmedia.mp4"
 ffmpeg_log_out=$("${BUILD}/roi-transcode" --in "${WORK}/notmedia.mp4" \
     --roi "${ROOT}/testdata/synth_roi.json" --out "${WORK}/notmedia-out.mp4" \
     --encoder x264direct --codec h264 2>&1)
-if [[ -n "$ffmpeg_log_out" ]] && printf '%s' "$ffmpeg_log_out" | grep -q '^ffmpeg \[error\]: '; then
+if [[ -n "$ffmpeg_log_out" ]] && grep -q '^ffmpeg \[error\]: ' <<<"$ffmpeg_log_out"; then
     pass "an FFmpeg error arrives through the sink, framed by the application"
 else
     fail "FFmpeg diagnostics did not reach the sink"
@@ -1212,7 +1216,7 @@ fi
 # product. What matters here is that something non-empty came through; the level mapping is
 # checked in logging_test, where the test chooses the level itself and the answer cannot
 # depend on which diagnostic FFmpeg happened to produce.
-if printf '%s' "$ffmpeg_log_out" | grep -qE '^ffmpeg \[error\]: .+'; then
+if grep -qE '^ffmpeg \[error\]: .+' <<<"$ffmpeg_log_out"; then
     pass "the routed line carries FFmpeg's message and not just the frame"
 else
     fail "the routed message arrived empty"
@@ -1220,7 +1224,7 @@ fi
 # The half that proves routing rather than mere presence: FFmpeg's own format starts the
 # line with its context, "[mov,mp4,...]". If any line still begins that way, a diagnostic
 # went to stderr directly instead of through the sink.
-if printf '%s' "$ffmpeg_log_out" | grep -q '^\['; then
+if grep -q '^\[' <<<"$ffmpeg_log_out"; then
     fail "an FFmpeg line reached stderr without going through the sink"
     printf '%s\n' "$ffmpeg_log_out" | grep '^\[' | head -3 | sed 's/^/      /' >&2
 else
@@ -1401,14 +1405,28 @@ if ! ffmpeg -v error -y -i "$SRC" -pix_fmt yuv420p10le -c:v libx265 \
     skip "this ffmpeg cannot produce a ten-bit fixture"
 else
     # The capability evidence AT-009 asks for, read from the library rather than assumed.
+    #
+    # Captured into a variable and matched afterwards, not piped into grep -q. Under
+    # `set -o pipefail` that pipeline reports the producer's SIGPIPE -- grep -q leaves as
+    # soon as it matches, sve-capabilities dies writing the rest, and the whole condition
+    # comes out false. It passed for a day because the only match was the last line of the
+    # output, and the moment a second backend reported main10 the match moved up, the
+    # producer had output left to write, and this step began skipping with a message that
+    # said the capability was absent when the report in hand said it was there.
+    tenbit_caps=$("${LIBBUILD}/sve-capabilities" --json 2>/dev/null || true)
     tenbit_backend=""
-    if "${LIBBUILD}/sve-capabilities" --json 2>/dev/null \
-            | grep -q '"main10": true' && [[ -e /dev/dri/renderD128 ]] \
-            && source "${ROOT}/integration/scripts/qsv-env.sh" 2>/dev/null; then
+    tenbit_why="no backend in this build reports main10"
+    if ! grep -q '"main10": true' <<<"$tenbit_caps"; then
+        : # the reason above stands
+    elif [[ ! -e /dev/dri/renderD128 ]]; then
+        tenbit_why="a backend reports main10 but this machine has no render node"
+    elif ! source "${ROOT}/integration/scripts/qsv-env.sh" 2>/dev/null; then
+        tenbit_why="a backend reports main10 but its runtime environment did not load"
+    else
         tenbit_backend="qsv"
     fi
     if [[ -z "$tenbit_backend" ]]; then
-        skip "no backend in this build reports main10 (sve-capabilities: none) -- AT-009 N/A"
+        skip "${tenbit_why} -- AT-009 N/A (capability evidence: sve-capabilities --json)"
     elif ! "${BUILD}/roi-transcode" --in "$tenbit_src" \
             --roi "${ROOT}/testdata/synth_roi.json" --out "${WORK}/ten_out.mp4" \
             --encoder "$tenbit_backend" --codec h265 --crf 28 --gop 50 \
