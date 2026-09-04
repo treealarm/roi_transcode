@@ -505,8 +505,8 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const EncoderConfig& confi
     // loop's actuator -- a quantiser offset on the background -- then acts on top of an
     // allocator that is itself reacting to the result. Two controllers on one plant, each
     // treating the other's correction as content: measured on a 36 s crowd scene at 3 Mbps,
-    // x265direct came out at P95 120% of target with both running and 108% with only its
-    // own (docs/STATUS.md, срез Z14).
+    // x265direct came out at P95 120% of target with both running and 113% with only its
+    // own, and its average went from 79% of target to 99% (docs/STATUS.md, срез Z13).
     impl->bitrate = BitrateBudget(outer_loop_policy(ep.rate_control,
         impl->encoder.capabilities().native_bitrate));
 

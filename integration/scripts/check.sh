@@ -1502,6 +1502,44 @@ PY
         ten_b_bg=$(ten_metric "${WORK}/ten_baseline.mp4" bg_psnr)
         assert_gt "ten-bit ROI quality improves (dB)" "$ten_a_roi" "$ten_b_roi"
         assert_lt "ten-bit background paid for it (dB)" "$ten_a_bg" "$ten_b_bg"
+
+        # §41: "hardware backend: >= 3 прогонов на конфигурацию; в отчёте mean ± 95% CI",
+        # and a paired bootstrap for the baseline/adaptive comparison. The assertion that
+        # follows is the one §41 is for: not "one run came out higher" but "the difference
+        # does not include zero at 95%". Two more encodes of a twelve-second clip on
+        # hardware, which is seconds.
+        #
+        # Measured 2026-09-03 and worth knowing before reading the interval: this driver is
+        # bit-exact across runs, so the interval collapses to a point. That is a result --
+        # it says the variation is not in the encoder -- and the day it stops being true,
+        # this is what notices.
+        : > "${WORK}/ten_a.txt"; : > "${WORK}/ten_b.txt"
+        ten_runs_ok=1
+        for _run in 1 2 3; do
+            for _side in a:adaptive b:baseline; do
+                _key="${_side%%:*}"; _name="${_side##*:}"
+                _roi="${SCENES}/moving/roi.json"
+                [[ "$_key" == "b" ]] && _roi="${WORK}/ten_flat.json"
+                "${BUILD}/roi-transcode" --in "${WORK}/ten_moving.mp4" --roi "$_roi" \
+                    --out "${WORK}/ten_${_key}_${_run}.mp4" --encoder qsv --codec h265 \
+                    --crf 32 --gop 60 >/dev/null 2>&1 || ten_runs_ok=0
+                ten_metric "${WORK}/ten_${_key}_${_run}.mp4" roi_psnr >> "${WORK}/ten_${_key}.txt"
+            done
+        done
+        if [[ "$ten_runs_ok" -ne 1 ]]; then
+            fail "a §41 repeat run did not complete"
+        else
+            python3 "${ROOT}/integration/scripts/stats.py" summarise \
+                < "${WORK}/ten_a.txt" | sed 's/^/      /'
+            ten_paired=$(python3 "${ROOT}/integration/scripts/stats.py" paired \
+                "${WORK}/ten_a.txt" "${WORK}/ten_b.txt")
+            printf '%s\n' "$ten_paired" | sed 's/^/      /'
+            if grep -q "separates from zero" <<<"$ten_paired"; then
+                pass "§41: the paired difference excludes zero at 95%"
+            else
+                fail "§41: the ROI difference includes zero over three runs"
+            fi
+        fi
     fi
 
     # And R2 itself, which became possible on 2026-09-03 when the native oneVPL backend
