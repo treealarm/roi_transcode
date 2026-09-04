@@ -308,6 +308,11 @@ Report transcode_file(const std::string& input_path,
         fail(flushed.message());
     }
     drain();
+    // §8.13's end of an encode, and what carries §19.4's report on sidecar records whose
+    // packet never arrived -- see the same call in Session::finish.
+    if (const Status stopped = enc.Stop(); !stopped.ok()) {
+        fail(stopped.message());
+    }
     open_mux();
     file_sink.end();
 

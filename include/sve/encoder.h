@@ -255,6 +255,13 @@ public:
 
 private:
     friend std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const EncoderConfig&);
+    /// The same assembly against a BackendRegistry the caller built, declared in
+    /// src/core/encoder_assembly.h and not here: the registry is chosen by whoever
+    /// assembles the deployment, which is this project, not by whoever calls the library.
+    /// Named here only because it has to be, to build what CreateVideoEncoder builds.
+    /// BackendRegistry is already declared at namespace scope by sve/types.h.
+    friend std::unique_ptr<SmartVideoEncoder> CreateVideoEncoderIn(
+        const EncoderConfig&, const BackendRegistry&);
 
     struct Impl;
     explicit SmartVideoEncoder(std::unique_ptr<Impl> impl);

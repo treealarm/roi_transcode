@@ -130,8 +130,8 @@ void RoiEncoder::open_deferred(const BackendConfig& config)
     // bitrate target and gets neither has been misled.
 
     std::string errors;
-    const std::vector<BackendRef> chain = resolve_backends(
-        config.kind, config.backend_selection, config.codec, &m_backends_skipped);
+    const std::vector<BackendRef> chain = resolve_backends(config.kind,
+        config.backend_selection, config.codec, &m_backends_skipped, *m_registry);
     if (chain.empty()) {
         std::string why;
         for (const std::string& reason : m_backends_skipped) {

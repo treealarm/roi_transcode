@@ -100,18 +100,9 @@ BackendRegistry& default_backend_registry()
     return registry;
 }
 
-namespace {
-
-const IEncoderBackend* backend_for(Backend kind)
+bool backend_supports(Backend kind, Codec codec, const BackendRegistry& registry)
 {
-    return default_backend_registry().Find(kind);
-}
-
-} // namespace
-
-bool backend_supports(Backend kind, Codec codec)
-{
-    const IEncoderBackend* backend = backend_for(kind);
+    const IEncoderBackend* backend = registry.Find(kind);
     if (backend == nullptr) {
         return false;
     }
@@ -120,8 +111,13 @@ bool backend_supports(Backend kind, Codec codec)
 }
 
 std::vector<BackendRef> resolve_backends(Backend requested, const BackendSelection& selection,
-    Codec codec, std::vector<std::string>* skipped)
+    Codec codec, std::vector<std::string>* skipped, const BackendRegistry& registry)
 {
+    // Everything below asks this registry and never the process-wide one. That is the whole
+    // difference the parameter makes: the answers have to come from one deployment, and a
+    // helper that reached for the default would mix two.
+    const auto backend_for = [&registry](Backend kind) { return registry.Find(kind); };
+
     std::vector<BackendRef> out;
 
     // Reported once per backend. allow_unlisted walks the full list after the caller's
@@ -144,7 +140,7 @@ std::vector<BackendRef> resolve_backends(Backend requested, const BackendSelecti
         }
         // Named outright and unable to serve the codec: §8.4 wants Unsupported, so the
         // chain comes back empty and the reason travels with it.
-        if (!backend_supports(requested, codec)) {
+        if (!backend_supports(requested, codec, registry)) {
             note_skip(requested);
             return out;
         }
@@ -163,7 +159,7 @@ std::vector<BackendRef> resolve_backends(Backend requested, const BackendSelecti
         if (already) {
             return;
         }
-        if (!backend_supports(kind, codec)) {
+        if (!backend_supports(kind, codec, registry)) {
             note_skip(kind);
             return;
         }
@@ -178,7 +174,7 @@ std::vector<BackendRef> resolve_backends(Backend requested, const BackendSelecti
         // is a permission to keep going, not a licence to reorder. "Whatever else" is now
         // what was registered rather than a constant list, which is the point: a build
         // without a component must not offer it.
-        for (const Backend kind : default_backend_registry().kinds()) {
+        for (const Backend kind : registry.kinds()) {
             append(kind);
         }
     }

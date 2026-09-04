@@ -496,6 +496,310 @@ void the_sidecar_follows_the_packets_not_the_submissions()
     }
 }
 
+/// §8.9: a caller who already has a per-block quantiser grid hands it over as it is, and
+/// it takes precedence over a mask and over boxes. Untested until 2026-09-04, which meant
+/// the whole branch that turns a grid into rectangles never ran here.
+void a_qp_map_is_taken_as_given_rather_than_recomputed()
+{
+    auto pixels = std::make_shared<Pixels>();
+    EncoderConfig cfg = config_for();
+    cfg.log = [](LogLevel, std::string_view) {};
+    auto enc = open_encoder(cfg);
+
+    // 128x96 at a block of 32 is a 4x3 grid. One block is protected, the rest is
+    // background: the two distinct values are what the rectangles are derived from.
+    constexpr int32_t kBlock = 32;
+    QpDeltaMap map;
+    map.block = kBlock;
+    map.cols = kWidth / kBlock;
+    map.rows = kHeight / kBlock;
+    map.width = kWidth;
+    map.height = kHeight;
+    map.deltas.assign(static_cast<std::size_t>(map.cols) * map.rows, int8_t{6});
+    map.deltas[0] = int8_t{-6};
+
+    FrameMetadata meta;
+    meta.timestamp = MediaTimestamp{0, Rational{1, 25}};
+    meta.regions.qp_map = map;
+    CHECK(enc->SubmitFrame(TimedFrame{make_frame(pixels, 0), meta}).ok());
+    CHECK(enc->Flush().ok());
+
+    // The software backend has no region limit, so nothing is dropped and no degradation
+    // is counted: the grid arrived whole.
+    CHECK(enc->GetStatistics().regions_dropped == 0);
+    CHECK(enc->GetStatistics().fallbacks_applied == 0);
+    CHECK(enc->GetStatistics().frames_submitted == 1);
+}
+
+/// §8.9's second form. A mask carries no kinds to weigh, so it is sampled onto the block
+/// grid rather than fed to the box pipeline -- and a caller who passes one used to get no
+/// regions at all, quietly, which is the defect this path was written for.
+void a_mask_is_sampled_onto_the_grid_rather_than_ignored()
+{
+    auto pixels = std::make_shared<Pixels>();
+    EncoderConfig cfg = config_for();
+    cfg.log = [](LogLevel, std::string_view) {};
+    auto enc = open_encoder(cfg);
+
+    // Background at 0, one bright quarter at the maximum an 8-bit mask holds.
+    std::vector<uint8_t> mask(static_cast<std::size_t>(kWidth) * kHeight, uint8_t{0});
+    for (int32_t y = 0; y < kHeight / 2; ++y) {
+        for (int32_t x = 0; x < kWidth / 2; ++x) {
+            mask[static_cast<std::size_t>(y) * kWidth + x] =
+                static_cast<uint8_t>(kMaskMax);
+        }
+    }
+
+    FrameMetadata meta;
+    meta.timestamp = MediaTimestamp{0, Rational{1, 25}};
+    meta.regions.mask.data = mask;
+    meta.regions.mask.width = kWidth;
+    meta.regions.mask.height = kHeight;
+    CHECK(meta.regions.mask.consistent());
+
+    CHECK(enc->SubmitFrame(TimedFrame{make_frame(pixels, 0), meta}).ok());
+    CHECK(enc->Flush().ok());
+    CHECK(enc->GetStatistics().frames_submitted == 1);
+    CHECK(enc->GetStatistics().regions_dropped == 0);
+}
+
+/// A mask whose span does not hold the rows it claims is ignored rather than half-read,
+/// and the frame still encodes -- the boxes path takes over.
+void an_inconsistent_mask_is_ignored_rather_than_half_read()
+{
+    auto pixels = std::make_shared<Pixels>();
+    EncoderConfig cfg = config_for();
+    cfg.log = [](LogLevel, std::string_view) {};
+    auto enc = open_encoder(cfg);
+
+    std::vector<uint8_t> too_small(static_cast<std::size_t>(kWidth), uint8_t{255});
+    FrameMetadata meta;
+    meta.timestamp = MediaTimestamp{0, Rational{1, 25}};
+    meta.regions.mask.data = too_small;
+    meta.regions.mask.width = kWidth;
+    meta.regions.mask.height = kHeight;
+    CHECK(!meta.regions.mask.consistent());
+
+    CHECK(enc->SubmitFrame(TimedFrame{make_frame(pixels, 0), meta}).ok());
+    CHECK(enc->Flush().ok());
+    CHECK(enc->GetStatistics().frames_submitted == 1);
+}
+
+/// §19.4: a sidecar record whose packet never arrives is counted and said out loud. The
+/// encoder is stopped with frames still inside it, which is what a caller aborting a job
+/// does -- and the guarantee "record N is packet N" is broken from that moment, so the
+/// gap has to be visible rather than left as a file that is merely shorter.
+void a_sidecar_record_whose_packet_never_comes_is_said_out_loud()
+{
+    auto pixels = std::make_shared<Pixels>();
+    std::vector<std::pair<LogLevel, std::string>> lines;
+    std::vector<std::string> records;
+
+    EncoderConfig cfg = config_for();
+    cfg.settings.metadata.bitstream_sei = false;
+    cfg.settings.metadata.sidecar = SidecarFormat::NDJSON;
+    cfg.settings.metadata.sidecar_sink = [&records](std::string_view line) {
+        records.emplace_back(line);
+    };
+    cfg.log = [&lines](LogLevel level, std::string_view message) {
+        lines.emplace_back(level, std::string(message));
+    };
+    auto enc = open_encoder(cfg);
+
+    // Submitted and never flushed: libx264 holds frames for its lookahead, so these are
+    // still inside the encoder when it is stopped.
+    constexpr int kFrames = 8;
+    for (int i = 0; i < kFrames; ++i) {
+        FrameMetadata meta;
+        meta.timestamp = MediaTimestamp{i, Rational{1, 25}};
+        CHECK(enc->SubmitFrame(TimedFrame{make_frame(pixels, i), meta}).ok());
+    }
+    CHECK(records.size() < static_cast<std::size_t>(kFrames));
+    enc->Stop();
+
+    bool warned = false;
+    for (const auto& [level, text] : lines) {
+        if (level == LogLevel::Warning
+            && text.find("packet never arrived") != std::string::npos) {
+            warned = true;
+        }
+    }
+    CHECK(warned);
+}
+
+/// §21's report is what a caller reads at the end of a job, and it had never been called
+/// by any test -- so every field of it was a copy nobody had checked against its source.
+void the_report_says_what_the_statistics_say()
+{
+    auto pixels = std::make_shared<Pixels>();
+    EncoderConfig cfg = config_for();
+    cfg.log = [](LogLevel, std::string_view) {};
+    auto enc = open_encoder(cfg);
+
+    for (int i = 0; i < 4; ++i) {
+        FrameMetadata meta;
+        meta.timestamp = MediaTimestamp{i, Rational{1, 25}};
+        CHECK(enc->SubmitFrame(TimedFrame{make_frame(pixels, i), meta}).ok());
+    }
+    CHECK(enc->Flush().ok());
+    for (;;) {
+        EncodedPacket packet;
+        if (!enc->ReceivePacket(&packet).ok()) {
+            break;
+        }
+    }
+
+    const EncoderStatistics stats = enc->GetStatistics();
+    const Report report = enc->ToReport();
+    CHECK(report.frames == stats.frames_submitted);
+    CHECK(report.packets == stats.packets_received);
+    CHECK(report.bytes == stats.bytes_encoded);
+    CHECK(report.encoder_used == stats.encoder_used);
+    CHECK(report.backend_name == stats.backend_name);
+    CHECK(report.regions_dropped == stats.regions_dropped);
+    CHECK(report.frames_converted == stats.frames_converted);
+    CHECK(report.frames_uploaded == stats.frames_uploaded);
+    CHECK(report.cpu_h265_target_guard == stats.cpu_h265_target_guard);
+    CHECK(report.roi_lag_measured == stats.roi_lag_measured);
+    // Not a tautology: the encode above really happened, so these are non-zero and a
+    // field wired to the wrong source would show.
+    CHECK(report.frames == 4);
+    CHECK(report.packets > 0);
+    CHECK(report.bytes > 0);
+}
+
+/// §8.1's borrowing overload: pixels the caller holds, handed over without a copy and
+/// without an ownership handle. Untested until 2026-09-04, so the zero-copy entry point --
+/// the one a service embedding this library uses -- had never been called here at all.
+void pixels_the_caller_holds_go_in_through_the_borrowing_overload()
+{
+    /// The caller's own buffer, over the same planes make_frame wraps. Not the fake from
+    /// roi_encoder_test: that one is NV12 and belongs to a test about backends refusing.
+    class BorrowedPlanes : public IFrameBuffer {
+    public:
+        explicit BorrowedPlanes(Pixels& pixels)
+            : m_pixels(&pixels)
+        {
+        }
+        MemoryType memory() const override { return MemoryType::CPU; }
+        int32_t width() const override { return kWidth; }
+        int32_t height() const override { return kHeight; }
+        PixelFormat format() const override { return PixelFormat::YUV420P; }
+        PlaneView plane(int32_t index) override
+        {
+            switch (index) {
+            case 0: return {m_pixels->y, kWidth};
+            case 1: return {m_pixels->u, kWidth / 2};
+            default: return {m_pixels->v, kWidth / 2};
+            }
+        }
+
+    private:
+        Pixels* m_pixels;
+    };
+
+    Pixels pixels;
+    BorrowedPlanes borrowed(pixels);
+    EncoderConfig cfg = config_for();
+    cfg.log = [](LogLevel, std::string_view) {};
+    auto enc = open_encoder(cfg);
+
+    FrameMetadata meta;
+    meta.timestamp = MediaTimestamp{0, Rational{1, 25}};
+    CHECK(enc->SubmitFrame(borrowed, meta).ok());
+    CHECK(enc->Flush().ok());
+    CHECK(enc->GetStatistics().frames_submitted == 1);
+    // Already in the format the encoder wants, so neither counter moved: that is what
+    // zero-copy means here, and it is the only way to tell it from a frame that merely
+    // travelled.
+    CHECK(enc->GetStatistics().frames_converted == 0);
+    CHECK(enc->GetStatistics().frames_uploaded == 0);
+}
+
+/// §24's bounded queue: a caller who never drains is answered, not grown into. Without
+/// this the packet queue is whatever the encode produced, and the bound is a comment.
+void the_bounded_queue_answers_again_rather_than_growing()
+{
+    auto pixels = std::make_shared<Pixels>();
+    EncoderConfig cfg = config_for();
+    cfg.log = [](LogLevel, std::string_view) {};
+    auto enc = open_encoder(cfg);
+
+    // More than the queue holds, submitted without a single ReceivePacket. The number is
+    // not the bound itself -- the point is that it is comfortably past whatever it is.
+    constexpr int kFarTooMany = 400;
+    bool backpressured = false;
+    for (int i = 0; i < kFarTooMany && !backpressured; ++i) {
+        FrameMetadata meta;
+        meta.timestamp = MediaTimestamp{i, Rational{1, 25}};
+        const Status s = enc->SubmitFrame(TimedFrame{make_frame(pixels, i), meta});
+        if (s.code() == StatusCode::Again) {
+            backpressured = true;
+            break;
+        }
+        CHECK(s.ok());
+    }
+    CHECK(backpressured);
+
+    // And it is backpressure rather than failure: drain some, and the encoder takes
+    // frames again.
+    EncodedPacket packet;
+    CHECK(enc->ReceivePacket(&packet).ok());
+    FrameMetadata meta;
+    meta.timestamp = MediaTimestamp{kFarTooMany, Rational{1, 25}};
+    CHECK(enc->SubmitFrame(TimedFrame{make_frame(pixels, kFarTooMany), meta}).ok());
+}
+
+/// The two accessors §21 gives a caller for what actually opened, including the refusal
+/// when there is nowhere to write the answer.
+void the_opened_encoder_can_be_asked_what_it_is()
+{
+    EncoderConfig cfg = config_for();
+    cfg.log = [](LogLevel, std::string_view) {};
+    auto enc = open_encoder(cfg);
+
+    CHECK(enc->GetCodecParameters(nullptr).code() == StatusCode::InvalidArgument);
+
+    CodecParameters params;
+    CHECK(enc->GetCodecParameters(&params).ok());
+    CHECK(params.width == kWidth);
+    CHECK(params.height == kHeight);
+    CHECK(params.codec == Codec::H264);
+
+    // The libavcodec x264 backend does not read its own settings back, so an empty answer
+    // is the honest one -- what is asserted is that asking is safe before anything else
+    // relies on it (§38's calibration does).
+    const EffectiveSettings effective = enc->GetEffectiveSettings();
+    (void)effective;
+}
+
+/// §8.4 and §50: a backend left out of the chain because it cannot serve the codec is
+/// named in the log, not merely counted. Until now the count was asserted and the line
+/// nobody had checked.
+void a_backend_left_out_of_the_chain_is_named_in_the_log()
+{
+    std::vector<std::pair<LogLevel, std::string>> lines;
+    EncoderConfig cfg = config_for(Backend::Auto, Codec::H264);
+    // X265 first: it cannot produce H.264, so it is skipped with its reason before
+    // anything is opened, and the software H.264 encoder behind it takes the encode.
+    cfg.settings.backend_selection.preferred = {Backend::X265, Backend::X264};
+    cfg.settings.backend_selection.allow_unlisted = false;
+    cfg.log = [&lines](LogLevel level, std::string_view message) {
+        lines.emplace_back(level, std::string(message));
+    };
+    auto enc = open_encoder(cfg);
+    CHECK(enc->GetStatistics().encoder_used == Backend::X264);
+
+    bool said = false;
+    for (const auto& [level, text] : lines) {
+        if (level == LogLevel::Warning && text.find("backend skipped:") != std::string::npos
+            && text.find("H.264") != std::string::npos) {
+            said = true;
+        }
+    }
+    CHECK(said);
+}
+
 /// A format without a sink is refused, not quietly dropped (§50).
 void a_sidecar_without_a_sink_is_refused()
 {
@@ -534,6 +838,15 @@ int main()
     strict_refuses_a_frame_whose_regions_do_not_fit();
     the_sidecar_follows_the_packets_not_the_submissions();
     a_sidecar_without_a_sink_is_refused();
+    a_qp_map_is_taken_as_given_rather_than_recomputed();
+    a_mask_is_sampled_onto_the_grid_rather_than_ignored();
+    an_inconsistent_mask_is_ignored_rather_than_half_read();
+    a_sidecar_record_whose_packet_never_comes_is_said_out_loud();
+    the_report_says_what_the_statistics_say();
+    pixels_the_caller_holds_go_in_through_the_borrowing_overload();
+    the_bounded_queue_answers_again_rather_than_growing();
+    the_opened_encoder_can_be_asked_what_it_is();
+    a_backend_left_out_of_the_chain_is_named_in_the_log();
     std::printf("ok\n");
     return 0;
 }

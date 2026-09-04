@@ -308,7 +308,12 @@ using BackendRef = std::reference_wrapper<const IEncoderBackend>;
 ///
 /// Returns a vector rather than a span over static storage: the order is now the caller's
 /// to choose, so there is no fixed list to point at.
+///
+/// `registry` is the deployment whose backends are walked, defaulting to the process-wide
+/// one. The registry of §26.4 has been an object since 4.2, and this is what makes the
+/// promise in its header -- that an application may assemble its own -- reachable.
 std::vector<BackendRef> resolve_backends(Backend requested, const BackendSelection& selection,
-    Codec codec, std::vector<std::string>* skipped = nullptr);
+    Codec codec, std::vector<std::string>* skipped = nullptr,
+    const BackendRegistry& registry = default_backend_registry());
 
 } // namespace sve

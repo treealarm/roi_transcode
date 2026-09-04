@@ -301,6 +301,13 @@ Report Session::finish()
         }
         m_impl->drain();
         m_impl->end_sink();
+        // §8.13 makes Stop the end of an encode, and this is it. Not only tidiness: the
+        // §19.4 report on sidecar records that never got a packet lives behind it, and
+        // until 2026-09-04 neither of the two paths that actually write a sidecar reached
+        // it -- so the check existed and never ran where it mattered.
+        if (const Status s = m_impl->encoder->Stop(); !s.ok()) {
+            roiav::fail(s.message());
+        }
 
         // Everything but the frame count comes from the encoder, which is the only thing
         // that knows it. Frames are counted here because a frame submitted and a frame

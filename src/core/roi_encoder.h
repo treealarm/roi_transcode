@@ -8,6 +8,7 @@
 // reporting which one opened. The frames themselves go through IEncoderBackend (§7) --
 // this class no longer touches libavcodec's send/receive pair itself.
 
+#include "sve/backend_registry.h"
 #include "sve/encoder_backend.h"
 #include "sve/types.h"
 
@@ -21,6 +22,19 @@ class PacketSink;
 
 class RoiEncoder {
 public:
+    /// Which deployment's backends this encoder may open, defaulting to the process-wide
+    /// registry -- so the ordinary caller constructs it with nothing, as before.
+    ///
+    /// It is a constructor argument rather than a global lookup inside open_deferred
+    /// because that lookup was this class's one hidden dependency: everything else it
+    /// needs arrives through IEncoderBackend or PacketSink, and the chain did not. A
+    /// caller assembling its own BackendRegistry -- which sve/backend_registry.h has
+    /// offered since 4.2 -- could not reach this pipeline at all.
+    explicit RoiEncoder(const BackendRegistry& registry = default_backend_registry())
+        : m_registry(&registry)
+    {
+    }
+
     // Opens a backend, falling back down the chain when kind is Auto, then
     // calls sink.begin(). Throws if nothing opens.
     void open(const BackendConfig& config, PacketSink& sink);
@@ -91,6 +105,7 @@ private:
                                       : BackendStatistics{};
     }
 
+    const BackendRegistry* m_registry;
     Backend m_kind = Backend::X264;
     CodecParameters m_params;
     long m_backends_declined = 0;

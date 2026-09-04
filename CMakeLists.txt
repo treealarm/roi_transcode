@@ -615,6 +615,30 @@ if(SVE_BUILD_TESTS)
     target_compile_options(bitrate_budget_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME bitrate_budget COMMAND bitrate_budget_test)
 
+    # roi_encoder_test drives the pipeline through a backend that fails on purpose, so it
+    # needs the internal header the pipeline lives behind: src/core is PRIVATE on sve
+    # because these are not installed, and the test is inside the project rather than a
+    # consumer of it.
+    # sve_all rather than sve: the fake backend is the only one this test registers, but
+    # default_backend_registry() still has to resolve, and RegisterDeploymentBackends is
+    # generated into the deployment object rather than the core.
+    add_executable(roi_encoder_test tests/unit/roi_encoder_test.cpp)
+    target_link_libraries(roi_encoder_test PRIVATE sve_all)
+    target_include_directories(roi_encoder_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_options(roi_encoder_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME roi_encoder COMMAND roi_encoder_test)
+
+    # The facade under a backend that fails on purpose. Needs the internal assembly header
+    # for the same reason roi_encoder_test needs roi_encoder.h: the seam is inside the
+    # project, not in include/.
+    add_executable(encoder_faults_test tests/unit/encoder_faults_test.cpp)
+    target_link_libraries(encoder_faults_test PRIVATE sve_all)
+    target_include_directories(encoder_faults_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_options(encoder_faults_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME encoder_faults COMMAND encoder_faults_test)
+
     add_executable(v3_policy_test tests/unit/v3_policy_test.cpp)
     target_link_libraries(v3_policy_test PRIVATE sve)
     target_compile_options(v3_policy_test PRIVATE ${SVE_WARNINGS})

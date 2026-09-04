@@ -278,10 +278,40 @@ void a_budget_of_zero_changes_nothing()
     sve::RoiMapBuilder builder;
     const auto dets = builder.detections_from(boxes, quality, 1000, 1000);
 
-    quality.max_protected_fraction = 0.0f;
+    // 1.0, not 0.0. "No cap" is the whole frame: a region cannot be bigger than the frame
+    // it lies in, so a budget of one covers anything. Zero used to spell this because the
+    // cap was skipped when the budget was zero -- since 2026-09-04 zero means what it says,
+    // that nothing may be protected.
+    quality.max_protected_fraction = 1.0f;
     const auto unbudgeted = builder.build(1000, 1000, dets, quality);
     check(unbudgeted.size() == 3 && unbudgeted[0].qp_delta == -6,
         "an unbudgeted person keeps its ladder delta and its halo");
+
+    // And the value that reads as "protect nothing" now does that, rather than the
+    // opposite. This is the case the old spelling made unreachable.
+    quality.max_protected_fraction = 0.0f;
+    const auto forbidden = builder.build(1000, 1000, dets, quality);
+    check(forbidden.size() == 2 && forbidden[0].qp_delta == 0,
+        "a budget of zero leaves the person neutral and takes its halo");
+
+    // The decisive pair, because this person is 42% of the frame and so does not fit the
+    // default 0.25 either -- without a box that *does* fit, zero and the default would
+    // agree by accident and the test would prove nothing. A tenth of the frame fits a
+    // quarter and does not fit nothing.
+    const std::vector<sve::Box> small{
+        box("person", 0.40f, 0.40f, 0.10f, 0.10f, 1.0f),
+    };
+    const auto small_dets = builder.detections_from(small, quality, 1000, 1000);
+
+    quality.max_protected_fraction = 0.25f;
+    const auto fits = builder.build(1000, 1000, small_dets, quality);
+    check(!fits.empty() && fits[0].qp_delta < 0,
+        "a tenth of the frame fits a quarter and keeps its ladder delta");
+
+    quality.max_protected_fraction = 0.0f;
+    const auto denied = builder.build(1000, 1000, small_dets, quality);
+    check(!denied.empty() && denied[0].qp_delta == 0,
+        "the same box under a budget of zero is protected by nothing");
 
     quality.max_protected_fraction = 0.25f;
     const auto budgeted = builder.build(1000, 1000, dets, quality);

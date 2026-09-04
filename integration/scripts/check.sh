@@ -982,7 +982,12 @@ if [[ -f "${SCENES}/crowded/source.mp4" ]]; then
 import json, sys
 d = json.load(open(sys.argv[1])); work = sys.argv[2]
 json.dump(dict(d, samples=[], background_qp_delta=0), open(f"{work}/crowd_flat.json", "w"))
-for tag, frac in (("on", 0.25), ("off", 0.0)):
+# "off" is a number no scene can reach, not 0.0 and not 1.0. It said 0.0 until 2026-09-04,
+# when that value stopped meaning "no budget" and started meaning what it reads as, a budget
+# of none. 1.0 is not "no cap" either: areas are summed and overlapping regions count twice,
+# so a scene with nesting can exceed a budget of one while covering less than the frame.
+# Ten is past anything this fixture or a future one can sum to.
+for tag, frac in (("on", 0.25), ("off", 10.0)):
     json.dump(dict(d, max_protected_fraction=frac), open(f"{work}/crowd_{tag}.json", "w"))
 CROWDCFG
     for tag in flat on off; do

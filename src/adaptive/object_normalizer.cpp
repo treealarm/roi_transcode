@@ -23,6 +23,25 @@ constexpr int32_t kDefaultRegionBudget = 256;
 
 namespace {
 
+/// How much of the frame §12's budget allows to be protected, in pixels.
+///
+/// Written once because it is read twice -- the AABB builder and the block-map builder --
+/// and a meaningful number computed in two places is where one copy changes and the other
+/// does not.
+///
+/// **A fraction of zero means nothing may be protected, and that is a change made
+/// 2026-09-04.** It used to mean the opposite: the budget was computed as `fraction > 0 ?
+/// fraction * area : 0` and then only enforced `if (budget > 0)`, so zero switched the cap
+/// off entirely and every region was protected. Measured before the change: output at 0.0
+/// was byte-identical to output at 1.0. A value that reads as its own opposite is worse
+/// than a missing feature, and no sentinel is needed here -- "no cap" is already spelled
+/// 1.0, because no region can exceed the frame it lies in.
+double protected_area_budget(const Quality& quality, double frame_area)
+{
+    return std::max(0.0f, quality.max_protected_fraction) * frame_area;
+}
+
+
 int clamp_i(int v, int lo, int hi)
 {
     return std::max(lo, std::min(v, hi));
@@ -223,9 +242,7 @@ std::vector<Rect> build_shaped(int width, int height,
         [](const Detection* a, const Detection* b) { return a->importance < b->importance; });
 
     const double frame_area = static_cast<double>(width) * static_cast<double>(height);
-    const double budget = quality.max_protected_fraction > 0.0f
-        ? static_cast<double>(quality.max_protected_fraction) * frame_area
-        : 0.0;
+    const double budget = protected_area_budget(quality, frame_area);
     double spent = 0.0;
 
     const int block = coding_block > 0 ? coding_block : 16;
@@ -248,7 +265,25 @@ std::vector<Rect> build_shaped(int width, int height,
     std::vector<Afforded> afforded;
     afforded.reserve(ordered.size());
 
-    for (const Detection* dp : ordered) {
+    // Two walks, and they go in opposite directions on purpose.
+    //
+    // §15 spends the budget on the critical objects first, so affordability is decided
+    // walking importance *downwards* -- a plate must be able to outbid a wall behind it.
+    // Painting goes the other way, upwards, because the map keeps the last write and the
+    // important object has to be written last. Deciding and painting in one pass means one
+    // of the two orders is wrong, and until 2026-09-04 it was the first: this builder spent
+    // the budget in the ascending order it needs for painting, so the least important
+    // object in the frame was served first and a plate could be refused for a wall that had
+    // already taken the room. RoiMapBuilder::build, which has no painting order to satisfy,
+    // has always spent it descending -- so the two builders disagreed about §12 depending
+    // on whether the backend had a block map.
+    std::vector<const Detection*> by_importance = ordered;
+    std::stable_sort(by_importance.begin(), by_importance.end(),
+        [](const Detection* a, const Detection* b) { return a->importance > b->importance; });
+
+    std::vector<const Detection*> within_budget;
+    within_budget.reserve(by_importance.size());
+    for (const Detection* dp : by_importance) {
         Rect obj{
             .top = dp->y1,
             .bottom = dp->y2,
@@ -262,16 +297,36 @@ std::vector<Rect> build_shaped(int width, int height,
         }
         const double area = static_cast<double>(obj.right - obj.left)
             * static_cast<double>(obj.bottom - obj.top);
-        Afforded a{dp, dp->qp_delta, dp->pad_qp_delta};
-        if (budget > 0.0 && spent + area > budget) {
-            a.body_delta = 0;
-            a.pad_delta = 0;
-        } else {
-            spent += area;
+        if (spent + area > budget) {
+            continue;
         }
-        if (a.body_delta != 0 || a.pad_delta != 0) {
-            afforded.push_back(a);
+        spent += area;
+        within_budget.push_back(dp);
+    }
+
+    for (const Detection* dp : ordered) {
+        Rect obj{
+            .top = dp->y1,
+            .bottom = dp->y2,
+            .left = dp->x1,
+            .right = dp->x2,
+            .qp_delta = dp->qp_delta,
+        };
+        clamp_rect(obj, width, height);
+        if (!rect_valid(obj)) {
+            continue;
         }
+        // What did not fit is painted at zero rather than left unpainted, and the
+        // difference is the whole of §12's rule: the map starts filled with the background
+        // penalty, so an object nobody paints is not neutral, it is *degraded*. A region
+        // nobody could afford to sharpen is still not background. Its halo does go -- a
+        // halo exists to soften a step that is no longer there.
+        //
+        // Until 2026-09-04 this builder skipped them, so the shaped path degraded what the
+        // rectangle path left alone. RoiMapBuilder::build has always emitted the unaffordable
+        // object with a delta of zero; now both do.
+        const bool paid = std::ranges::find(within_budget, dp) != within_budget.end();
+        afforded.push_back(Afforded{dp, paid ? dp->qp_delta : 0, paid ? dp->pad_qp_delta : 0});
     }
 
     // Every halo before every body, for the same reason as the AABB builder: a nested
@@ -301,9 +356,9 @@ std::vector<Rect> build_shaped(int width, int height,
         }
     }
     for (const Afforded& a : afforded) {
-        if (a.body_delta == 0) {
-            continue;
-        }
+        // A body of zero is painted, not skipped. The map starts filled with the background
+        // penalty, so skipping an object leaves it degraded rather than neutral -- which is
+        // the opposite of what §12 says happens to a region the budget could not pay for.
         const Detection* dp = a.dp;
         if (dp->polygon.size() >= 3) {
             std::memset(scratch.data(), 0, scratch.size());
@@ -395,9 +450,7 @@ std::vector<Rect> RoiMapBuilder::build(int width, int height,
     // afford to sharpen is still not background. Its halo goes, though: a halo exists to
     // soften a step that is no longer there.
     const double frame_area = static_cast<double>(width) * static_cast<double>(height);
-    const double budget = quality.max_protected_fraction > 0.0f
-        ? static_cast<double>(quality.max_protected_fraction) * frame_area
-        : 0.0;
+    const double budget = protected_area_budget(quality, frame_area);
     double spent = 0.0;
 
     // Every object before any halo, and that ordering is load-bearing rather than tidy.
@@ -424,7 +477,7 @@ std::vector<Rect> RoiMapBuilder::build(int width, int height,
 
         const double area = static_cast<double>(obj.right - obj.left)
             * static_cast<double>(obj.bottom - obj.top);
-        if (budget > 0.0 && spent + area > budget) {
+        if (spent + area > budget) {
             obj.qp_delta = 0;
         } else {
             spent += area;

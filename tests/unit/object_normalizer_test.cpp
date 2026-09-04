@@ -2,6 +2,7 @@
 #include "object_normalizer.h"
 
 #include <cstddef>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -122,11 +123,77 @@ void at_004_normalization_edge_cases()
     }
 }
 
+/// §12 and §15: when the budget cannot pay for everything, it pays for the important thing.
+///
+/// On the shaped path this was backwards until 2026-09-04. That builder sorts ascending --
+/// it paints onto a block map and the map keeps the last write, so the important object has
+/// to be painted last -- and it decided affordability in the same walk, which served the
+/// least important object in the frame first. The rectangle builder beside it has no
+/// painting order to satisfy and has always spent the budget descending, so the two
+/// disagreed about §12 depending on whether the backend had a block map.
+void the_budget_pays_for_the_important_object_first()
+{
+    constexpr int kW = 1000;
+    constexpr int kH = 1000;
+    // Two equal squares of 9% of the frame each. The budget holds one of them, so which one
+    // it holds is the whole assertion.
+    constexpr double kSquare = 0.09;
+
+    Quality quality;
+    quality.background_qp_delta = 6;
+    quality.pad = 0;
+    quality.max_protected_fraction = static_cast<float>(kSquare * 1.5);
+
+    const auto square = [](int x, int y, int side, float importance, int32_t delta) {
+        Detection d;
+        d.x1 = x;
+        d.y1 = y;
+        d.x2 = x + side;
+        d.y2 = y + side;
+        d.qp_delta = delta;
+        d.pad_qp_delta = 0;
+        d.importance = importance;
+        // A polygon is what selects the shaped builder; a square one keeps the geometry the
+        // same as the rectangle path so that only the ordering is under test. Polygon
+        // vertices are normalised to the frame, unlike the pixel bounds beside them.
+        const float nx0 = static_cast<float>(x) / kW;
+        const float ny0 = static_cast<float>(y) / kH;
+        const float nx1 = static_cast<float>(x + side) / kW;
+        const float ny1 = static_cast<float>(y + side) / kH;
+        d.polygon = {{nx0, ny0}, {nx1, ny0}, {nx1, ny1}, {nx0, ny1}};
+        return d;
+    };
+
+    const int side = static_cast<int>(std::sqrt(kSquare) * kW);
+    // The important one second in the list, so that a builder serving them in arrival order
+    // would fail this too.
+    const std::vector<Detection> dets{
+        square(50, 50, side, 0.20f, -4),
+        square(600, 600, side, 0.95f, -10),
+    };
+
+    RoiMapBuilder builder;
+    const std::vector<Rect> rects = builder.build(kW, kH, dets, quality, 16, 0);
+    QpDeltaMapBuilder qp_map;
+    const auto grid = qp_map.build(kW, kH, 16, rects);
+
+    const auto delta_at = [&](int x, int y) {
+        return grid.deltas[static_cast<std::size_t>(y / 16) * grid.cols + (x / 16)];
+    };
+    // The important square keeps its ladder delta; the weak one is left neutral rather than
+    // degraded -- a region nobody can afford to sharpen is still not background.
+    CHECK(delta_at(600 + side / 2, 600 + side / 2) == -10);
+    CHECK(delta_at(50 + side / 2, 50 + side / 2) == 0);
+    // And the background around them is still background.
+    CHECK(delta_at(kW - 8, 8) == 6);
+}
+
 } // namespace
 
 int main()
 {
     at_004_normalization_edge_cases();
+    the_budget_pays_for_the_important_object_first();
 
     RoiMapBuilder builder;
 
@@ -204,7 +271,7 @@ int main()
     poly_q.pad = 0;
     poly_q.margin_mode = MarginMode::FractionOfFrame;
     poly_q.min_roi_side = 0;
-    poly_q.max_protected_fraction = 0; // no area budget for this check
+    poly_q.max_protected_fraction = 1; // the whole frame may be protected: no cap here
     poly_q.kinds["vehicle"] = KindQuality{-8, 0.0};
     Box tri;
     tri.kind = "vehicle";

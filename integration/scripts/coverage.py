@@ -15,18 +15,27 @@ target (`sve_examples`) and which the unit tests never touch, because what exerc
 check.sh driving the CLI. Counting 539 lines of example against the core's gate would report
 a number that no change to the library could move.
 
+**Lines are merged across objects, not read off gcov's summary.** A source compiled into
+two targets -- src/metadata/cbor.cpp is in the library and in cbor_test -- has one .gcda per
+object, and each one only knows what its own binary ran. gcov's own summary for that case is
+not a union: handed both files it reported "489" lines for a 163-line source and averaged the
+two percentages into it. So each .gcda is converted on its own with `gcov -i` and the per-line
+counts are unioned here: a line is covered when any binary executed it, and the denominator is
+the source's line count once.
+
     build:   cmake -S . -B build-cov -G Ninja -DCMAKE_BUILD_TYPE=Debug \
                  -DCMAKE_CXX_FLAGS="--coverage -O0" -DCMAKE_EXE_LINKER_FLAGS="--coverage"
     run:     ctest --test-dir build-cov
     report:  integration/scripts/coverage.py build-cov src/core src/adaptive src/metadata
+    lines:   integration/scripts/coverage.py --uncovered build-cov src/core/roi_encoder.cpp
 """
 
 # The FFmpeg RAII wrappers: in src/core by history, used by the example application and by
 # the libavcodec backend group, and by nothing §41 calls core. Reported on its own line
-# rather than excluded, and the reason is worth stating plainly: taking it out of the core
-# figure moves that figure from 79.76% to 81.2%, across §41's threshold, and a rule chosen
-# after seeing which side of a threshold it lands on is not a measurement. The number this
-# project stands behind is the one computed by the rule that was set first.
+# rather than excluded, and the reason is worth stating plainly: a rule chosen after seeing
+# which side of a threshold it lands on is not a measurement. The number this project
+# stands behind is the one computed by the rule that was set first, and taking these lines
+# out would move it by a third of a point either way.
 FFMPEG_HELPERS = ("src/core/av_raii.h",)
 
 # §52's example application: in src/core by history, not part of what §41 calls core.
@@ -39,38 +48,72 @@ EXAMPLE_APPLICATION = (
     "src/core/file_mux_sink.h",
 )
 import collections
+import gzip
+import json
 import os
-import re
 import subprocess
 import sys
+import tempfile
 
-def main(argv):
-    build, prefixes = argv[0], argv[1:]
-    root = os.path.dirname(os.path.abspath(build.rstrip("/")))
+def line_counts(build, root, prefixes):
+    """source path -> {line number: times executed}, unioned over every object."""
     gcda = []
     for dirpath, _dirs, files in os.walk(build):
-        gcda += [os.path.join(dirpath, f) for f in files if f.endswith(".gcda")]
+        gcda += [os.path.abspath(os.path.join(dirpath, f))
+                 for f in files if f.endswith(".gcda")]
     if not gcda:
+        return None
+    hits = collections.defaultdict(dict)
+    with tempfile.TemporaryDirectory() as work:
+        for one in gcda:
+            # Checked rather than assumed: a gcov that fails writes no report, and the
+            # object's lines then leave both halves of the ratio at once -- the gate would
+            # read as a percentage of whatever still worked, and nothing would say so.
+            done = subprocess.run(["gcov", "-i", "-m", "-o", os.path.dirname(one), one],
+                                  cwd=work, capture_output=True, text=True)
+            if done.returncode != 0:
+                raise SystemExit(
+                    f"gcov failed on {one} (exit {done.returncode}): {done.stderr.strip()}")
+            for name in os.listdir(work):
+                with gzip.open(os.path.join(work, name), "rt", encoding="utf-8") as fh:
+                    report = json.load(fh)
+                # gcno records the source path as the compiler saw it, which for a CMake
+                # build is relative to the build directory rather than to the repository.
+                base = report.get("current_working_directory", work)
+                for entry in report.get("files", []):
+                    path = os.path.normpath(os.path.join(base, entry["file"]))
+                    rel = os.path.relpath(path, root) if os.path.isabs(path) else path
+                    if not any(rel.startswith(p) or ("/" + p) in rel for p in prefixes):
+                        continue
+                    into = hits[rel]
+                    for line in entry.get("lines", []):
+                        number = line["line_number"]
+                        into[number] = into.get(number, 0) + line["count"]
+                os.remove(os.path.join(work, name))
+    return hits
+
+def main(argv):
+    uncovered_only = argv and argv[0] == "--uncovered"
+    if uncovered_only:
+        argv = argv[1:]
+    build, prefixes = argv[0], argv[1:]
+    root = os.path.dirname(os.path.abspath(build.rstrip("/")))
+    hits = line_counts(build, root, prefixes)
+    if hits is None:
         print("no .gcda files: was the instrumented build run?", file=sys.stderr)
         return 2
-    per_file = collections.defaultdict(lambda: [0, 0])   # source -> [covered, total]
-    # One gcov invocation per object, parsed from its own report rather than from the
-    # summary: the summary mixes headers and system code in with ours.
-    out = subprocess.run(["gcov", "-n", "-b", *gcda], capture_output=True, text=True).stdout
-    current = None
-    for line in out.splitlines():
-        m = re.match(r"File '(.+)'", line)
-        if m:
-            current = os.path.normpath(m.group(1))
-            continue
-        m = re.match(r"Lines executed:([0-9.]+)% of ([0-9]+)", line)
-        if m and current:
-            pct, total = float(m.group(1)), int(m.group(2))
-            rel = os.path.relpath(current, root) if os.path.isabs(current) else current
-            if any(rel.startswith(p) or ("/" + p) in rel for p in prefixes):
-                covered = round(total * pct / 100.0)
-                per_file[rel] = [covered, total]
-            current = None
+    if uncovered_only:
+        # Which lines a new test would have to reach. Printed rather than guessed at from
+        # a percentage, because "55 lines short" says nothing about what they are.
+        for name in sorted(hits):
+            missing = sorted(n for n, count in hits[name].items() if count == 0)
+            if missing:
+                print(f"{name}: {', '.join(str(n) for n in missing)}")
+        return 0
+    # A header whose inline functions were never instantiated anywhere contributes no
+    # lines at all; printing it as 0/0 would be a row that can never move.
+    per_file = {name: [sum(1 for c in lines.values() if c > 0), len(lines)]
+                for name, lines in hits.items() if lines}
     if not per_file:
         print("no source under " + ", ".join(prefixes), file=sys.stderr)
         return 2

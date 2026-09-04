@@ -1,5 +1,7 @@
 #include "roi_json.h"
 
+#include <cstdio>
+
 #include <algorithm>
 
 #include <fstream>
@@ -71,10 +73,20 @@ RoiJson load_roi_json(const std::string& path)
     if (root.contains("max_regions")) {
         doc.quality.max_regions = root.value("max_regions", 32);
     }
-    // §15's area budget. Present so a config can turn it off or move it -- the default is a
-    // quarter of the frame and lives in Quality, not here.
+    // §15's area budget. Present so a config can move it -- the default is a quarter of
+    // the frame and lives in Quality, not here.
     if (root.contains("max_protected_fraction")) {
         doc.quality.max_protected_fraction = root.value("max_protected_fraction", 0.25f);
+        if (doc.quality.max_protected_fraction == 0.0f) {
+            // Said out loud because the meaning of this exact value changed on 2026-09-04,
+            // and a document written before that meant the opposite of what it now does.
+            // A silently reinterpreted config is the shape of failure §50 forbids, and this
+            // is the only place that can see the document as written.
+            std::fprintf(stderr,
+                "roi json: max_protected_fraction is 0, which protects nothing. Before "
+                "2026-09-04 this value switched the budget off and protected everything; "
+                "if that is what was meant, the value for it is now larger than 1.\n");
+        }
     }
 
     if (root.contains("kinds") && root["kinds"].is_object()) {

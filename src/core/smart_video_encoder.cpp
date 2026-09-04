@@ -9,6 +9,7 @@
 #include "object_normalizer.h"
 #include "packet_sink.h"
 #include "qp_slew.h"
+#include "encoder_assembly.h"
 #include "roi_encoder.h"
 #include "roi_lag.h"
 #include "sve/metadata.h"
@@ -68,7 +69,11 @@ const char* encoder_state_name(EncoderState s)
 /// and the second copy is where the two drifted: only one of them fed the bitrate budget
 /// from its own output. Here there is one.
 struct SmartVideoEncoder::Impl : PacketSink {
-    explicit Impl(const EncoderConfig& cfg) : config(cfg) {}
+    Impl(const EncoderConfig& cfg, const BackendRegistry& registry)
+        : config(cfg)
+        , encoder(registry)
+    {
+    }
 
     EncoderConfig config;
     BackendConfig backend_config;
@@ -150,17 +155,25 @@ struct SmartVideoEncoder::Impl : PacketSink {
 
     void end() override
     {
-        // Anything still held has no packet and never will. §19.4 asks for complete
-        // synchronisation, so the gap is counted and said out loud rather than leaving a
-        // file that is simply shorter than the stream.
-        if (!pending_sidecar.empty()) {
-            sidecar_orphans += static_cast<int64_t>(pending_sidecar.size());
-            pending_sidecar.clear();
-        }
-        if (sidecar_orphans > 0) {
+        // Two different failures, counted apart because they are not the same fault and a
+        // single number would be both wrong and ambiguous.
+        //
+        // `sidecar_unmatched_packets` is a packet arriving under a timestamp nothing was
+        // submitted with. `pending_sidecar` is the reverse: a frame submitted whose packet
+        // never came. A backend that skews timestamps produces one of each per frame, and
+        // adding them reported eight for four frames until 2026-09-04 -- the same frame
+        // counted once on the way in and once on the way out.
+        const auto never_emitted = static_cast<int64_t>(pending_sidecar.size());
+        pending_sidecar.clear();
+        if (never_emitted > 0) {
             log.warn(std::format("sidecar: {} frame(s) submitted whose packet never "
                                  "arrived; records and packets do not correspond",
-                sidecar_orphans));
+                never_emitted));
+        }
+        if (sidecar_unmatched_packets > 0) {
+            log.warn(std::format("sidecar: {} packet(s) arrived under a timestamp no frame "
+                                 "was submitted with; records and packets do not correspond",
+                sidecar_unmatched_packets));
         }
     }
 
@@ -174,8 +187,9 @@ struct SmartVideoEncoder::Impl : PacketSink {
         const auto it = pending_sidecar.find(pts);
         if (it == pending_sidecar.end()) {
             // A packet whose frame we never held. Not silently skipped: §19.3's guarantee
-            // is that records correspond to packets, and a missing one breaks it.
-            ++sidecar_orphans;
+            // is that records correspond to packets, and a missing one breaks it. Counted
+            // separately from the frames that never produced a packet -- see end().
+            ++sidecar_unmatched_packets;
             return;
         }
         config.settings.metadata.sidecar_sink(encode_sidecar_ndjson(
@@ -313,7 +327,10 @@ struct SmartVideoEncoder::Impl : PacketSink {
     /// Frames whose packet never arrived to claim them. A packet dropped or a PTS that
     /// came back changed would leave one here, and §19.4 wants 100% synchronisation --
     /// so this is counted and reported rather than left as a quietly shorter file.
-    int64_t sidecar_orphans = 0;
+    /// Packets that arrived under a timestamp no frame was submitted with. The mirror of
+    /// `pending_sidecar` left non-empty at end(), and counted apart from it: one is a
+    /// record with no packet, the other a packet with no record.
+    int64_t sidecar_unmatched_packets = 0;
 
     /// §19.1 keeps `objects` and `roi_info` as separate fields, and §19.2's payload is the
     /// objects -- so what goes in is what the caller submitted, not what the pipeline made
@@ -371,6 +388,12 @@ SmartVideoEncoder::~SmartVideoEncoder() = default;
 
 std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const EncoderConfig& config)
 {
+    return CreateVideoEncoderIn(config, default_backend_registry());
+}
+
+std::unique_ptr<SmartVideoEncoder> CreateVideoEncoderIn(
+    const EncoderConfig& config, const BackendRegistry& registry)
+{
     if (!config.input.valid()) {
         throw EncoderError(Status::InvalidArgument("input video format is not usable"));
     }
@@ -384,7 +407,7 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const EncoderConfig& confi
             "a sidecar format was requested without a sidecar sink to write it to"));
     }
 
-    auto impl = std::make_unique<SmartVideoEncoder::Impl>(config);
+    auto impl = std::make_unique<SmartVideoEncoder::Impl>(config, registry);
     impl->log = Logger(config.log);
     impl->policy = config.settings.fallback;
 
@@ -452,7 +475,7 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const EncoderConfig& confi
     // §8.4: named outright and unable to produce this codec -- X264 asked for HEVC, say --
     // is Unsupported. Under Auto the same backend is merely skipped, which is why this
     // check is here and not in the chain walk.
-    if (ep.kind != Backend::Auto && !backend_supports(ep.kind, ep.codec)) {
+    if (ep.kind != Backend::Auto && !backend_supports(ep.kind, ep.codec, registry)) {
         throw EncoderError(Status::Unsupported(std::format("the {} backend cannot encode {}",
             backend_name(ep.kind), ep.codec == Codec::H264 ? "H.264" : "HEVC")));
     }
@@ -678,6 +701,13 @@ Status SmartVideoEncoder::Stop()
         "{} fallback(s), {} region(s) dropped",
         encoder_state_name(s.state), s.stats.frames_submitted, s.stats.packets_received,
         s.stats.bytes_encoded, s.stats.fallbacks_applied, s.stats.regions_dropped));
+    // §19.4's report on the records that never got a packet. It lives in the sink's end(),
+    // and until 2026-09-04 nothing on this path called it: the counter was kept and thrown
+    // away, so a sidecar that had stopped corresponding to the stream said nothing at all.
+    // Stop is where it belongs: §8.13 makes it the end of an encode. A caller who simply
+    // destroys the encoder still gets nothing, and that is deliberate -- warning from a
+    // destructor is a worse trade than a caller who skipped the documented ending.
+    s.end();
     s.queued.clear();
     s.state = EncoderState::Stopped;
     return Status::Ok();

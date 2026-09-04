@@ -102,7 +102,14 @@ enum class CodecProfile {
 /// that could never serve the requested codec has to be skipped before it is asked for a
 /// device it may not have. The hardware backends answer yes to both; the two software ones
 /// answer for their own library only.
-bool backend_supports(Backend kind, Codec codec);
+///
+/// `registry` is which deployment is being asked. It defaults to the process-wide one, so
+/// the ordinary caller passes nothing; sve/backend_registry.h says an application may
+/// assemble its own, and this is one of the two entry points that has to honour that.
+class BackendRegistry;
+BackendRegistry& default_backend_registry();
+bool backend_supports(Backend kind, Codec codec,
+    const BackendRegistry& registry = default_backend_registry());
 
 
 
@@ -252,6 +259,20 @@ struct Quality {
     ///
     /// A quarter of the frame by default. Below that the codec still has three quarters to
     /// take bits from; above it the archive says the file grows instead of shrinking.
+    ///
+    /// 0 protects nothing. Until 2026-09-04 it meant the opposite -- it switched the cap
+    /// off, and output at 0.0 was byte-identical to output at 1.0. Negative is read as zero.
+    ///
+    /// **1.0 is not "no cap".** What is compared against the budget is the sum of the
+    /// regions' areas, and overlapping regions each contribute their own: a face inside a
+    /// person spends its area twice. So a frame whose regions cover 60% of it can still
+    /// exceed a budget of 1.0. To mean "never refuse anything", give a number larger than
+    /// the deepest nesting can reach -- 10 is beyond any plausible one.
+    ///
+    /// Worth knowing before reaching for it: measured on real footage 2026-09-04, this
+    /// setting moves the encoded size by under one percent whatever it is set to, including
+    /// with a single box over half the frame (docs/tuning.md, раздел 9). It is a fuse, not
+    /// a dial -- what moves the size is `background_qp_delta`.
     float max_protected_fraction = 0.25f;
 };
 
