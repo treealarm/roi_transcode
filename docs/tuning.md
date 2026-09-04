@@ -248,7 +248,7 @@ cmake --build build-cov && ctest --test-dir build-cov
 python3 integration/scripts/coverage.py build-cov src/core src/adaptive src/metadata
 ```
 
-**Измерено 2026-09-03: ядро 78.43%** при требуемых §41 восьмидесяти. Пример приложения
+**Измерено 2026-09-03: ядро 79.76%** при требуемых §41 восьмидесяти. Пример приложения
 (`transcode_file`, `session`, `frame_input`, `file_mux_sink`) считается отдельной строкой и
 по юнит-тестам даёт 0%: его гоняет `check.sh` через CLI, а не `ctest`.
 

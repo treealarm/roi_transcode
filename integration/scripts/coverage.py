@@ -21,6 +21,14 @@ a number that no change to the library could move.
     report:  integration/scripts/coverage.py build-cov src/core src/adaptive src/metadata
 """
 
+# The FFmpeg RAII wrappers: in src/core by history, used by the example application and by
+# the libavcodec backend group, and by nothing §41 calls core. Reported on its own line
+# rather than excluded, and the reason is worth stating plainly: taking it out of the core
+# figure moves that figure from 79.76% to 81.2%, across §41's threshold, and a rule chosen
+# after seeing which side of a threshold it lands on is not a measurement. The number this
+# project stands behind is the one computed by the rule that was set first.
+FFMPEG_HELPERS = ("src/core/av_raii.h",)
+
 # §52's example application: in src/core by history, not part of what §41 calls core.
 EXAMPLE_APPLICATION = (
     "src/core/transcode_file.cpp",
@@ -81,6 +89,14 @@ def main(argv):
         print(f"§52 example application, reported apart: "
               f"{100.0 * e_cov / max(e_tot, 1):.2f}% ({e_cov}/{e_tot} lines) -- "
               f"exercised by check.sh through the CLI, not by these tests")
+    helpers = {n: v for n, v in core.items() if n in FFMPEG_HELPERS}
+    if helpers:
+        h_cov = sum(v[0] for v in helpers.values())
+        h_tot = sum(v[1] for v in helpers.values())
+        print(f"of which FFmpeg RAII helpers (counted above): "
+              f"{100.0 * h_cov / max(h_tot, 1):.2f}% ({h_cov}/{h_tot} lines) -- "
+              f"used by the example and the libavcodec backends; without them the core "
+              f"figure is {100.0 * (covered - h_cov) / max(total - h_tot, 1):.2f}%")
     return 0
 
 if __name__ == "__main__":

@@ -194,10 +194,104 @@ void a_truncated_stream_does_not_read_past_its_end()
     CHECK(!r2.text(text));
 }
 
+
+/// The two argument widths nothing had ever encoded: sixteen and thirty-two bits.
+///
+/// CBOR spends one byte on an argument below 24, then jumps to 1, 2, 4 or 8 extra bytes.
+/// The suite covered the ends and skipped the middle, and the middle is where a real payload
+/// lives: a sidecar record with 300 objects writes a 16-bit array header, and a PTS in
+/// microseconds writes a 32-bit one. Both were unexecuted lines until 2026-09-03.
+void the_middle_argument_widths_match_the_rfc()
+{
+    std::vector<uint8_t> out;
+    // 16-bit: the first value that needs it, and the last it can hold.
+    cbor::put_uint(out, 256);          EXPECT(out, "190100"); out.clear();
+    cbor::put_uint(out, 65535);        EXPECT(out, "19ffff"); out.clear();
+    // 32-bit: the same two boundaries one width up.
+    cbor::put_uint(out, 65536);        EXPECT(out, "1a00010000"); out.clear();
+    cbor::put_uint(out, 4294967295ull); EXPECT(out, "1affffffff"); out.clear();
+    // And the first value that does not fit in 32 bits takes the 64-bit form.
+    cbor::put_uint(out, 4294967296ull); EXPECT(out, "1b0000000100000000"); out.clear();
+
+    // Array and map headers use the same widths -- that is the point of put_head being one
+    // function -- so a big collection is the same encoding with a different major type.
+    cbor::put_array(out, 300);         EXPECT(out, "99012c"); out.clear();
+    cbor::put_map(out, 70000);         EXPECT(out, "ba00011170"); out.clear();
+}
+
+/// put_int with a non-negative value: the branch that writes an unsigned head from the
+/// signed entry point. Every existing call passed it something negative, so the positive
+/// half of the function had never run.
+void put_int_writes_both_signs()
+{
+    std::vector<uint8_t> out;
+    cbor::put_int(out, 0);             EXPECT(out, "00"); out.clear();
+    cbor::put_int(out, 42);            EXPECT(out, "182a"); out.clear();
+    cbor::put_int(out, -42);           EXPECT(out, "3829"); out.clear();
+    // The extremes, where the sign matters most: CBOR encodes a negative as -1-n, so the
+    // most negative int64 is the largest unsigned argument.
+    cbor::put_int(out, 9223372036854775807ll);
+    EXPECT(out, "1b7fffffffffffffff"); out.clear();
+    cbor::put_int(out, -9223372036854775807ll - 1);
+    EXPECT(out, "3b7fffffffffffffff"); out.clear();
+}
+
+/// Reading maps, and reading signed integers of both signs. Reader::map had no test at all.
+void a_reader_reads_maps_and_signed_integers()
+{
+    std::vector<uint8_t> out;
+    cbor::put_map(out, 2);
+    cbor::put_text(out, "pts");
+    cbor::put_int(out, 1234);          // positive through the signed reader
+    cbor::put_text(out, "delta");
+    cbor::put_int(out, -9);
+
+    cbor::Reader r(out);
+    uint64_t pairs = 0;
+    CHECK(r.map(pairs) && pairs == 2);
+    std::string key;
+    int64_t value = 0;
+    CHECK(r.text(key) && key == "pts");
+    CHECK(r.integer(value) && value == 1234);
+    CHECK(r.text(key) && key == "delta");
+    CHECK(r.integer(value) && value == -9);
+    CHECK(r.done());
+}
+
+/// A map header asked of something that is not a map leaves the stream where it was, the
+/// same contract the other readers keep. Without this the failure path in Reader::map --
+/// the one that restores the position -- is never taken.
+void a_reader_refuses_a_map_that_is_not_there()
+{
+    std::vector<uint8_t> out;
+    cbor::put_array(out, 3);
+    cbor::Reader r(out);
+    uint64_t pairs = 99;
+    CHECK(!r.map(pairs));
+    CHECK(pairs == 99);
+    // The array is still readable afterwards, which is what "leaves the stream alone" means.
+    uint64_t count = 0;
+    CHECK(r.array(count) && count == 3);
+
+    // And the same for the signed reader against text.
+    std::vector<uint8_t> other;
+    cbor::put_text(other, "nine");
+    cbor::Reader r2(other);
+    int64_t value = 5;
+    CHECK(!r2.integer(value));
+    CHECK(value == 5);
+    std::string text;
+    CHECK(r2.text(text) && text == "nine");
+}
+
 } // namespace
 
 int main()
 {
+    the_middle_argument_widths_match_the_rfc();
+    put_int_writes_both_signs();
+    a_reader_reads_maps_and_signed_integers();
+    a_reader_refuses_a_map_that_is_not_there();
     unsigned_integers_match_the_rfc();
     negative_integers_match_the_rfc();
     strings_arrays_and_maps_match_the_rfc();

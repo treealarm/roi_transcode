@@ -1,0 +1,178 @@
+// §50's rule, in the four places that implement it -- "no silent degradation".
+//
+// Each guard answers the same question for one degradation: the caller asked for something
+// this encoder cannot do, so either say so and refuse (FallbackPolicy::Strict), or do the
+// lesser thing and say that too (Permissive). What §50 forbids is the third option, which is
+// to do the lesser thing quietly, and the only way to tell that apart from the second is to
+// look at whether anything was logged.
+//
+// Two properties per guard, and the second is the one that a change would break silently:
+//
+//   * Strict refuses with Unsupported, carrying the same text the log would have had;
+//   * Permissive returns Ok, logs once, and does not log again -- these are called per
+//     frame, so a guard that forgot its `warned` flag would bury the encode in its own
+//     warnings at thirty lines a second.
+//
+// Written 2026-09-03, when the coverage measurement §41 asks for showed the Strict half of
+// every one of them had never run.
+
+#include "codec_id.h"
+#include "encoder_runtime_warnings.h"
+
+#include <cstdio>
+#include <string>
+#include <vector>
+
+using namespace sve;
+
+namespace {
+
+int failures = 0;
+
+void check(bool ok, const std::string& what)
+{
+    if (!ok) {
+        std::fprintf(stderr, "FAIL: %s\n", what.c_str());
+        ++failures;
+    }
+}
+
+/// A logger that keeps what it was told, so "did it say anything" is a question with an
+/// answer rather than something to read off a terminal.
+struct Recorder {
+    std::vector<std::string> lines;
+    Logger logger()
+    {
+        return Logger([this](LogLevel, std::string_view text) {
+            lines.emplace_back(text);
+        });
+    }
+};
+
+EncoderCapabilities without_sei()
+{
+    EncoderCapabilities caps;
+    caps.sei = false;
+    caps.qp_map = false;
+    caps.max_roi_regions = 4;
+    return caps;
+}
+
+void strict_refuses_and_permissive_reports_once()
+{
+    const EncoderCapabilities caps = without_sei();
+
+    // §19.2: bitstream metadata asked of an encoder that cannot carry it.
+    {
+        Recorder strict_log;
+        bool warned = false;
+        const Status s = guard_sei_unsupported(true, caps, FallbackPolicy::Strict,
+            strict_log.logger(), warned);
+        check(s.code() == StatusCode::Unsupported, "strict SEI guard refuses");
+        check(!s.message().empty() && strict_log.lines.size() == 1,
+            "strict SEI guard says why, once");
+
+        Recorder permissive_log;
+        bool warned_p = false;
+        check(guard_sei_unsupported(true, caps, FallbackPolicy::Permissive,
+                  permissive_log.logger(), warned_p).ok(),
+            "permissive SEI guard continues");
+        check(permissive_log.lines.size() == 1, "permissive SEI guard warns");
+        guard_sei_unsupported(true, caps, FallbackPolicy::Permissive,
+            permissive_log.logger(), warned_p);
+        check(permissive_log.lines.size() == 1,
+            "and does not warn again -- this runs per frame");
+    }
+
+    // §22: regions cut down to what the backend accepts.
+    {
+        Recorder strict_log;
+        bool warned = false;
+        const Status s = guard_roi_regions_dropped(3, caps, Codec::H264,
+            FallbackPolicy::Strict, strict_log.logger(), warned);
+        check(s.code() == StatusCode::Unsupported, "strict region guard refuses");
+        check(s.message().find("4") != std::string::npos,
+            "and names the limit the backend gave");
+
+        Recorder permissive_log;
+        bool warned_p = false;
+        check(guard_roi_regions_dropped(3, caps, Codec::H265, FallbackPolicy::Permissive,
+                  permissive_log.logger(), warned_p).ok(),
+            "permissive region guard continues");
+        check(permissive_log.lines.size() == 1, "permissive region guard warns");
+        guard_roi_regions_dropped(3, caps, Codec::H265, FallbackPolicy::Permissive,
+            permissive_log.logger(), warned_p);
+        check(permissive_log.lines.size() == 1, "and warns only once");
+    }
+
+    // §22 again: a per-block map handed to a backend that takes rectangles.
+    {
+        Recorder strict_log;
+        bool warned = false;
+        const Status s = guard_qp_map_quantized(true, caps, FallbackPolicy::Strict,
+            strict_log.logger(), warned);
+        check(s.code() == StatusCode::Unsupported, "strict qp-map guard refuses");
+
+        Recorder permissive_log;
+        bool warned_p = false;
+        check(guard_qp_map_quantized(true, caps, FallbackPolicy::Permissive,
+                  permissive_log.logger(), warned_p).ok(),
+            "permissive qp-map guard continues");
+        check(permissive_log.lines.size() == 1, "permissive qp-map guard warns");
+    }
+}
+
+/// Nothing to report is reported as nothing: a guard that fires when the capability is
+/// present would refuse encodes that are perfectly fine, which is the opposite failure and
+/// just as silent from the caller's side.
+void a_guard_says_nothing_when_there_is_nothing_to_say()
+{
+    EncoderCapabilities caps;
+    caps.sei = true;
+    caps.qp_map = true;
+    caps.max_roi_regions = 0;
+
+    Recorder log;
+    bool warned = false;
+    check(guard_sei_unsupported(true, caps, FallbackPolicy::Strict, log.logger(), warned).ok(),
+        "an encoder that carries SEI is not refused");
+    check(guard_qp_map_quantized(true, caps, FallbackPolicy::Strict, log.logger(), warned).ok(),
+        "an encoder with a block map is not refused");
+    check(guard_roi_regions_dropped(0, caps, Codec::H264, FallbackPolicy::Strict,
+              log.logger(), warned).ok(),
+        "nothing dropped is nothing to report");
+    check(log.lines.empty(), "and none of them said anything");
+}
+
+/// The codec, in both vocabularies. Small, documented, and never checked: "anything that is
+/// not HEVC becomes H.264" is the SameAsSource rule, and the reverse direction has to agree
+/// with it or a file gets a tag its bitstream does not match.
+void the_codec_survives_both_directions()
+{
+    check(codec_from_av_id(AV_CODEC_ID_H264) == Codec::H264, "H.264 comes back as H.264");
+    check(codec_from_av_id(AV_CODEC_ID_HEVC) == Codec::H265, "HEVC comes back as HEVC");
+    // The documented rule for everything else, spelled with a codec nothing here encodes.
+    check(codec_from_av_id(AV_CODEC_ID_VP9) == Codec::H264,
+        "anything that is not HEVC becomes H.264");
+
+    check(av_id_from_codec(Codec::H264) == AV_CODEC_ID_H264, "H.264 goes out as H.264");
+    check(av_id_from_codec(Codec::H265) == AV_CODEC_ID_HEVC, "HEVC goes out as HEVC");
+    check(codec_from_av_id(av_id_from_codec(Codec::H264)) == Codec::H264, "H.264 round trip");
+    check(codec_from_av_id(av_id_from_codec(Codec::H265)) == Codec::H265, "HEVC round trip");
+}
+
+} // namespace
+
+int main()
+{
+    strict_refuses_and_permissive_reports_once();
+    a_guard_says_nothing_when_there_is_nothing_to_say();
+    the_codec_survives_both_directions();
+
+    if (failures > 0) {
+        std::fprintf(stderr, "runtime_warnings_test: %d failure(s)\n", failures);
+        return 1;
+    }
+    std::puts("runtime_warnings_test ok");
+    return 0;
+}

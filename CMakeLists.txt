@@ -750,6 +750,14 @@ if(SVE_BUILD_TESTS)
     # The other half of a surface check, and not an add_test for the same reason: what it
     # prints means something only against what the Python module exposes.
     # integration/scripts/python-enum-parity.py is that comparison.
+    # §50's guards, tested directly: they are pure functions, and the Strict half of each
+    # had never run until the coverage measurement said so.
+    add_executable(runtime_warnings_test tests/unit/runtime_warnings_test.cpp)
+    target_link_libraries(runtime_warnings_test PRIVATE sve_all)
+    target_include_directories(runtime_warnings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
+    target_compile_options(runtime_warnings_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME runtime_warnings COMMAND runtime_warnings_test)
+
     # Every enumerator has a name of its own, asked of the library's own naming functions.
     add_executable(names_test tests/unit/names_test.cpp)
     target_link_libraries(names_test PRIVATE sve_all)
