@@ -155,6 +155,17 @@ public:
             return Status::Unsupported("the x265 backend encodes HEVC only");
         }
         if (config.input.pixel_format != PixelFormat::YUV420P) {
+            // Ten bits get their own answer, because "not wired yet" is the wrong reason
+            // and points at the wrong fix. libx265 is packaged per depth, and what a build
+            // links decides the matter: this one answers x265_max_bit_depth, and where that
+            // is 8 there is nothing to wire -- the library cannot encode ten bits at all.
+            // §55 asks for that number in the build manifest, and it is there since
+            // 2026-09-03 (sve::build::kX265BitDepth).
+            if (config.input.pixel_format == PixelFormat::P010) {
+                return Status::Unsupported(std::string(
+                    "ten-bit input needs a ten-bit libx265; this build links one with "
+                    "x265_max_bit_depth=") + std::to_string(x265_max_bit_depth));
+            }
             return Status::Unsupported(std::string("the x265 backend takes YUV420P; ")
                 + pixel_format_name(config.input.pixel_format) + " is not wired yet");
         }

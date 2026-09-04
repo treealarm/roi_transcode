@@ -24,6 +24,12 @@ inline constexpr const char* kBuildType = "@CMAKE_BUILD_TYPE@";
 inline constexpr const char* kCxxStandard = "@CMAKE_CXX_STANDARD@";
 inline constexpr const char* kX264Version = "@X264_VERSION@";
 inline constexpr const char* kX265Version = "@X265_VERSION@";
+/// §55 asks for the bit depth of each, and it is not a property of the version: the same
+/// libx265 release is packaged as an 8-bit build or a 10-bit one, and which one an artefact
+/// carries decides whether §15.3's ten-bit profile is reachable on CPU at all. Measured
+/// 2026-09-03: this toolchain's libx265 answers 8, so P010 on CPU is not unwired but absent.
+inline constexpr const char* kX264BitDepth = "@SVE_X264_BIT_DEPTH@";
+inline constexpr const char* kX265BitDepth = "@SVE_X265_BIT_DEPTH@";
 inline constexpr const char* kFfmpegLibavutilVersion = "@FFMPEG_libavutil_VERSION@";
 inline constexpr const char* kFeatures = "@SVE_MANIFEST_FEATURES_TEXT@";
 

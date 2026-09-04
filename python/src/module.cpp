@@ -43,6 +43,10 @@ PYBIND11_MODULE(_core, m)
     manifest["cxx_abi"] = std::to_string(_GLIBCXX_USE_CXX11_ABI);
     manifest["libx264"] = sve::build::kX264Version;
     manifest["libx265"] = sve::build::kX265Version;
+    // §55 names bit depth beside the versions, and it is the field that says whether ten
+    // bits are reachable on this artefact's CPU path at all.
+    manifest["libx264_bit_depth"] = sve::build::kX264BitDepth;
+    manifest["libx265_bit_depth"] = sve::build::kX265BitDepth;
     manifest["ffmpeg_libavutil"] = sve::build::kFfmpegLibavutilVersion;
     manifest["features"] = sve::build::kFeatures;
     manifest["license"] = sve::build::kLicense;

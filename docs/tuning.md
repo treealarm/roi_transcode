@@ -164,8 +164,12 @@ SOAK_SECONDS=28800 SOAK_ENCODER=x264direct ./integration/scripts/soak-check.sh b
 | бэкенд | что получилось |
 |---|---|
 | `qsv` h265 | `Main 10`, `yuv420p10le`, 300 кадров — работает |
-| `x265direct` h265 | отказ: «the x265 backend takes YUV420P; P010 is not wired yet» |
+| `x265direct` h265 | отказ: «ten-bit input needs a ten-bit libx265; this build links one with x265_max_bit_depth=8» |
 | `x264direct` | к десяти битам неприменим: §15.3 — профиль HEVC |
+
+Проверить свою сборку можно, не запуская кодирование: `build_manifest` несёт глубину обеих
+библиотек (`libx264_bit_depth`, `libx265_bit_depth`). У этой сборки libx265 — `8`, поэтому
+CPU-путь на десяти битах невозможен в принципе, а не «не разведён».
 
 Два практических следствия. **Десять бит сегодня возможны только на Intel** — CPU-путь
 отказывается, и отказывается честно, с причиной, а не молча отдаёт восемь. И **глубину
