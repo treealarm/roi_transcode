@@ -93,7 +93,7 @@ mfxU32 align_down(int32_t value)
 /// CQP, or VBR when a target bitrate was asked for -- and the choice is the same one
 /// GetCapabilities answered with, because both read the same target. See CapabilityQuery.
 void fill_encode_params(mfxVideoParam& p, Codec codec, int32_t width, int32_t height,
-    Rational frame_rate, int crf, int gop, uint64_t target_bitrate)
+    Rational frame_rate, int crf, int gop, uint64_t target_bitrate, bool ten_bit = false)
 {
     p.mfx.CodecId = codec_id(codec);
     p.mfx.TargetUsage = MFX_TARGETUSAGE_BALANCED;
@@ -132,8 +132,19 @@ void fill_encode_params(mfxVideoParam& p, Codec codec, int32_t width, int32_t he
         p.mfx.QPB = qp;
     }
 
+    // §15.3's ten-bit profile. P010 is NV12 with sixteen bits a sample and the ten of them
+    // in the high end, which is what Shift says; the profile has to be named too, because
+    // Main cannot carry ten bits and a driver asked for one with the other refuses at Query
+    // rather than at the first frame.
+    if (ten_bit) {
+        p.mfx.CodecProfile = MFX_PROFILE_HEVC_MAIN10;
+    }
+
     mfxFrameInfo& fi = p.mfx.FrameInfo;
-    fi.FourCC = MFX_FOURCC_NV12;
+    fi.FourCC = ten_bit ? MFX_FOURCC_P010 : MFX_FOURCC_NV12;
+    fi.BitDepthLuma = ten_bit ? 10 : 8;
+    fi.BitDepthChroma = fi.BitDepthLuma;
+    fi.Shift = ten_bit ? 1 : 0;
     fi.ChromaFormat = MFX_CHROMAFORMAT_YUV420;
     fi.PicStruct = MFX_PICSTRUCT_PROGRESSIVE;
     fi.FrameRateExtN = static_cast<mfxU32>(std::max(frame_rate.num, 1));
@@ -168,6 +179,30 @@ mfxExtCodingOption3 coding_option3(mfxU16 enable_mbqp)
 /// all, GetVideoParam after Init reports EnableMBQP as OFF. So "does the driver support it"
 /// and "did we ask for it" are the same question here, and the probe has to attach the
 /// buffer to get an answer.
+/// Does this implementation encode ten bits -- P010 in, Main10 out?
+///
+/// Asked of the driver in the same shape as the MBQP question above, and for the same
+/// reason: §15.3 makes the ten-bit profile mandatory for backends that report main10, so
+/// reporting it on anything but the driver's own answer would be promising on its behalf.
+/// H.264 is not asked at all: §15.3's ten-bit profile is HEVC, and this library refuses
+/// ten-bit H.264 at the public interface.
+bool query_accepts_main10(mfxSession session, Codec codec)
+{
+    if (codec != Codec::H265) {
+        return false;
+    }
+    mfxVideoParam in{};
+    fill_encode_params(in, codec, 1280, 720, Rational{25, 1}, 28, 0, 0, true);
+    mfxVideoParam out = in;
+    if (MFXVideoENCODE_Query(session, &in, &out) < MFX_ERR_NONE) {
+        return false;
+    }
+    // Query corrects what it cannot do rather than refusing outright, so the answer is
+    // whether what came back is still ten bits.
+    return out.mfx.FrameInfo.FourCC == MFX_FOURCC_P010
+        && out.mfx.FrameInfo.BitDepthLuma == 10;
+}
+
 bool query_accepts_mbqp(mfxSession session, Codec codec)
 {
     // A nominal clip. Whether the runtime implements MBQP is a property of the driver, not
@@ -201,6 +236,8 @@ struct DeviceProbe {
     bool device = false;
     /// mfxExtCodingOption3::EnableMBQP survived Query -- the per-block QP map of §2.2.
     bool mbqp = false;
+    /// P010 with the Main10 profile survived Query -- §15.3's ten-bit profile.
+    bool main10 = false;
 };
 
 /// The dispatcher's answer to "is there hardware here that encodes this, and how well".
@@ -237,6 +274,7 @@ DeviceProbe run_probe(Codec codec)
         if (MFXCreateSession(loader, 0, &session) == MFX_ERR_NONE) {
             out.device = true;
             out.mbqp = query_accepts_mbqp(session, codec);
+            out.main10 = query_accepts_main10(session, codec);
             MFXClose(session);
         }
     }
@@ -281,6 +319,8 @@ public:
     Codec codec = Codec::H264;
     int width = 0;
     int height = 0;
+    /// P010 surfaces rather than NV12: sixteen bits a sample, ten of them in the high end.
+    bool ten_bit = false;
 
     /// NV12 surfaces in system memory, one per frame VPL may hold at once -- and with each
     /// one, the ROI that frame was submitted with.
@@ -386,6 +426,30 @@ void to_nv12(const IFrameBuffer& src, mfxFrameSurface1& dst, int width, int heig
     }
 }
 
+/// P010 in, P010 surface out: two planes of sixteen-bit samples, copied row by row because
+/// the surface's pitch is the driver's and the caller's stride is theirs.
+///
+/// No conversion here and none wanted: a caller on the ten-bit path already has the layout
+/// the encoder takes, and pulling libswscale in to move bytes would undo the one thing this
+/// component exists to prove.
+void copy_p010(const IFrameBuffer& src, mfxFrameSurface1& dst, int width, int height)
+{
+    const PlaneView y = const_cast<IFrameBuffer&>(src).plane(0);
+    const PlaneView uv = const_cast<IFrameBuffer&>(src).plane(1);
+    const std::size_t pitch = dst.Data.Pitch;
+    const std::size_t row_bytes = static_cast<std::size_t>(width) * 2;
+
+    for (int row = 0; row < height; ++row) {
+        std::memcpy(dst.Data.Y + static_cast<std::size_t>(row) * pitch,
+            y.bytes.data() + static_cast<std::size_t>(row) * y.stride, row_bytes);
+    }
+    const int half_h = (height + 1) / 2;
+    for (int row = 0; row < half_h; ++row) {
+        std::memcpy(dst.Data.UV + static_cast<std::size_t>(row) * pitch,
+            uv.bytes.data() + static_cast<std::size_t>(row) * uv.stride, row_bytes);
+    }
+}
+
 class OneVplNativeBackend final : public IEncoderBackend {
 public:
     Backend kind() const override { return Backend::IntelOneVplDirect; }
@@ -432,6 +496,9 @@ public:
         // map, which is qp_map. Reporting emphasis_map for it would be renaming a feature
         // rather than having it.
         c.emphasis_map = false;
+        // §15.3, and from the driver's answer rather than from the hardware's reputation.
+        c.main10 = device.main10;
+        c.p010_input = device.main10;
         // The encoder's own bitrate control, which this backend does have -- and which is
         // the other half of the trade above. Asked for a target, it opens VBR and gives up
         // the block map; asked for none, it opens CQP and keeps it. Neither is a downgrade
@@ -466,8 +533,15 @@ public:
 
         mfxVideoParam& p = s->param;
         const uint64_t target = config.rate_control.target_bitrate;
+        // The session remembers its depth: the surfaces are sized from it and every frame
+        // submitted is checked against it.
+        s->ten_bit = config.input.pixel_format == PixelFormat::P010;
+        if (s->ten_bit && !probe(config.codec).main10) {
+            return Status::Unsupported(
+                "this oneVPL implementation does not encode ten bits (P010/Main10)");
+        }
         fill_encode_params(p, config.codec, config.input.width, config.input.height,
-            config.input.frame_rate, config.crf, config.gop, target);
+            config.input.frame_rate, config.crf, config.gop, target, s->ten_bit);
 
         // The per-block QP map of §2.2, asked for at Init because that is the only place
         // mfxExtCodingOption3::EnableMBQP can be set -- the runtime buffer of §26 below is
@@ -562,7 +636,13 @@ public:
         if (s.draining) {
             return Status::InvalidArgument("SubmitFrame after Flush");
         }
-        if (frame.format() != PixelFormat::YUV420P && frame.format() != PixelFormat::NV12) {
+        const PixelFormat incoming = frame.format();
+        if (s.ten_bit) {
+            if (incoming != PixelFormat::P010) {
+                return Status::Unsupported(
+                    "this session encodes ten bits and takes P010 frames");
+            }
+        } else if (incoming != PixelFormat::YUV420P && incoming != PixelFormat::NV12) {
             return Status::Unsupported("the native oneVPL backend takes YUV420P or NV12");
         }
 
@@ -572,8 +652,14 @@ public:
             // caller drains and comes back, which is §24's backpressure.
             return Status::Again();
         }
-        to_nv12(frame, slot->surface, s.width, s.height);
-        ++s.frames_converted;
+        if (s.ten_bit) {
+            // Already the layout the encoder wants: two planes, sixteen bits a sample. A
+            // copy into the surface and no conversion, so nothing is counted as converted.
+            copy_p010(frame, slot->surface, s.width, s.height);
+        } else {
+            to_nv12(frame, slot->surface, s.width, s.height);
+            ++s.frames_converted;
+        }
         slot->surface.Data.TimeStamp = static_cast<mfxU64>(control.pts);
 
         mfxEncodeCtrl* ctrl = set_regions(s, *slot, control.regions);
@@ -760,7 +846,10 @@ private:
         const int count = std::max<int>(request.NumFrameSuggested, 1) + 4;
         const mfxU16 width = s.param.mfx.FrameInfo.Width;
         const mfxU16 height = s.param.mfx.FrameInfo.Height;
-        const std::size_t plane = static_cast<std::size_t>(width) * height;
+        // Two bytes a sample on the ten-bit path, one on the eight-bit one -- the layout is
+        // the same otherwise, which is what makes P010 "NV12 with wider samples".
+        const std::size_t sample_bytes = s.ten_bit ? 2 : 1;
+        const std::size_t plane = static_cast<std::size_t>(width) * height * sample_bytes;
 
         const auto cells = static_cast<std::size_t>(qp_map_cols(s.width, kMbqpBlock))
             * static_cast<std::size_t>(qp_map_rows(s.height, kMbqpBlock));
@@ -772,7 +861,7 @@ private:
             surface.surface.Info = s.param.mfx.FrameInfo;
             surface.surface.Data.Y = surface.data.data();
             surface.surface.Data.UV = surface.data.data() + plane;
-            surface.surface.Data.Pitch = width;
+            surface.surface.Data.Pitch = static_cast<mfxU16>(width * sample_bytes);
             // One map per frame in flight, not one per encoder: see the comment on Surface.
             if (s.mbqp_ready) {
                 surface.mbqp_cells.assign(cells, 0);

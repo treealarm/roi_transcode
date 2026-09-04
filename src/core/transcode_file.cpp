@@ -212,6 +212,37 @@ Report transcode_file(const std::string& input_path,
         }
     };
 
+    // The ten-bit path wants P010 and a decoder hands over whatever the file had, usually
+    // planar yuv420p10le. Converting here rather than inside a backend is deliberate: the
+    // native oneVPL component keeps FFmpeg out on purpose, and this is the example
+    // application, which already has libswscale open for its own use.
+    roiav::Sws to_p010;
+    roiav::Frame p010_frame;
+    auto as_encoder_wants = [&](AVFrame* decoded) -> AVFrame* {
+        if (cfg.input.pixel_format != PixelFormat::P010
+            || decoded->format == AV_PIX_FMT_P010) {
+            return decoded;
+        }
+        to_p010.p = sws_getCachedContext(to_p010.p, decoded->width, decoded->height,
+            static_cast<AVPixelFormat>(decoded->format), decoded->width, decoded->height,
+            AV_PIX_FMT_P010, SWS_BILINEAR, nullptr, nullptr, nullptr);
+        if (to_p010.p == nullptr) {
+            fail("no ten-bit conversion from this pixel format");
+        }
+        av_frame_unref(p010_frame.p);
+        p010_frame.p->format = AV_PIX_FMT_P010;
+        p010_frame.p->width = decoded->width;
+        p010_frame.p->height = decoded->height;
+        check(av_frame_get_buffer(p010_frame.p, 0), "allocate P010 frame");
+        sws_scale(to_p010.p, decoded->data, decoded->linesize, 0, decoded->height,
+            p010_frame.p->data, p010_frame.p->linesize);
+        // The timestamps travel with the pixels; everything downstream reads them off the
+        // frame it was handed.
+        p010_frame.p->pts = decoded->pts;
+        p010_frame.p->best_effort_timestamp = decoded->best_effort_timestamp;
+        return p010_frame.p;
+    };
+
     auto handle_decoded = [&]() {
         const int64_t pts = dec_frame.p->best_effort_timestamp;
         const double t = (pts == AV_NOPTS_VALUE)
@@ -229,7 +260,7 @@ Report transcode_file(const std::string& input_path,
             params.time_base};
         meta.regions.boxes = live;
 
-        const Status s = SubmitAvFrame(enc, dec_frame.p, meta);
+        const Status s = SubmitAvFrame(enc, as_encoder_wants(dec_frame.p), meta);
         if (!s.ok()) {
             fail(s.message());
         }

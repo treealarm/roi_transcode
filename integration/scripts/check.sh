@@ -1485,6 +1485,21 @@ PY
         assert_gt "ten-bit ROI quality improves (dB)" "$ten_a_roi" "$ten_b_roi"
         assert_lt "ten-bit background paid for it (dB)" "$ten_a_bg" "$ten_b_bg"
     fi
+
+    # And R2 itself, which became possible on 2026-09-03 when the native oneVPL backend
+    # learned P010: it has bitrate control of its own, so §15.3's VBR and Main10 can be had
+    # together there and nowhere else in this build. The ROI numbers are deliberately not
+    # asserted here -- under a target this backend trades the block map for rectangles, and
+    # the measured difference is 0.02 dB, which is not a threshold anything should stand on.
+    if ! "${BUILD}/roi-transcode" --in "${WORK}/ten_moving.mp4"             --roi "${SCENES}/moving/roi.json" --out "${WORK}/ten_r2.mp4"             --encoder onevpldirect --codec h265 --crf 32 --gop 60             --target-bitrate 1500000 >"${WORK}/ten_r2.log" 2>&1; then
+        skip "no native oneVPL on this machine for §15.3's R2 point"
+    else
+        assert_eq "R2 on ten bits is Main 10"             "$(probe stream=profile "${WORK}/ten_r2.mp4")" "Main 10"
+        # The target has to actually act: on the backend without native bitrate control the
+        # §50 guard removes it, and the same command comes out tens of times over.
+        ten_r2_kbps=$(python3 "${ROOT}/integration/scripts/bitrate-check.py"             "${WORK}/ten_r2.mp4" 1500000 2>/dev/null             | grep -oE 'average +[0-9.]+' | awk '{print $2}')
+        assert_lt "R2's target is honoured on ten bits (Mbps)" "$ten_r2_kbps" "1.58"
+    fi
 fi
 
 # A clip is stored in one orientation and displayed in another, and the difference lives in
