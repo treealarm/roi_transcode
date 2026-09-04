@@ -750,8 +750,16 @@ if(SVE_BUILD_TESTS)
     # The other half of a surface check, and not an add_test for the same reason: what it
     # prints means something only against what the Python module exposes.
     # integration/scripts/python-enum-parity.py is that comparison.
+    # Every enumerator has a name of its own, asked of the library's own naming functions.
+    add_executable(names_test tests/unit/names_test.cpp)
+    target_link_libraries(names_test PRIVATE sve_all)
+    target_include_directories(names_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/unit)
+    target_compile_options(names_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME names COMMAND names_test)
+
     add_executable(enum_surface tests/unit/enum_surface.cpp)
     target_link_libraries(enum_surface PRIVATE sve)
+    target_include_directories(enum_surface PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/unit)
     target_compile_options(enum_surface PRIVATE ${SVE_WARNINGS})
 
     # The C++ reference for §58.10.8's overhead budget, and not an add_test for the same

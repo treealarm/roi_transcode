@@ -237,7 +237,22 @@ python3 integration/scripts/stats.py paired adaptive.txt baseline.txt
 аппаратные замеры ради разброса **не нужно**, но три прогона стоит держать в приёмке — они
 доказывают воспроизводимость, а не предполагают её, и заметят день, когда она кончится.
 
-## 12. Не измерено (и потому здесь нет рекомендаций)
+## 12. Покрытие тестами
+
+Измеряется отдельной инструментированной сборкой, рабочий каталог не трогает:
+
+```bash
+cmake -S . -B build-cov -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+      -DCMAKE_CXX_FLAGS="--coverage -O0" -DCMAKE_EXE_LINKER_FLAGS="--coverage"
+cmake --build build-cov && ctest --test-dir build-cov
+python3 integration/scripts/coverage.py build-cov src/core src/adaptive src/metadata
+```
+
+**Измерено 2026-09-03: ядро 78.43%** при требуемых §41 восьмидесяти. Пример приложения
+(`transcode_file`, `session`, `frame_input`, `file_mux_sink`) считается отдельной строкой и
+по юнит-тестам даёт 0%: его гоняет `check.sh` через CLI, а не `ctest`.
+
+## 13. Не измерено (и потому здесь нет рекомендаций)
 
 - Пресеты (`--preset`) против качества зоны и скорости.
 - `max_protected_fraction` в реальных сценах с несколькими объектами.

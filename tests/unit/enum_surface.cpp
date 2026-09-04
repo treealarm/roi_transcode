@@ -16,6 +16,8 @@
 // The spelling printed is the C++ enumerator, not the display name: `backend_name` says
 // "qsv" for IntelOneVpl, and what is being compared here is the surface, not the wording.
 
+#include "enum_table.h"
+
 #include "sve/backend_selection.h"
 #include "sve/encoder.h"
 #include "sve/frame_buffer.h"
@@ -29,124 +31,12 @@
 
 namespace {
 
-/// The range scanned for each enum. Every enum below numbers from 0 with no gaps, but the
-/// scan does not stop at the first hole: a missing case would otherwise truncate the dump
-/// and report every later value as missing from C++, which is the opposite of the truth.
-constexpr int kScanLimit = 64;
-
-const char* spell(sve::Backend e)
-{
-    switch (e) {
-    case sve::Backend::Auto:              return "Auto";
-    case sve::Backend::IntelOneVpl:       return "IntelOneVpl";
-    case sve::Backend::Vaapi:             return "Vaapi";
-    case sve::Backend::NvidiaNvenc:       return "NvidiaNvenc";
-    case sve::Backend::X264:              return "X264";
-    case sve::Backend::X265:              return "X265";
-    case sve::Backend::X264Direct:        return "X264Direct";
-    case sve::Backend::X265Direct:        return "X265Direct";
-    case sve::Backend::IntelOneVplDirect: return "IntelOneVplDirect";
-    }
-    return nullptr;
-}
-
-const char* spell(sve::StatusCode e)
-{
-    switch (e) {
-    case sve::StatusCode::Ok:                return "Ok";
-    case sve::StatusCode::DeviceUnavailable: return "DeviceUnavailable";
-    case sve::StatusCode::Unsupported:       return "Unsupported";
-    case sve::StatusCode::InvalidArgument:   return "InvalidArgument";
-    case sve::StatusCode::Again:             return "Again";
-    case sve::StatusCode::EndOfStream:       return "EndOfStream";
-    case sve::StatusCode::BackendError:      return "BackendError";
-    case sve::StatusCode::OutOfMemory:       return "OutOfMemory";
-    case sve::StatusCode::Timeout:           return "Timeout";
-    case sve::StatusCode::Error:             return "Error";
-    }
-    return nullptr;
-}
-
-const char* spell(sve::PixelFormat e)
-{
-    switch (e) {
-    case sve::PixelFormat::Unknown:         return "Unknown";
-    case sve::PixelFormat::YUV420P:         return "YUV420P";
-    case sve::PixelFormat::NV12:            return "NV12";
-    case sve::PixelFormat::YUV422P:         return "YUV422P";
-    case sve::PixelFormat::YUV444P:         return "YUV444P";
-    case sve::PixelFormat::GRAY8:           return "GRAY8";
-    case sve::PixelFormat::P010:            return "P010";
-    case sve::PixelFormat::HardwareSurface: return "HardwareSurface";
-    }
-    return nullptr;
-}
-
-const char* spell(sve::Codec e)
-{
-    switch (e) {
-    case sve::Codec::H264:         return "H264";
-    case sve::Codec::H265:         return "H265";
-    case sve::Codec::SameAsSource: return "SameAsSource";
-    }
-    return nullptr;
-}
-
-const char* spell(sve::LogLevel e)
-{
-    switch (e) {
-    case sve::LogLevel::Trace:   return "Trace";
-    case sve::LogLevel::Debug:   return "Debug";
-    case sve::LogLevel::Info:    return "Info";
-    case sve::LogLevel::Warning: return "Warning";
-    case sve::LogLevel::Error:   return "Error";
-    }
-    return nullptr;
-}
-
-const char* spell(sve::ObjectPriority e)
-{
-    switch (e) {
-    case sve::ObjectPriority::Background: return "Background";
-    case sve::ObjectPriority::Low:        return "Low";
-    case sve::ObjectPriority::Normal:     return "Normal";
-    case sve::ObjectPriority::High:       return "High";
-    case sve::ObjectPriority::Critical:   return "Critical";
-    }
-    return nullptr;
-}
-
-const char* spell(sve::EncoderState e)
-{
-    switch (e) {
-    case sve::EncoderState::Created:     return "Created";
-    case sve::EncoderState::Configured:  return "Configured";
-    case sve::EncoderState::Running:     return "Running";
-    case sve::EncoderState::Draining:    return "Draining";
-    case sve::EncoderState::EndOfStream: return "EndOfStream";
-    case sve::EncoderState::Stopped:     return "Stopped";
-    case sve::EncoderState::Failed:      return "Failed";
-    }
-    return nullptr;
-}
-
-const char* spell(sve::SidecarFormat e)
-{
-    switch (e) {
-    case sve::SidecarFormat::None:   return "None";
-    case sve::SidecarFormat::NDJSON: return "NDJSON";
-    }
-    return nullptr;
-}
-
 template <class E>
 void dump(const char* key)
 {
-    for (int value = 0; value < kScanLimit; ++value) {
-        if (const char* name = spell(static_cast<E>(value)); name != nullptr) {
-            std::printf("%s %d %s\n", key, value, name);
-        }
-    }
+    sve_enum_table::for_each<E>([key](E value, const char* name) {
+        std::printf("%s %d %s\n", key, static_cast<int>(value), name);
+    });
 }
 
 } // namespace
