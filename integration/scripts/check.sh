@@ -1432,6 +1432,61 @@ else
     fi
 fi
 
+# §15.3's other half: "прогоняется минимум на functional codec tests (AT-009) и на одном
+# operating point (R2) synthetic ROI suite". The step above is AT-009; this is the ROI suite,
+# and it asks the same question of the ten-bit path that the eight-bit step asks: do the bits
+# go where the regions are.
+#
+# At CRF and not at R2's bitrate, and the reason is worth reading before "fixing" it. R2 is a
+# bitrate, §15.3 also asks for VBR, and in this build the two cannot be had together with ten
+# bits: qsv h265 reports main10 and no native bitrate control, so §50's guard removes the
+# target, while onevpldirect has native VBR and no main10 because P010 is not wired into it.
+# Measured 2026-09-03: R2's 1.5 Mbps on qsv h265 comes out at 54-74 Mbps, the target having
+# no effect at all. That is question 14 to the customer, recorded in docs/STATUS.md.
+step "ROI works on the ten-bit path too (§15.3, R2 suite)"
+if [[ ! -x "${BUILD}/roi_metrics" || ! -f "${SCENES}/moving/source.mp4" ]]; then
+    skip "the ten-bit ROI suite needs roi_metrics and the synthetic scenes"
+elif [[ ! -e /dev/dri/renderD128 ]] || ! source "${ROOT}/integration/scripts/qsv-env.sh" 2>/dev/null; then
+    skip "no backend with main10 on this machine -- §15.3's ROI suite is N/A"
+elif ! ffmpeg -v error -y -i "${SCENES}/moving/source.mp4" -pix_fmt yuv420p10le \
+        -c:v libx265 -x265-params log-level=none -crf 18 "${WORK}/ten_moving.mp4" \
+        >/dev/null 2>&1; then
+    skip "this ffmpeg cannot produce a ten-bit fixture"
+else
+    python3 - "${SCENES}/moving/roi.json" "${WORK}/ten_flat.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["samples"] = []
+d["background_qp_delta"] = 0
+json.dump(d, open(sys.argv[2], "w"))
+PY
+    ten_ok=1
+    for _pair in "ten_adaptive ${SCENES}/moving/roi.json" "ten_baseline ${WORK}/ten_flat.json"; do
+        # shellcheck disable=SC2086
+        set -- $_pair
+        "${BUILD}/roi-transcode" --in "${WORK}/ten_moving.mp4" --roi "$2" \
+            --out "${WORK}/$1.mp4" --encoder qsv --codec h265 --crf 32 --gop 60 \
+            >"${WORK}/$1.log" 2>&1 || ten_ok=0
+    done
+    if [[ "$ten_ok" -ne 1 ]]; then
+        fail "a ten-bit ROI encode did not complete (see ${WORK}/ten_adaptive.log)"
+    else
+        assert_eq "the adaptive ten-bit encode stayed Main 10" \
+            "$(probe stream=profile "${WORK}/ten_adaptive.mp4")" "Main 10"
+        ten_metric() {
+            "${BUILD}/roi_metrics" "${WORK}/ten_moving.mp4" "$1" \
+                "${SCENES}/moving/truth.json" m 2>/dev/null \
+                | grep -oE "$2=[-0-9.]+" | head -1 | cut -d= -f2
+        }
+        ten_a_roi=$(ten_metric "${WORK}/ten_adaptive.mp4" roi_psnr)
+        ten_b_roi=$(ten_metric "${WORK}/ten_baseline.mp4" roi_psnr)
+        ten_a_bg=$(ten_metric "${WORK}/ten_adaptive.mp4" bg_psnr)
+        ten_b_bg=$(ten_metric "${WORK}/ten_baseline.mp4" bg_psnr)
+        assert_gt "ten-bit ROI quality improves (dB)" "$ten_a_roi" "$ten_b_roi"
+        assert_lt "ten-bit background paid for it (dB)" "$ten_a_bg" "$ten_b_bg"
+    fi
+fi
+
 # A clip is stored in one orientation and displayed in another, and the difference lives in
 # the stream's display matrix. The decoder hands over the stored pixels, so an application
 # that drops the matrix writes a file that plays rotated against its source -- which is what
