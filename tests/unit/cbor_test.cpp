@@ -286,8 +286,40 @@ void a_reader_refuses_a_map_that_is_not_there()
 
 } // namespace
 
+/// A container that contains a container, on and on: one stack frame per byte until the
+/// process dies. These bytes come off a bitstream through decode_sei_payload, so this is
+/// reachable from a file rather than from a bug in our own writer, and §43.2 asks for no
+/// unexpected crash.
+void nesting_deeper_than_the_format_allows_is_refused_not_followed()
+{
+    // 0x81 is "an array of one item". Repeated, each byte opens another level.
+    std::vector<uint8_t> deep(100000, uint8_t{0x81});
+    deep.push_back(0x00); // one integer at the bottom, so only the depth is wrong
+    sve::cbor::Reader reader(deep);
+    CHECK(!reader.skip());
+
+    // And the legitimate depth still passes: §19.2 nests three levels, the limit is 32.
+    std::vector<uint8_t> shallow(3, uint8_t{0x81});
+    shallow.push_back(0x00);
+    sve::cbor::Reader ok(shallow);
+    CHECK(ok.skip());
+    CHECK(ok.done());
+}
+
+/// A map whose claimed pair count doubles to zero. Read as `argument * 2` items, 2^63 pairs
+/// became no items at all and a truncated map was accepted as a complete one.
+void a_pair_count_that_overflows_is_not_read_as_empty()
+{
+    // 0xBB + eight bytes: a map with 2^63 pairs, and nothing after it.
+    const std::vector<uint8_t> absurd{0xBB, 0x80, 0, 0, 0, 0, 0, 0, 0};
+    sve::cbor::Reader reader(absurd);
+    CHECK(!reader.skip());
+}
+
 int main()
 {
+    nesting_deeper_than_the_format_allows_is_refused_not_followed();
+    a_pair_count_that_overflows_is_not_read_as_empty();
     the_middle_argument_widths_match_the_rfc();
     put_int_writes_both_signs();
     a_reader_reads_maps_and_signed_integers();

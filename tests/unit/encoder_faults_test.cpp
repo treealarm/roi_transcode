@@ -263,6 +263,17 @@ void a_packet_for_a_frame_we_never_held_is_counted_as_an_orphan()
     // Every packet arrived under a timestamp nothing was submitted with, so no record can
     // be written for any of them.
     CHECK(records.empty());
+
+    // Flushed and drained before stopping, so the stream really did finish: that is what
+    // separates a sidecar that stopped corresponding to its packets from an encode the
+    // caller simply abandoned, and only the first is a fault to report.
+    CHECK(enc->Flush().ok());
+    for (;;) {
+        EncodedPacket packet;
+        if (!enc->ReceivePacket(&packet).ok()) {
+            break;
+        }
+    }
     enc->Stop();
 
     // Two failures, and the counts must not be added together: four frames went in and

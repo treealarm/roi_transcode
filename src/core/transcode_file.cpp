@@ -309,7 +309,8 @@ Report transcode_file(const std::string& input_path,
     }
     drain();
     // §8.13's end of an encode, and what carries §19.4's report on sidecar records whose
-    // packet never arrived -- see the same call in Session::finish.
+    // packet never arrived. Session::finish does the same, in the same order: the warning
+    // has to reach the caller before the sink says the stream is complete.
     if (const Status stopped = enc.Stop(); !stopped.ok()) {
         fail(stopped.message());
     }

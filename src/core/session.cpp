@@ -300,14 +300,16 @@ Report Session::finish()
             roiav::fail(s.message());
         }
         m_impl->drain();
-        m_impl->end_sink();
-        // §8.13 makes Stop the end of an encode, and this is it. Not only tidiness: the
-        // §19.4 report on sidecar records that never got a packet lives behind it, and
-        // until 2026-09-04 neither of the two paths that actually write a sidecar reached
-        // it -- so the check existed and never ran where it mattered.
+        // Stop before the sink is ended, matching transcode_file. §8.13 makes Stop the end
+        // of an encode, and the §19.4 report on sidecar records that never got a packet
+        // lives behind it -- until 2026-09-04 neither of the two paths that actually write
+        // a sidecar reached it, so the check existed and never ran where it mattered. The
+        // order matters because end_sink tells the caller the stream is complete, and a
+        // complaint that it is not has to arrive before that, not after.
         if (const Status s = m_impl->encoder->Stop(); !s.ok()) {
             roiav::fail(s.message());
         }
+        m_impl->end_sink();
 
         // Everything but the frame count comes from the encoder, which is the only thing
         // that knows it. Frames are counted here because a frame submitted and a frame

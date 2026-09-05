@@ -30,6 +30,14 @@ public:
     /// needs arrives through IEncoderBackend or PacketSink, and the chain did not. A
     /// caller assembling its own BackendRegistry -- which sve/backend_registry.h has
     /// offered since 4.2 -- could not reach this pipeline at all.
+    ///
+    /// **The registry must outlive the encoder.** It is held by pointer, not copied: a
+    /// BackendRegistry holds references to backends that are stateless immortal singletons
+    /// (Р7), so copying it would be copying a list of pointers and would say nothing about
+    /// lifetime anyway. A temporary binds here without a diagnostic, and today survives
+    /// only by accident -- open_deferred is the sole reader, and CreateVideoEncoderIn calls
+    /// it inside the full-expression that keeps a temporary alive. The two-step form below
+    /// has no such luck.
     explicit RoiEncoder(const BackendRegistry& registry = default_backend_registry())
         : m_registry(&registry)
     {

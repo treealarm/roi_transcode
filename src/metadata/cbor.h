@@ -58,13 +58,26 @@ public:
 
     /// Skips one complete item, whatever it is, including the contents of a container.
     /// This is what lets a reader tolerate a field it does not know.
+    ///
+    /// Refuses a nesting deeper than kMaxNestingDepth rather than following it. The bytes
+    /// this reads are a caller's -- decode_sei_payload takes them off a bitstream -- and a
+    /// container that contains a container is one stack frame per byte: 0x81 repeated is a
+    /// one-byte-per-level array of arrays, so a payload of a hundred kilobytes would ask
+    /// for a hundred thousand frames and take the process with it. §43.2 asks for no
+    /// unexpected crash, and a crash reachable from a file is one.
     bool skip();
+
+    /// The deepest container this format can legitimately produce, plus room to spare.
+    /// §19.2's payload is an array holding an array of objects, each of which is a flat
+    /// array of scalars: three levels. Anything past this is not a payload of ours.
+    static constexpr int kMaxNestingDepth = 32;
 
     bool done() const { return m_in.empty(); }
     std::span<const uint8_t> rest() const { return m_in; }
 
 private:
     bool head(uint8_t& major, uint64_t& argument);
+    bool skip_at(int depth);
 
     std::span<const uint8_t> m_in;
 };

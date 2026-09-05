@@ -24,10 +24,11 @@
 
 namespace sve {
 
-class BackendRegistry;
-
 /// Exactly CreateVideoEncoder, except that the backends come from `registry` rather than
 /// from the process-wide one. Same validation, same refusals, same exceptions.
+///
+/// `registry` must outlive the encoder this returns: it is held by pointer all the way
+/// down to RoiEncoder, and every backend it names is consulted again on each open.
 std::unique_ptr<SmartVideoEncoder> CreateVideoEncoderIn(
     const EncoderConfig& config, const BackendRegistry& registry);
 

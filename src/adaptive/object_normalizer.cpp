@@ -8,6 +8,8 @@
 #include <cmath>
 #include <cstring>
 #include <optional>
+#include <unordered_set>
+#include <span>
 #include <vector>
 
 namespace sve {
@@ -106,6 +108,32 @@ void apply_geometry_policy(Detection& d, int32_t width, int32_t height, const Qu
     d.x2 = clamp_i(d.x2, 0, width);
     d.y1 = clamp_i(d.y1, 0, height);
     d.y2 = clamp_i(d.y2, 0, height);
+}
+
+/// Whether every number this box carries is one arithmetic can use.
+///
+/// The public API takes floats from whoever fills a Box -- a detector, a config file, a
+/// gRPC message -- and nothing upstream promises they are finite. A NaN reaches three
+/// places that cannot survive it: std::lround, whose result on a NaN is undefined; the
+/// comparator of a stable_sort, where a NaN breaks the strict weak ordering the standard
+/// requires and takes the sort with it; and the polygon rasteriser, where floor(NaN) is
+/// converted to int. An infinity is the same story through the multiplication by the frame
+/// size.
+///
+/// So a box that carries one is dropped here, at the boundary, in the same way §2.3's
+/// degenerate boxes are: the frame still encodes, and one region is missing rather than
+/// the process. Checked once per box on the way in rather than at each of the three
+/// places, because the three are far apart and the next one added would not know to look.
+bool box_is_finite(const Box& b)
+{
+    const auto finite = [](float v) { return std::isfinite(v); };
+    if (!finite(b.x) || !finite(b.y) || !finite(b.width) || !finite(b.height)
+        || !finite(b.confidence)) {
+        return false;
+    }
+    return std::ranges::all_of(b.polygon, [&](const Point& p) {
+        return finite(p.x) && finite(p.y);
+    });
 }
 
 Detection to_detection(
@@ -222,9 +250,70 @@ void paint_aabb_on_qp_map(QpDeltaMap& map, const Rect& r)
 ///
 /// `coding_block` is the qp_map cell size. `map_region_limit` 0 means keep every merged
 /// rectangle (qp_map backends); otherwise strongest-first truncate like rectangle APIs.
+/// The detection's body as a rectangle inside the frame, or nothing when it does not
+/// survive the clamp.
+///
+/// One definition because three places want it: the two builders' walks and the affordable
+/// set below. They were three copies of the same designated initialiser plus clamp_rect
+/// plus rect_valid, which is the shape of a rounding rule or a clamp bound changing in one
+/// of them and not the others.
+std::optional<Rect> body_rect(const Detection& d, int width, int height)
+{
+    Rect r{
+        .top = d.y1,
+        .bottom = d.y2,
+        .left = d.x1,
+        .right = d.x2,
+        .qp_delta = d.qp_delta,
+    };
+    clamp_rect(r, width, height);
+    if (!rect_valid(r)) {
+        return std::nullopt;
+    }
+    return r;
+}
+
+/// Which detections §15's area budget can pay for -- TZ v4.2 §12 and §15.
+///
+/// One policy, called by both builders. It was written twice, and the two drifted: the
+/// shaped builder spent the budget in the ascending order it needed for painting, so the
+/// least important object in the frame was served first (fixed 2026-09-04). Extracting the
+/// number alone left the walk that decides *who* gets it in two places, which is the layer
+/// they actually disagreed at.
+///
+/// `detections` is walked in the order given and the caller owes it descending importance:
+/// §15 spends on the critical objects first, and a plate has to be able to outbid the wall
+/// behind it. Areas are summed rather than united, so a face inside a person spends its own
+/// area again -- that errs towards spending less, which is the safe direction.
+std::unordered_set<const Detection*> affordable_detections(
+    std::span<const Detection* const> by_importance_desc, const Quality& quality,
+    int width, int height)
+{
+    const double budget = protected_area_budget(
+        quality, static_cast<double>(width) * static_cast<double>(height));
+    double spent = 0.0;
+
+    std::unordered_set<const Detection*> paid;
+    paid.reserve(by_importance_desc.size());
+    for (const Detection* dp : by_importance_desc) {
+        const std::optional<Rect> body = body_rect(*dp, width, height);
+        if (!body) {
+            continue;
+        }
+        const double area = static_cast<double>(body->right - body->left)
+            * static_cast<double>(body->bottom - body->top);
+        if (spent + area > budget) {
+            continue;
+        }
+        spent += area;
+        paid.insert(dp);
+    }
+    return paid;
+}
+
 std::vector<Rect> build_shaped(int width, int height,
     const std::vector<Detection>& detections, const Quality& quality,
-    int32_t coding_block, int32_t map_region_limit)
+    int32_t coding_block, int32_t map_region_limit, int32_t* dropped)
 {
     std::vector<Rect> empty;
     if (width <= 0 || height <= 0) {
@@ -240,10 +329,6 @@ std::vector<Rect> build_shaped(int width, int height,
     // encoder's "first region wins" once rects_from_qp_map sorts strongest-|delta| first.
     std::stable_sort(ordered.begin(), ordered.end(),
         [](const Detection* a, const Detection* b) { return a->importance < b->importance; });
-
-    const double frame_area = static_cast<double>(width) * static_cast<double>(height);
-    const double budget = protected_area_budget(quality, frame_area);
-    double spent = 0.0;
 
     const int block = coding_block > 0 ? coding_block : 16;
     QpDeltaMap map;
@@ -277,43 +362,16 @@ std::vector<Rect> build_shaped(int width, int height,
     // already taken the room. RoiMapBuilder::build, which has no painting order to satisfy,
     // has always spent it descending -- so the two builders disagreed about §12 depending
     // on whether the backend had a block map.
-    std::vector<const Detection*> by_importance = ordered;
-    std::stable_sort(by_importance.begin(), by_importance.end(),
-        [](const Detection* a, const Detection* b) { return a->importance > b->importance; });
-
-    std::vector<const Detection*> within_budget;
-    within_budget.reserve(by_importance.size());
-    for (const Detection* dp : by_importance) {
-        Rect obj{
-            .top = dp->y1,
-            .bottom = dp->y2,
-            .left = dp->x1,
-            .right = dp->x2,
-            .qp_delta = dp->qp_delta,
-        };
-        clamp_rect(obj, width, height);
-        if (!rect_valid(obj)) {
-            continue;
-        }
-        const double area = static_cast<double>(obj.right - obj.left)
-            * static_cast<double>(obj.bottom - obj.top);
-        if (spent + area > budget) {
-            continue;
-        }
-        spent += area;
-        within_budget.push_back(dp);
-    }
+    //
+    // `ordered` is ascending, so reading it backwards is the descending order the budget
+    // wants -- one sort serves both walks, and equal importances are interchangeable for
+    // painting because the map keeps the last write either way.
+    std::vector<const Detection*> by_importance(ordered.rbegin(), ordered.rend());
+    const std::unordered_set<const Detection*> within_budget =
+        affordable_detections(by_importance, quality, width, height);
 
     for (const Detection* dp : ordered) {
-        Rect obj{
-            .top = dp->y1,
-            .bottom = dp->y2,
-            .left = dp->x1,
-            .right = dp->x2,
-            .qp_delta = dp->qp_delta,
-        };
-        clamp_rect(obj, width, height);
-        if (!rect_valid(obj)) {
+        if (!body_rect(*dp, width, height)) {
             continue;
         }
         // What did not fit is painted at zero rather than left unpainted, and the
@@ -325,7 +383,7 @@ std::vector<Rect> build_shaped(int width, int height,
         // Until 2026-09-04 this builder skipped them, so the shaped path degraded what the
         // rectangle path left alone. RoiMapBuilder::build has always emitted the unaffordable
         // object with a delta of zero; now both do.
-        const bool paid = std::ranges::find(within_budget, dp) != within_budget.end();
+        const bool paid = within_budget.contains(dp);
         afforded.push_back(Afforded{dp, paid ? dp->qp_delta : 0, paid ? dp->pad_qp_delta : 0});
     }
 
@@ -382,7 +440,7 @@ std::vector<Rect> build_shaped(int width, int height,
     const int32_t limit = map_region_limit >= 0
         ? map_region_limit
         : (quality.max_regions > 0 ? quality.max_regions : kDefaultRegionBudget);
-    return rects_from_qp_map(map, limit, nullptr);
+    return rects_from_qp_map(map, limit, dropped);
 }
 
 } // namespace
@@ -404,12 +462,15 @@ Object object_from_box(const Box& box, const ImportancePolicy& policy)
 
 std::vector<Rect> RoiMapBuilder::build(int width, int height,
     const std::vector<Detection>& detections, const Quality& quality,
-    int32_t coding_block, int32_t map_region_limit) const
+    int32_t coding_block, int32_t map_region_limit, int32_t* dropped) const
 {
+    if (dropped) {
+        *dropped = 0;
+    }
     for (const auto& d : detections) {
         if (d.polygon.size() >= 3) {
-            return build_shaped(
-                width, height, detections, quality, coding_block, map_region_limit);
+            return build_shaped(width, height, detections, quality, coding_block,
+                map_region_limit, dropped);
         }
     }
 
@@ -433,13 +494,10 @@ std::vector<Rect> RoiMapBuilder::build(int width, int height,
     std::stable_sort(ordered.begin(), ordered.end(),
         [](const Detection* a, const Detection* b) { return a->importance > b->importance; });
 
-    // §15's budget, denominated in area rather than in bits.
-    //
-    // Under a constant quantizer there is no bitrate to hand around, but protection is still
-    // paid for: every block held at a lower QP is paid for by the background it is taken
-    // from, and a frame with no background left cannot pay. So the budget is a share of the
-    // frame, spent in the order the sort above already established -- which is what makes
-    // this §15's "critical objects first" and not a second, competing policy.
+    // §15's budget, denominated in area rather than in bits, and decided by the one
+    // function both builders call. Under a constant quantizer there is no bitrate to hand
+    // around, but protection is still paid for: every block held at a lower QP is paid for
+    // by the background it is taken from, and a frame with no background left cannot pay.
     //
     // Areas are summed, not united, so nesting counts twice: a face inside a person spends
     // its own area again. That errs towards spending less, which is the safe direction --
@@ -449,9 +507,8 @@ std::vector<Rect> RoiMapBuilder::build(int width, int height,
     // fall through to the background rectangle below and be *degraded*; a person nobody can
     // afford to sharpen is still not background. Its halo goes, though: a halo exists to
     // soften a step that is no longer there.
-    const double frame_area = static_cast<double>(width) * static_cast<double>(height);
-    const double budget = protected_area_budget(quality, frame_area);
-    double spent = 0.0;
+    const std::unordered_set<const Detection*> within_budget =
+        affordable_detections(ordered, quality, width, height);
 
     // Every object before any halo, and that ordering is load-bearing rather than tidy.
     //
@@ -463,27 +520,18 @@ std::vector<Rect> RoiMapBuilder::build(int width, int height,
     std::vector<const Detection*> afforded;
     afforded.reserve(ordered.size());
     for (const Detection* dp : ordered) {
-        Rect obj{
-            .top = dp->y1,
-            .bottom = dp->y2,
-            .left = dp->x1,
-            .right = dp->x2,
-            .qp_delta = dp->qp_delta,
-        };
-        clamp_rect(obj, width, height);
-        if (!rect_valid(obj)) {
+        std::optional<Rect> obj = body_rect(*dp, width, height);
+        if (!obj) {
             continue;
         }
-
-        const double area = static_cast<double>(obj.right - obj.left)
-            * static_cast<double>(obj.bottom - obj.top);
-        if (spent + area > budget) {
-            obj.qp_delta = 0;
-        } else {
-            spent += area;
+        // What did not fit keeps a delta of zero rather than being dropped: a region nobody
+        // can afford to sharpen is still not background. Its halo goes with the money.
+        if (within_budget.contains(dp)) {
             afforded.push_back(dp);
+        } else {
+            obj->qp_delta = 0;
         }
-        out.push_back(obj);
+        out.push_back(*obj);
     }
 
     for (const Detection* dp : afforded) {
@@ -536,6 +584,9 @@ std::vector<Detection> RoiMapBuilder::detections_from(
     std::vector<Detection> out;
     out.reserve(boxes.size());
     for (const auto& b : boxes) {
+        if (!box_is_finite(b)) {
+            continue;
+        }
         out.push_back(to_detection(b, quality, width, height));
     }
     return out;

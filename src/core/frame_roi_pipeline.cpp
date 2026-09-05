@@ -68,10 +68,15 @@ FrameRoiPipelineOutput FrameRoiPipeline::process(const FrameRoiPipelineInput& in
         : in.temporal.max_qp_delta_per_frame;
     m_qp_slew.apply(dets, slew);
     const Quality effective_quality = m_bitrate.apply(in.quality);
-    out.rects =
-        m_roi_builder.build(in.width, in.height, dets, effective_quality, out.coding_block, budget);
+    out.rects = m_roi_builder.build(in.width, in.height, dets, effective_quality,
+        out.coding_block, budget, &out.regions_dropped);
     if (budget > 0 && static_cast<int32_t>(out.rects.size()) > budget) {
-        truncate_roi_rects(out.rects, budget, in.width, in.height, &out.regions_dropped);
+        // Adds to what the shaped path already discarded rather than replacing it: on that
+        // path the builder has truncated once inside itself, and both losses are the same
+        // degradation as far as §50 is concerned.
+        int32_t here = 0;
+        truncate_roi_rects(out.rects, budget, in.width, in.height, &here);
+        out.regions_dropped += here;
     }
     return out;
 }

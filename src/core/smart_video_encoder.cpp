@@ -165,11 +165,20 @@ struct SmartVideoEncoder::Impl : PacketSink {
         // counted once on the way in and once on the way out.
         const auto never_emitted = static_cast<int64_t>(pending_sidecar.size());
         pending_sidecar.clear();
-        if (never_emitted > 0) {
+        // Only once the stream was actually finished. §8.13 makes Stop safe from any
+        // state, so it is also the cleanup path of a cancelled job -- and frames still
+        // inside a lookahead when the caller gave up are not a broken sidecar, they are an
+        // encode nobody drained. Warning there would report a data-integrity fault about a
+        // decision the caller made on purpose.
+        const bool stream_was_finished =
+            state == EncoderState::Draining || state == EncoderState::EndOfStream;
+        if (never_emitted > 0 && stream_was_finished) {
             log.warn(std::format("sidecar: {} frame(s) submitted whose packet never "
                                  "arrived; records and packets do not correspond",
                 never_emitted));
         }
+        // Unconditional, unlike the above: a packet that arrived under a timestamp nobody
+        // submitted is wrong however the encode ended.
         if (sidecar_unmatched_packets > 0) {
             log.warn(std::format("sidecar: {} packet(s) arrived under a timestamp no frame "
                                  "was submitted with; records and packets do not correspond",
@@ -324,12 +333,11 @@ struct SmartVideoEncoder::Impl : PacketSink {
     /// Position of the packet this record accompanies, which is what §19.3 calls
     /// frame_index. Counts emissions, not submissions.
     uint64_t sidecar_index = 0;
-    /// Frames whose packet never arrived to claim them. A packet dropped or a PTS that
-    /// came back changed would leave one here, and §19.4 wants 100% synchronisation --
-    /// so this is counted and reported rather than left as a quietly shorter file.
-    /// Packets that arrived under a timestamp no frame was submitted with. The mirror of
-    /// `pending_sidecar` left non-empty at end(), and counted apart from it: one is a
-    /// record with no packet, the other a packet with no record.
+    /// Packets that arrived under a timestamp no frame was submitted with.
+    ///
+    /// The mirror of `pending_sidecar` left non-empty at end(), and counted apart from it
+    /// on purpose: one is a record with no packet, the other a packet with no record. They
+    /// were one number until 2026-09-04, which reported eight faults for four frames.
     int64_t sidecar_unmatched_packets = 0;
 
     /// §19.1 keeps `objects` and `roi_info` as separate fields, and §19.2's payload is the

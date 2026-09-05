@@ -585,11 +585,15 @@ void an_inconsistent_mask_is_ignored_rather_than_half_read()
     CHECK(enc->GetStatistics().frames_submitted == 1);
 }
 
-/// §19.4: a sidecar record whose packet never arrives is counted and said out loud. The
-/// encoder is stopped with frames still inside it, which is what a caller aborting a job
-/// does -- and the guarantee "record N is packet N" is broken from that moment, so the
-/// gap has to be visible rather than left as a file that is merely shorter.
-void a_sidecar_record_whose_packet_never_comes_is_said_out_loud()
+/// The other side of §19.4, and the one that is easy to get backwards: an encode the caller
+/// abandoned is not a broken sidecar.
+///
+/// §8.13 makes Stop safe from any state, so it is also how a cancelled job cleans up. The
+/// frames still inside libx264's lookahead at that moment were never given a chance to come
+/// out -- complaining that records and packets do not correspond would report a data
+/// integrity fault about a decision the caller made on purpose. This test asserted the
+/// opposite until 2026-09-05.
+void a_cancelled_encode_does_not_report_a_sidecar_fault()
 {
     auto pixels = std::make_shared<Pixels>();
     std::vector<std::pair<LogLevel, std::string>> lines;
@@ -624,7 +628,7 @@ void a_sidecar_record_whose_packet_never_comes_is_said_out_loud()
             warned = true;
         }
     }
-    CHECK(warned);
+    CHECK(!warned);
 }
 
 /// §21's report is what a caller reads at the end of a job, and it had never been called
@@ -841,7 +845,7 @@ int main()
     a_qp_map_is_taken_as_given_rather_than_recomputed();
     a_mask_is_sampled_onto_the_grid_rather_than_ignored();
     an_inconsistent_mask_is_ignored_rather_than_half_read();
-    a_sidecar_record_whose_packet_never_comes_is_said_out_loud();
+    a_cancelled_encode_does_not_report_a_sidecar_fault();
     the_report_says_what_the_statistics_say();
     pixels_the_caller_holds_go_in_through_the_borrowing_overload();
     the_bounded_queue_answers_again_rather_than_growing();

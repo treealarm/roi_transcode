@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -188,12 +189,73 @@ void the_budget_pays_for_the_important_object_first()
     CHECK(delta_at(kW - 8, 8) == 6);
 }
 
+/// AT-004 lists the coordinates a caller can get wrong -- negative, past the edge, zero
+/// area, tiny, overlapping -- and stops at the ones that are numbers. These are not.
+///
+/// The public API takes floats from whoever fills a Box, and nothing upstream promises they
+/// are finite. Before 2026-09-05 a NaN travelled from there into std::lround (undefined for
+/// a NaN), into a stable_sort comparator (where it breaks the strict weak ordering the
+/// standard requires) and into the polygon rasteriser. Dropped at the boundary now, the way
+/// a degenerate box is: the frame still encodes and one region is missing, rather than the
+/// process being gone.
+void a_box_carrying_a_number_arithmetic_cannot_use_is_dropped()
+{
+    RoiMapBuilder builder;
+    Quality quality;
+    quality.background_qp_delta = 6;
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+
+    const auto box_at = [](float x, float y, float w, float h, float confidence) {
+        Box b;
+        b.kind = "plate";
+        b.x = x;
+        b.y = y;
+        b.width = w;
+        b.height = h;
+        b.confidence = confidence;
+        return b;
+    };
+
+    std::vector<Box> boxes{
+        box_at(nan, 0.1f, 0.2f, 0.2f, 0.9f),   // a coordinate
+        box_at(0.1f, inf, 0.2f, 0.2f, 0.9f),   // an infinity
+        box_at(0.1f, 0.1f, nan, 0.2f, 0.9f),   // an extent
+        box_at(0.1f, 0.1f, 0.2f, 0.2f, nan),   // and the confidence, which becomes the
+                                               // importance the sort is ordered by
+        box_at(0.4f, 0.4f, 0.2f, 0.2f, 0.9f),  // the only usable one
+    };
+    // A polygon vertex is the fifth way in, and it reaches the rasteriser rather than
+    // lround.
+    Box shaped = box_at(0.6f, 0.6f, 0.2f, 0.2f, 0.9f);
+    shaped.polygon = {{0.6f, 0.6f}, {nan, 0.8f}, {0.6f, 0.8f}};
+    boxes.push_back(shaped);
+
+    const auto dets = builder.detections_from(boxes, quality, 1000, 1000);
+    CHECK(dets.size() == 1);
+    // The survivor is the usable box: it covers the 0.4..0.6 square it was given. The
+    // bounds are not asserted exactly because the margin of §2.3 widens a detection, and
+    // by how much is that rule's business, not this test's.
+    CHECK(dets[0].x1 <= 400 && dets[0].x2 >= 600);
+    CHECK(dets[0].y1 <= 400 && dets[0].y2 >= 600);
+
+    // And the frame still encodes: one usable region, plus the background.
+    const auto rects = builder.build(1000, 1000, dets, quality);
+    CHECK(!rects.empty());
+    for (const Rect& r : rects) {
+        CHECK(r.left >= 0 && r.top >= 0 && r.right <= 1000 && r.bottom <= 1000);
+        CHECK(r.left < r.right && r.top < r.bottom);
+    }
+}
+
 } // namespace
 
 int main()
 {
     at_004_normalization_edge_cases();
     the_budget_pays_for_the_important_object_first();
+    a_box_carrying_a_number_arithmetic_cannot_use_is_dropped();
 
     RoiMapBuilder builder;
 
@@ -271,7 +333,7 @@ int main()
     poly_q.pad = 0;
     poly_q.margin_mode = MarginMode::FractionOfFrame;
     poly_q.min_roi_side = 0;
-    poly_q.max_protected_fraction = 1; // the whole frame may be protected: no cap here
+    poly_q.max_protected_fraction = 1; // one frame's worth, which this single box fits in
     poly_q.kinds["vehicle"] = KindQuality{-8, 0.0};
     Box tri;
     tri.kind = "vehicle";

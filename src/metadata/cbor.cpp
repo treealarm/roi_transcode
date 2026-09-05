@@ -223,6 +223,14 @@ bool Reader::map(uint64_t& pairs)
 
 bool Reader::skip()
 {
+    return skip_at(0);
+}
+
+bool Reader::skip_at(int depth)
+{
+    if (depth >= kMaxNestingDepth) {
+        return false;
+    }
     uint8_t major = 0;
     uint64_t argument = 0;
     if (m_in.empty()) {
@@ -248,14 +256,18 @@ bool Reader::skip()
         return true;
     case kMajorArray:
         for (uint64_t i = 0; i < argument; ++i) {
-            if (!skip()) {
+            if (!skip_at(depth + 1)) {
                 return false;
             }
         }
         return true;
     case kMajorMap:
-        for (uint64_t i = 0; i < argument * 2; ++i) {
-            if (!skip()) {
+        // Counted as pairs rather than as `argument * 2` items: a claimed length of 2^63
+        // doubles to zero, and the loop that never ran reported an empty map as a complete
+        // one. Every item still has to be there -- skip_at fails on exhausted input -- so
+        // an absurd count costs a walk to the end of the buffer and then a refusal.
+        for (uint64_t i = 0; i < argument; ++i) {
+            if (!skip_at(depth + 1) || !skip_at(depth + 1)) {
                 return false;
             }
         }

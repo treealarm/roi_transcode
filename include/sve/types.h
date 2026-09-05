@@ -2,6 +2,7 @@
 
 // The vocabulary both entry points share.
 
+#include "sve/backend_registry.h"
 #include "sve/backend_selection.h"
 #include "sve/importance.h"
 #include "sve/object_priority.h"
@@ -106,8 +107,10 @@ enum class CodecProfile {
 /// `registry` is which deployment is being asked. It defaults to the process-wide one, so
 /// the ordinary caller passes nothing; sve/backend_registry.h says an application may
 /// assemble its own, and this is one of the two entry points that has to honour that.
-class BackendRegistry;
-BackendRegistry& default_backend_registry();
+///
+/// Declared here rather than beside the registry because this is where the question is
+/// asked. The class and `default_backend_registry()` come from the header that owns them,
+/// included below, so that neither signature exists in two places.
 bool backend_supports(Backend kind, Codec codec,
     const BackendRegistry& registry = default_backend_registry());
 
@@ -271,8 +274,8 @@ struct Quality {
     ///
     /// Worth knowing before reaching for it: measured on real footage 2026-09-04, this
     /// setting moves the encoded size by under one percent whatever it is set to, including
-    /// with a single box over half the frame (docs/tuning.md, раздел 9). It is a fuse, not
-    /// a dial -- what moves the size is `background_qp_delta`.
+    /// with a single box over half the frame (docs/tuning.md, section 9). It is a fuse,
+    /// not a dial -- what moves the size is `background_qp_delta`.
     float max_protected_fraction = 0.25f;
 };
 

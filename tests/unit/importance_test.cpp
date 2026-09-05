@@ -278,10 +278,11 @@ void a_budget_of_zero_changes_nothing()
     sve::RoiMapBuilder builder;
     const auto dets = builder.detections_from(boxes, quality, 1000, 1000);
 
-    // 1.0, not 0.0. "No cap" is the whole frame: a region cannot be bigger than the frame
-    // it lies in, so a budget of one covers anything. Zero used to spell this because the
-    // cap was skipped when the budget was zero -- since 2026-09-04 zero means what it says,
-    // that nothing may be protected.
+    // 1.0, not 0.0. One frame's worth of budget is enough for this single box; it is not
+    // "no cap" in general, because areas are summed and overlapping regions each spend
+    // their own (see Quality::max_protected_fraction). Zero used to spell "no cap" because
+    // the check was skipped when the budget was zero -- since 2026-09-04 zero means what it
+    // says, that nothing may be protected.
     quality.max_protected_fraction = 1.0f;
     const auto unbudgeted = builder.build(1000, 1000, dets, quality);
     check(unbudgeted.size() == 3 && unbudgeted[0].qp_delta == -6,

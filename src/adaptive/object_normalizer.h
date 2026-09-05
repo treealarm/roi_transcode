@@ -52,9 +52,17 @@ public:
     /// `coding_block` is the qp_map cell (16 for H.264, 32 for HEVC here).
     /// `map_region_limit`: <0 keeps the old Quality::max_regions default for the shaped
     /// path; 0 means unlimited (backend has qp_map); >0 truncates strongest-first.
+    ///
+    /// `dropped`, when given, receives how many regions the shaped path had to discard to
+    /// fit that limit. §50 forbids a silent degradation and this one was silent: the shaped
+    /// builder truncated inside itself and told nobody, so `stats.regions_dropped` stayed
+    /// at zero and `guard_roi_regions_dropped` never fired on exactly the crowded scenes
+    /// the limit exists for. The rectangle path has no such step -- its truncation happens
+    /// in the caller, through truncate_roi_rects, which has always counted.
     std::vector<Rect> build(int width, int height,
         const std::vector<Detection>& detections, const Quality& quality,
-        int32_t coding_block = 16, int32_t map_region_limit = -1) const;
+        int32_t coding_block = 16, int32_t map_region_limit = -1,
+        int32_t* dropped = nullptr) const;
 
     // Boxes lie on a timeline; picks the ones within Quality::hold_sec of
     // `t_sec` and resolves them to pixels.
