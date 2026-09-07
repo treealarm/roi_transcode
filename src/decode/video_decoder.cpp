@@ -76,7 +76,8 @@ Status VideoDecoder::Open(
     m_impl->device = std::move(device);
     try {
         m_impl->decoder.open(codec, extradata.data(), static_cast<int>(extradata.size()),
-            DecodeDeviceAccess::device(m_impl->device));
+            DecodeDeviceAccess::device(m_impl->device),
+            FrameDecoder::Framing::CompleteAccessUnits);
     } catch (const std::exception& e) {
         return Status::BackendError(e.what());
     }

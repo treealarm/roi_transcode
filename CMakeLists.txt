@@ -801,6 +801,16 @@ if(SVE_BUILD_TESTS)
     target_compile_options(encoder_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME encoder COMMAND encoder_test)
 
+    # The decode side of the public API, on the software path: no GPU needed, and the
+    # stream it decodes comes out of the encoder in the same binary. Guarded because
+    # sve_decode is an option -- a consumer that only encodes does not build it.
+    if(TARGET sve_decode)
+        add_executable(decoder_test tests/unit/decoder_test.cpp)
+        target_link_libraries(decoder_test PRIVATE sve_all)
+        target_compile_options(decoder_test PRIVATE ${SVE_WARNINGS})
+        add_test(NAME decoder COMMAND decoder_test)
+    endif()
+
     # §29's mandatory events and levels, plus the FFmpeg routing that carries the other
     # half of them. Reaches encoder_runtime_warnings.h directly: the guards are where the
     # fallback and refusal events are emitted, and provoking each one through the public

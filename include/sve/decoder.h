@@ -120,8 +120,15 @@ public:
 
     using FrameCb = std::function<void(const Frame&, const DecodedFrameInfo&)>;
 
-    /// Feeds one buffer, calling `on_frame` for every picture that comes out -- usually
-    /// one, sometimes none while the decoder builds up state, sometimes several.
+    /// Feeds one access unit -- one complete coded picture, which is what a demuxer hands
+    /// out and what the parameter is named for. Calling `on_frame` for every picture that
+    /// comes out: usually one, sometimes none while the decoder builds up state, sometimes
+    /// several.
+    ///
+    /// Whole, not a slice of one and not several at once. The decoder takes the promise
+    /// literally and does no reassembly, which is what keeps a picture from being held back
+    /// until the next one arrives -- a delay of one access unit, and of a whole group of
+    /// pictures for a caller that pushes only keyframes.
     Status Push(std::span<const uint8_t> access_unit, MediaTimestamp timestamp,
         const FrameCb& on_frame);
     /// Drains the pictures the decoder is still holding.

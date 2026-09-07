@@ -23,14 +23,27 @@ public:
     // `extradata` may be null; for H.264/H.265 in AVCC/HVCC form it is required
     // for the decoder to make sense of the first access unit.
     //
+    // `framing` says whether every push carries one complete access unit. It decides whether
+    // a parser goes in front of the decoder, and a parser is not free: it holds each picture
+    // back until the start of the next one arrives, because that is the only thing that ends
+    // an Annex-B access unit. One picture of delay is nothing on a stream decoded whole, and
+    // a whole GOP on a caller that pushes only keyframes -- which is what analytics does.
+    //
     // `hw_device` is the encoder's own device, or null to decode on the CPU. Given one, the
     // decoder produces frames that already live in the encoder's memory and SubmitAvFrame
     // hands them straight over -- no conversion, no upload, no copy. Given one it cannot
     // use (a codec the device has no decoder for, a profile the silicon does not implement)
     // it decodes in software instead and says so through hardware_name(), because a
     // hardware path that quietly became a software one is what §50 forbids.
+    enum class Framing {
+        /// Buffers may split an access unit or carry several; a parser reassembles them.
+        Arbitrary,
+        /// Every push is exactly one access unit, so nothing has to be reassembled.
+        CompleteAccessUnits,
+    };
+
     void open(sve::InputCodec codec, const uint8_t* extradata, int extradata_size,
-        AVBufferRef* hw_device = nullptr);
+        AVBufferRef* hw_device = nullptr, Framing framing = Framing::Arbitrary);
 
     // Which libavcodec decoder opened ("hevc", "h264", "mjpeg"); empty for a raw session.
     const std::string& decoder_name() const { return m_decoder_name; }
