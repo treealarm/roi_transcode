@@ -15,6 +15,9 @@ int to_av_pix_fmt(PixelFormat f)
     case PixelFormat::YUV444P: return AV_PIX_FMT_YUV444P;
     case PixelFormat::GRAY8:   return AV_PIX_FMT_GRAY8;
     case PixelFormat::P010:    return AV_PIX_FMT_P010;
+    // Named in the host's byte order, like the enumerator itself: AV_PIX_FMT_YUV420P10 is
+    // an alias for whichever of the two endian spellings this machine uses.
+    case PixelFormat::YUV420P10: return AV_PIX_FMT_YUV420P10;
     default:                   return AV_PIX_FMT_NONE;
     }
 }
@@ -28,6 +31,7 @@ PixelFormat from_av_pix_fmt(int f)
     case AV_PIX_FMT_YUV444P: return PixelFormat::YUV444P;
     case AV_PIX_FMT_GRAY8:   return PixelFormat::GRAY8;
     case AV_PIX_FMT_P010:    return PixelFormat::P010;
+    case AV_PIX_FMT_YUV420P10: return PixelFormat::YUV420P10;
     // A frame the CPU cannot address: QSV, VAAPI, CUDA and the rest. They share one
     // answer here because what a caller can do with them is the same -- nothing directly.
     case AV_PIX_FMT_QSV:

@@ -45,7 +45,12 @@ class IEncoderBackend;
 /// fields. What a plugin hands over is an IEncoderBackend, so a virtual added to that class
 /// changes the table a plugin built against the older header produces -- a mismatch that no
 /// field of this struct would show. Version 2 is that: `GetEffectiveSettings` (2026-09-03).
-inline constexpr uint32_t kBackendPluginAbiVersion = 2;
+///
+/// It guards the vocabulary those calls are made in as well. Version 3 is that: PixelFormat
+/// gained YUV420P10 between P010 and HardwareSurface, so every value after it means
+/// something different than it did, and a plugin that still counts the old way would take a
+/// hardware surface for a planar one (2026-09-07).
+inline constexpr uint32_t kBackendPluginAbiVersion = 3;
 
 /// Hands over the component's backend, or null if it cannot be had.
 ///

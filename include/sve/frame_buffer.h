@@ -31,9 +31,10 @@ namespace sve {
 /// pinning them here would be promising something another project's release notes get to
 /// break. The mapping lives inside the library, where it can be wrong in one place.
 ///
-/// Short on purpose. These are the formats an encoder here actually accepts from a caller;
-/// anything else is a conversion, and a conversion is a copy the caller should be choosing
-/// deliberately rather than discovering in a profile.
+/// Short on purpose. These are the formats an encoder here actually accepts from a caller,
+/// and the ones a decoder here hands back; anything else is a conversion, and a conversion
+/// is a copy the caller should be choosing deliberately rather than discovering in a
+/// profile.
 enum class PixelFormat : int32_t {
     Unknown = 0,
     /// Planar Y, U, V at 4:2:0. Three planes.
@@ -53,6 +54,15 @@ enum class PixelFormat : int32_t {
     /// while Quick Sync accepts P010 and not yuv420p10le. The conversion is the backend's,
     /// counted like any other in frames_converted.
     P010,
+    /// Planar Y, U, V at 4:2:0 with ten bits in the low end of each 16-bit sample, in the
+    /// host's byte order. Three planes.
+    ///
+    /// It is here because it is what a *decoder* hands back for a 10-bit stream it decoded
+    /// in software -- libavcodec's yuv420p10le -- while P010 is what the hardware path
+    /// produces for the same stream. Without it a Main10 source that falls back to software
+    /// decodes to a format this enumeration cannot name, and every frame of it is dropped by
+    /// a caller that has nothing to convert from.
+    YUV420P10,
     /// The pixels live on the device and are not addressable from the CPU. plane() is
     /// empty for these, which is the answer rather than an error.
     HardwareSurface,

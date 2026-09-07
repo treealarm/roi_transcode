@@ -77,6 +77,7 @@ void register_config(py::module_& m)
         .value("YUV444P", sve::PixelFormat::YUV444P)
         .value("GRAY8", sve::PixelFormat::GRAY8)
         .value("P010", sve::PixelFormat::P010)
+        .value("YUV420P10", sve::PixelFormat::YUV420P10)
         .value("HARDWARE_SURFACE", sve::PixelFormat::HardwareSurface);
 
     py::enum_<sve::StatusCode>(m, "StatusCode", "§25's error model, carried by exceptions.")
