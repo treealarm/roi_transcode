@@ -118,12 +118,26 @@ Result<DecodeDevice> DecodeDevice::Open(const DecodeSelection& selection)
                 "{}: not built into this FFmpeg", decode_backend_name(backend)));
             continue;
         }
-        if (backend == DecodeBackend::Vaapi) {
+        // QSV reaches the same Intel silicon through libva on Linux, so it needs the driver
+        // path as much as VA-API does; only CUDA does not.
+        if (backend == DecodeBackend::Vaapi || backend == DecodeBackend::IntelQsv) {
             ensure_libva_driver_path();
         }
 
+        // Two attempts, and the second is not redundant: letting libva choose (a null path)
+        // is right on a machine with one GPU and has been seen to fail outright on machines
+        // where it is not, so the render node is named explicitly as a fallback. The error
+        // from the first attempt is what gets reported if both fail, because that is the one
+        // describing the configuration the caller actually asked for.
         roiav::Buffer opened;
-        const int err = av_hwdevice_ctx_create(&opened.p, type, nullptr, nullptr, 0);
+        int err = av_hwdevice_ctx_create(&opened.p, type, nullptr, nullptr, 0);
+        if (err < 0 && type != AV_HWDEVICE_TYPE_CUDA) {
+            roiav::Buffer named;
+            if (av_hwdevice_ctx_create(&named.p, type, "/dev/dri/renderD128", nullptr, 0) >= 0) {
+                opened = std::move(named);
+                err = 0;
+            }
+        }
         if (err < 0) {
             char message[AV_ERROR_MAX_STRING_SIZE] = {};
             av_strerror(err, message, sizeof(message));
