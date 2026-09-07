@@ -66,6 +66,9 @@ public:
     /// What the opened backend settled on -- §38's calibration reads this. Empty before
     /// open, and empty afterwards from a backend that cannot read its own settings back.
     EffectiveSettings effective_settings() const;
+    /// The hardware device the opened backend is using. Empty before open, and empty from
+    /// any backend that encodes on the CPU.
+    NativeHandle hardware_device() const;
     // Human-readable name of the backend that actually opened, codec included.
     const char* label() const;
     /// What the opened encoder produces -- codec, geometry, time base, extradata. Read

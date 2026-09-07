@@ -34,6 +34,19 @@ struct Report {
     int64_t frames_converted = 0;
     int64_t frames_uploaded = 0;
 
+    // Which decoder ran, for a session that was given compressed input rather than raw
+    // frames. Empty for a raw session, which decodes nothing.
+    std::string decoder_name;
+    // The hardware the decoded frames came back on ("vaapi", "qsv"), empty when the decode
+    // ran on the CPU.
+    //
+    // Reported for the same reason frames_uploaded is. A session whose encoder is on the GPU
+    // and whose decoder is not still moves every frame across the bus twice, and the two
+    // cases are indistinguishable from the outside -- both work, one costs several times the
+    // CPU. Non-empty here together with frames_uploaded at zero is what an end-to-end
+    // hardware path looks like.
+    std::string decoder_hardware;
+
     // Safety guard for this build: CPU H.265 ignores target_bitrate and runs plain
     // CRF/CQP to avoid an unstable ROI+SEI path in libx265.
     bool cpu_h265_target_guard = false;

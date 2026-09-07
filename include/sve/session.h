@@ -69,6 +69,14 @@ public:
     Backend encoder_used() const;
     std::string backend_name() const;
 
+    // The hardware the decode is running on ("vaapi", "qsv"), empty when it runs on the CPU.
+    //
+    // Unlike the encoder's, this is not knowable when the session opens: libavcodec settles
+    // the decoder's pixel format on the first packet, so before then there is an intention
+    // and nothing more. Empty therefore means "on the CPU, or not asked yet" -- a live
+    // caller reads it once frames are flowing, and finish() reports the settled answer.
+    std::string decoder_hardware() const;
+
     // Drains decoder and encoder, ends the sink, and reports what happened.
     Report finish();
 

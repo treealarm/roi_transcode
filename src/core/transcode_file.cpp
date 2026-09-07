@@ -104,6 +104,15 @@ Report transcode_file(const std::string& input_path,
     const int aindex = find_stream(in.p, AVMEDIA_TYPE_AUDIO);
     AVStream* in_v = in.p->streams[vindex];
 
+    // Software, deliberately, where Session now decodes on the encoder's device.
+    //
+    // Two reasons, and neither is that it was forgotten. This is the file pass: a clip
+    // re-encoded offline, bounded by the encoder rather than by wall-clock, so the CPU a
+    // hardware decode would save is not on anyone's critical path -- unlike live video,
+    // where it was most of what the transcode cost. And the ordering here is not free: the
+    // encoder's frame rate is guessed from this decoder once it is open (guess_fps below),
+    // so handing it the encoder's device means opening them the other way round and finding
+    // another answer for the frame rate. Worth doing on its own, not as a rider here.
     const AVCodec* decoder = avcodec_find_decoder(in_v->codecpar->codec_id);
     if (!decoder) {
         fail("no decoder for input video");

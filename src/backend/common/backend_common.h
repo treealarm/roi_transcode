@@ -72,6 +72,9 @@ public:
     Status Flush(BackendSession& session) const override;
     Result<CodecParameters> GetCodecParameters(BackendSession& session) const override;
     BackendStatistics Statistics(const BackendSession& session) const override;
+    /// One override for the whole group: every backend here reaches its device through the
+    /// same AVBufferRef, and the software ones simply never opened one.
+    NativeHandle HardwareDevice(const BackendSession& session) const override;
 
 protected:
     /// The libavcodec encoder to open, by output codec.

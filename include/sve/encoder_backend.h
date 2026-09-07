@@ -192,6 +192,25 @@ struct FrameBufferDeleter {
 };
 using FrameBufferPtr = std::unique_ptr<IFrameBuffer, FrameBufferDeleter>;
 
+/// What a handle out of a backend is, when the thing handed out has no type this header may
+/// name.
+///
+/// `kind` is not here for extension, it is here for the check. A Rockchip MppCtx and an
+/// FFmpeg AVBufferRef are both a pointer, so an untagged void* would let a caller read one
+/// as the other -- and the result of that is a crash somewhere else, not a diagnostic here.
+enum class NativeHandleKind {
+    None,
+    /// An AVBufferRef* holding an AVHWDeviceContext. Owned by the session that handed it
+    /// out and valid only while that session lives; a caller who needs it for longer takes
+    /// its own reference.
+    FfmpegHardwareDevice,
+};
+
+struct NativeHandle {
+    NativeHandleKind kind = NativeHandleKind::None;
+    void* value = nullptr;
+};
+
 class IEncoderBackend {
 public:
     virtual ~IEncoderBackend() = default;
@@ -279,6 +298,22 @@ public:
     /// nothing, and nothing is a truthful answer here -- every field is optional and absent
     /// means "cannot say". A pure virtual would have forced every backend to invent one.
     virtual EffectiveSettings GetEffectiveSettings(const BackendSession& session) const
+    {
+        (void)session;
+        return {};
+    }
+
+    /// The hardware device this session opened, for a caller that must put frames on the
+    /// same device as the encoder.
+    ///
+    /// One caller needs this and the reason is worth stating: a decoder in front of the
+    /// encoder can hand over frames that never leave the GPU, but only if it decodes onto
+    /// the device the encoder is already using. Without it the frame comes back to system
+    /// memory and goes up again, which costs more than the decode it accelerated.
+    ///
+    /// Defaulted to nothing, like GetEffectiveSettings above: a CPU backend has no device,
+    /// and saying so is a truthful answer rather than a gap every backend must fill.
+    virtual NativeHandle HardwareDevice(const BackendSession& session) const
     {
         (void)session;
         return {};

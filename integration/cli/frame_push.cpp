@@ -297,6 +297,16 @@ int run(const Args& args)
         static_cast<long long>(rep.frames), static_cast<long long>(rep.packets),
         static_cast<long long>(rep.bytes), rep.backend_name.c_str(),
         args.use_mask ? " (mask)" : " (boxes)");
+    // Only --push bitstream decodes inside the session; with raw planes there is no decoder
+    // to report and the fields are empty. Uploads are printed beside it because the pair is
+    // the claim: a hardware decoder with zero uploads is a frame that never left the device,
+    // and a hardware decoder with uploads is one that went down and came back.
+    if (!rep.decoder_name.empty()) {
+        std::fprintf(stderr, "decoded with %s on %s, %lld frame(s) uploaded\n",
+            rep.decoder_name.c_str(),
+            rep.decoder_hardware.empty() ? "the CPU" : rep.decoder_hardware.c_str(),
+            static_cast<long long>(rep.frames_uploaded));
+    }
     if (rep.regions_dropped > 0) {
         std::fprintf(stderr, "warning: %lld regions over the budget were dropped\n",
             static_cast<long long>(rep.regions_dropped));

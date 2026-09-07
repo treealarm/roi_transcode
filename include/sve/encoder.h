@@ -247,6 +247,20 @@ public:
     /// asked for. §38's calibration profile pins these; a field left unset means the
     /// backend cannot report it, which is not the same as it being off.
     EffectiveSettings GetEffectiveSettings() const;
+
+    /// The hardware device the backend opened, as its own native handle. Empty when the
+    /// encoder is running on the CPU.
+    ///
+    /// Untyped on purpose: naming AVBufferRef here would put an FFmpeg type back into the
+    /// interface §8.3 keeps free of them. `sve/frame.h` -- the one header that may say
+    /// AVFrame -- turns this into an AVBufferRef*, and the tag NativeHandle carries is what
+    /// makes that conversion checkable rather than assumed.
+    ///
+    /// There is one caller and it is worth naming: a decoder that hands this encoder frames
+    /// without a round trip through system memory has to decode onto the device the encoder
+    /// already holds.
+    NativeHandle HardwareDevice() const;
+
     EncoderStatistics GetStatistics() const;
     EncoderState State() const;
 

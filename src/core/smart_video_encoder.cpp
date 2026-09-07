@@ -813,6 +813,11 @@ EffectiveSettings SmartVideoEncoder::GetEffectiveSettings() const
     return m_impl->encoder.effective_settings();
 }
 
+NativeHandle SmartVideoEncoder::HardwareDevice() const
+{
+    return m_impl->encoder.hardware_device();
+}
+
 EncoderState SmartVideoEncoder::State() const { return m_impl->state; }
 
 EncoderStatistics SmartVideoEncoder::GetStatistics() const

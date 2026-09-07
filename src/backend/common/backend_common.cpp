@@ -456,6 +456,15 @@ BackendStatistics LibavBackend::Statistics(const BackendSession& session) const
     return BackendStatistics{s.frames_converted, s.frames_uploaded};
 }
 
+NativeHandle LibavBackend::HardwareDevice(const BackendSession& session) const
+{
+    const LibavSession& s = libav(const_cast<BackendSession&>(session));
+    if (!s.hw_device.p) {
+        return {};  // x264 and x265 open none, and that is the whole answer
+    }
+    return NativeHandle{NativeHandleKind::FfmpegHardwareDevice, s.hw_device.p};
+}
+
 Result<EncodedPacket> LibavBackend::ReceivePacket(BackendSession& session) const
 {
     LibavSession& s = libav(session);

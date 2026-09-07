@@ -69,4 +69,15 @@ public:
 Status SubmitAvFrame(SmartVideoEncoder& encoder, const AVFrame* frame,
     const FrameMetadata& metadata);
 
+/// The encoder's hardware device, or null when it encodes on the CPU.
+///
+/// The typed half of SmartVideoEncoder::HardwareDevice, here for the same reason
+/// SubmitAvFrame is: this is the one header allowed to say AVBufferRef. Returns null rather
+/// than reinterpreting a handle of another kind, so a backend not built on libavcodec cannot
+/// have its own pointer read as FFmpeg's.
+///
+/// Borrowed, not owned: the reference belongs to the encoder and goes with it. A caller who
+/// needs the device to outlive the encoder takes av_buffer_ref itself.
+AVBufferRef* EncoderHardwareDevice(const SmartVideoEncoder& encoder);
+
 } // namespace sve

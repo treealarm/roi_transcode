@@ -57,4 +57,13 @@ Status SubmitAvFrame(SmartVideoEncoder& encoder, const AVFrame* frame,
     return encoder.SubmitFrame(TimedFrame{std::move(held), metadata});
 }
 
+AVBufferRef* EncoderHardwareDevice(const SmartVideoEncoder& encoder)
+{
+    const NativeHandle handle = encoder.HardwareDevice();
+    if (handle.kind != NativeHandleKind::FfmpegHardwareDevice) {
+        return nullptr;
+    }
+    return static_cast<AVBufferRef*>(handle.value);
+}
+
 } // namespace sve

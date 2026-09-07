@@ -109,6 +109,11 @@ EffectiveSettings RoiEncoder::effective_settings() const
                                   : EffectiveSettings{};
 }
 
+NativeHandle RoiEncoder::hardware_device() const
+{
+    return m_backend && m_session ? m_backend->HardwareDevice(*m_session) : NativeHandle{};
+}
+
 Result<FrameBufferPtr> RoiEncoder::create_frame(MemoryType memory)
 {
     if (!m_backend || !m_session) {

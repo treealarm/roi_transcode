@@ -214,10 +214,6 @@ Session::Session(const SessionParams& params, PacketHandler* handler)
             params.output_path, params.settings.movflags);
     }
 
-    m_impl->decoder.open(params.codec,
-        params.extradata.empty() ? nullptr : params.extradata.data(),
-        static_cast<int>(params.extradata.size()));
-
     EncoderConfig cfg;
     cfg.input.width = params.width;
     cfg.input.height = params.height;
@@ -242,6 +238,20 @@ Session::Session(const SessionParams& params, PacketHandler* handler)
         !s.ok()) {
         roiav::fail(s.message());
     }
+
+    // After the encoder, and that ordering is the whole point: the decoder is given the
+    // device the encoder opened, so its frames are already in the memory the encoder reads
+    // and SubmitAvFrame passes them through untouched. Opened before it -- as this was --
+    // there is no device to give, and every frame makes the trip down to system memory and
+    // back up again. A CPU backend hands over nothing, and then this is the software decode
+    // it always was.
+    m_impl->decoder.open(params.codec,
+        params.extradata.empty() ? nullptr : params.extradata.data(),
+        static_cast<int>(params.extradata.size()),
+        EncoderHardwareDevice(*m_impl->encoder));
+    m_impl->report.decoder_name = m_impl->decoder.decoder_name();
+    // Empty until the first frame settles the format, so this is filled again in finish().
+    m_impl->report.decoder_hardware = m_impl->decoder.hardware_name();
 }
 
 Session::~Session() = default;
@@ -254,6 +264,11 @@ Backend Session::encoder_used() const
 std::string Session::backend_name() const
 {
     return m_impl->report.backend_name;
+}
+
+std::string Session::decoder_hardware() const
+{
+    return m_impl->decoder.hardware_name();
 }
 
 void Session::submit(IFrameBuffer& pixels, const Regions& regions, int64_t pts)
@@ -321,6 +336,12 @@ Report Session::finish()
         m_impl->report.frames = frames;
         m_impl->report.packets = packets;
         m_impl->report.bytes = bytes;
+        // The encoder's report knows nothing about the decoder in front of it, and this
+        // assignment replaces the whole struct -- so the two decoder fields are put back
+        // here, and the hardware one is read now rather than at open: the format was
+        // negotiated on the first packet, which had not arrived then.
+        m_impl->report.decoder_name = m_impl->decoder.decoder_name();
+        m_impl->report.decoder_hardware = m_impl->decoder.hardware_name();
     }
     return m_impl->report;
 }
