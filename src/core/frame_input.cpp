@@ -23,6 +23,23 @@ AVCodecID codec_id_of(sve::InputCodec c)
     }
 }
 
+/// Whether `extradata` is a length-prefixed configuration record -- AVCC for H.264, HVCC for
+/// H.265 -- rather than Annex-B parameter sets.
+///
+/// The difference decides whether a parser belongs in front of the decoder, and getting it wrong
+/// is silent in the worst way: an Annex-B parser fed length-prefixed access units finds no start
+/// codes, emits nothing, and the stream decodes to a black picture with not one line in the log
+/// to say why. Both records begin with configurationVersion, which is 1; Annex-B parameter sets
+/// begin with a start code, whose first byte is 0. That is the whole test, and it is the same one
+/// libavformat makes.
+bool is_length_prefixed(const uint8_t* extradata, int extradata_size)
+{
+    if (!extradata || extradata_size < 4) {
+        return false;
+    }
+    return extradata[0] == 1;
+}
+
 } // namespace
 
 FrameDecoder::~FrameDecoder()
@@ -86,6 +103,15 @@ bool FrameDecoder::open_context(const AVCodec* dec, const uint8_t* extradata,
             m_dec.p->hw_device_ctx = av_buffer_ref(hw_device);
             m_dec.p->opaque = this;
             m_dec.p->get_format = &FrameDecoder::choose_format;
+            // Surfaces beyond what the decoder needs for reference frames, for whoever is
+            // holding the output: the encoder on the transcode path, or a caller reading
+            // pixels back on the analytics one. libavcodec's default of a handful is
+            // enough for neither -- measured on two 2.5K streams through one VA-API
+            // device, where av_hwframe_transfer_data stops being able to sync and the
+            // decode fails after minutes of working. Costs surface memory and nothing
+            // else, so it is sized for the case that fails rather than the one that does
+            // not.
+            m_dec.p->extra_hw_frames = 32;
         }
     }
 
@@ -121,10 +147,16 @@ void FrameDecoder::open(sve::InputCodec codec, const uint8_t* extradata, int ext
         check(AVERROR(EINVAL), "open decoder");
     }
 
-    // A caller promising whole frames is usually right, but an Annex-B stream
-    // arriving in arbitrary chunks is common enough that going without a parser
-    // would fail quietly and confusingly. JPEG is self-delimiting.
-    if (codec == sve::InputCodec::H264 || codec == sve::InputCodec::H265) {
+    // A caller promising whole frames is usually right, but an Annex-B stream arriving in
+    // arbitrary chunks is common enough that going without a parser would fail quietly and
+    // confusingly. JPEG is self-delimiting.
+    //
+    // Length-prefixed input is the exception, and it has to be, because a parser is not merely
+    // unnecessary there but actively wrong -- see is_length_prefixed. libavcodec reads the
+    // configuration record out of extradata and splits the access units itself, so the packets go
+    // straight through.
+    if ((codec == sve::InputCodec::H264 || codec == sve::InputCodec::H265)
+        && !is_length_prefixed(extradata, extradata_size)) {
         m_parser = av_parser_init(id);
     }
 }

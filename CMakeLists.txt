@@ -25,6 +25,11 @@ option(SVE_BUILD_TOOLS       "Build sve-capabilities (§23)"               ON)
 # §58.8: off by default, and the core never depends on Python, NumPy or pybind11 whether it
 # is on or off -- the bindings live in python/ and link the public library from outside.
 option(SVE_BUILD_PYTHON      "Build the Python extension (§58)"           OFF)
+# Decode on its own, without an encoder behind it: sve/decoder.h and the device selection
+# beside it. On by default because Session needs the same FrameDecoder and would otherwise
+# have to keep a private copy of it -- the point of the component is that there is one
+# hardware decode in this repository, not one per caller.
+option(SVE_BUILD_DECODE      "Build the standalone video decoder (sve/decoder.h)" ON)
 # Whether this build installs the C++ package at all. On for an ordinary install; off for a
 # wheel, which carries the extension and the Python package and has no use for static
 # archives or headers -- they added 1.5 MB of unusable weight before this existed, and
@@ -370,6 +375,7 @@ endif()
 # ---------------------------------------------------------------------------
 if(SVE_BUILD_FFMPEG_INTEROP)
     add_library(sve_ffmpeg_interop
+        src/core/av_frame_ref.cpp
         src/core/av_frame_adapter.cpp
         src/core/ffmpeg_log.cpp
         src/backend/common/av_pixel_format.cpp
@@ -412,6 +418,45 @@ if(SVE_BUILD_BACKEND_FFMPEG)
 endif()
 
 # ---------------------------------------------------------------------------
+# sve_decode -- decode without an encoder
+#
+# FrameDecoder used to live in sve_examples, which made a caller who wanted pictures link
+# the file pipeline and the muxer to reach it -- and made "decode on the GPU" a property of
+# the example rather than of the library. It is here now, and sve_examples depends on this
+# instead of owning it, so Session and a standalone consumer decode through exactly the
+# same code.
+#
+# libavcodec and libavutil, and no libavformat: nothing here demuxes.
+# ---------------------------------------------------------------------------
+if(SVE_BUILD_DECODE)
+    add_library(sve_decode
+        src/core/frame_input.cpp
+        src/decode/decode_backend.cpp
+        src/decode/decode_device.cpp
+        src/decode/video_decoder.cpp
+    )
+    target_include_directories(sve_decode
+        PUBLIC  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/decode)
+    target_include_directories(sve_decode SYSTEM PUBLIC ${FFMPEG_INCLUDE_DIRS})
+    if(FFMPEG_LIBRARY_DIRS)
+        target_link_directories(sve_decode PUBLIC $<BUILD_INTERFACE:${FFMPEG_LIBRARY_DIRS}>)
+    endif()
+    target_link_libraries(sve_decode PUBLIC sve ${FFMPEG_LIBRARIES})
+    # AvFrameAdapter turns the decoder's AVFrame into a Frame. Required rather than
+    # optional: without the adapter there is no way to hand a decoded frame out through the
+    # public interface, so a decode component without it would compile and be useless.
+    if(NOT SVE_BUILD_FFMPEG_INTEROP)
+        message(FATAL_ERROR "SVE_BUILD_DECODE needs SVE_BUILD_FFMPEG_INTEROP")
+    endif()
+    target_link_libraries(sve_decode PUBLIC sve_ffmpeg_interop)
+    target_compile_options(sve_decode PRIVATE ${SVE_WARNINGS})
+endif()
+
+# ---------------------------------------------------------------------------
 # sve_examples -- §52's example applications, not the library
 #
 # transcode_file and Session: a demuxer, a decoder and a muxer around the encoder. The
@@ -420,10 +465,12 @@ endif()
 # keeping them in their own target is what stops that spreading.
 # ---------------------------------------------------------------------------
 if(SVE_BUILD_EXAMPLES)
+    if(NOT SVE_BUILD_DECODE)
+        message(FATAL_ERROR "SVE_BUILD_EXAMPLES needs SVE_BUILD_DECODE: Session decodes")
+    endif()
     add_library(sve_examples
         src/core/transcode_file.cpp
         src/core/session.cpp
-        src/core/frame_input.cpp
         src/core/file_mux_sink.cpp
     )
     target_include_directories(sve_examples
@@ -435,7 +482,7 @@ if(SVE_BUILD_EXAMPLES)
     if(FFMPEG_LIBRARY_DIRS)
         target_link_directories(sve_examples PUBLIC $<BUILD_INTERFACE:${FFMPEG_LIBRARY_DIRS}>)
     endif()
-    target_link_libraries(sve_examples PUBLIC sve ${FFMPEG_LIBRARIES})
+    target_link_libraries(sve_examples PUBLIC sve sve_decode ${FFMPEG_LIBRARIES})
     if(SVE_BUILD_FFMPEG_INTEROP)
         target_link_libraries(sve_examples PUBLIC sve_ffmpeg_interop)
     endif()
@@ -472,7 +519,7 @@ target_compile_options(sve_deployment PRIVATE ${SVE_WARNINGS})
 # add_subdirectory() users -- ta_vms among them -- do not have to learn the component list.
 add_library(sve_all INTERFACE)
 target_link_libraries(sve_all INTERFACE sve $<TARGET_OBJECTS:sve_deployment>)
-set(SVE_ALL_COMPONENTS sve_backend_ffmpeg sve_ffmpeg_interop sve_examples)
+set(SVE_ALL_COMPONENTS sve_backend_ffmpeg sve_ffmpeg_interop sve_decode sve_examples)
 if(SVE_STATIC_REGISTRATION)
     # Under DYNAMIC these are not linked in at all: their backends arrive through the
     # loader, and an archive whose registration function nobody calls would only be dead
@@ -530,7 +577,7 @@ if(SVE_INSTALL)
 set(SVE_INSTALL_TARGETS sve sve_all)
 set(SVE_INSTALLED_COMPONENTS "")
 foreach(component sve_backend_x264 sve_backend_x265 sve_backend_onevpl sve_backend_ffmpeg
-                  sve_ffmpeg_interop sve_examples)
+                  sve_ffmpeg_interop sve_decode sve_examples)
     if(TARGET ${component})
         list(APPEND SVE_INSTALL_TARGETS ${component})
         list(APPEND SVE_INSTALLED_COMPONENTS ${component})
