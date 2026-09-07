@@ -18,6 +18,7 @@ std::size_t plane_count_of(PixelFormat f)
 {
     switch (f) {
     case PixelFormat::YUV420P:
+    case PixelFormat::YUV420P10:
     case PixelFormat::YUV422P:
     case PixelFormat::YUV444P:
         return 3;
@@ -42,6 +43,7 @@ int32_t plane_rows(PixelFormat f, std::size_t index, int32_t height)
     }
     switch (f) {
     case PixelFormat::YUV420P:
+    case PixelFormat::YUV420P10:
     case PixelFormat::NV12:
     case PixelFormat::P010:
         return (height + 1) / 2;

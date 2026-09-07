@@ -65,6 +65,7 @@ inline const char* spell(sve::PixelFormat e)
     case sve::PixelFormat::YUV444P:         return "YUV444P";
     case sve::PixelFormat::GRAY8:           return "GRAY8";
     case sve::PixelFormat::P010:            return "P010";
+    case sve::PixelFormat::YUV420P10:       return "YUV420P10";
     case sve::PixelFormat::HardwareSurface: return "HardwareSurface";
     }
     return nullptr;

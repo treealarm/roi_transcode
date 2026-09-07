@@ -57,6 +57,10 @@ std::vector<PlaneShape> planes_of(sve::PixelFormat format, int32_t width, int32_
     case sve::PixelFormat::P010:
         // The same shape as NV12 with two bytes a sample -- §17's ten-bit input.
         return {{height, width, 2}, {half_h, width, 2}};
+    case sve::PixelFormat::YUV420P10:
+        // YUV420P's shape with two bytes a sample -- what a software decode of a ten-bit
+        // stream produces, where P010 is what the hardware one does.
+        return {{height, width, 2}, {half_h, half_w, 2}, {half_h, half_w, 2}};
     case sve::PixelFormat::GRAY8:
         return {{height, width, 1}};
     case sve::PixelFormat::Unknown:

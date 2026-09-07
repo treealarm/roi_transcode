@@ -16,6 +16,7 @@ const char* pixel_format_name(PixelFormat f)
     case PixelFormat::YUV444P:         return "YUV444P";
     case PixelFormat::GRAY8:           return "GRAY8";
     case PixelFormat::P010:            return "P010";
+    case PixelFormat::YUV420P10:       return "YUV420P10";
     case PixelFormat::HardwareSurface: return "HardwareSurface";
     case PixelFormat::Unknown:         break;
     }

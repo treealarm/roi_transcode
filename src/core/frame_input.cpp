@@ -125,7 +125,7 @@ bool FrameDecoder::open_context(const AVCodec* dec, const uint8_t* extradata,
 }
 
 void FrameDecoder::open(sve::InputCodec codec, const uint8_t* extradata, int extradata_size,
-    AVBufferRef* hw_device)
+    AVBufferRef* hw_device, Framing framing)
 {
     m_codec = codec;
     if (codec == sve::InputCodec::Raw) {
@@ -147,15 +147,21 @@ void FrameDecoder::open(sve::InputCodec codec, const uint8_t* extradata, int ext
         check(AVERROR(EINVAL), "open decoder");
     }
 
-    // A caller promising whole frames is usually right, but an Annex-B stream arriving in
-    // arbitrary chunks is common enough that going without a parser would fail quietly and
-    // confusingly. JPEG is self-delimiting.
+    // An Annex-B stream arriving in arbitrary chunks is common enough that going without a
+    // parser would fail quietly and confusingly, so it is what a caller gets by default.
+    // JPEG is self-delimiting.
     //
-    // Length-prefixed input is the exception, and it has to be, because a parser is not merely
-    // unnecessary there but actively wrong -- see is_length_prefixed. libavcodec reads the
-    // configuration record out of extradata and splits the access units itself, so the packets go
-    // straight through.
+    // Two callers do not need it, and for them it is a cost rather than a safety net -- see
+    // Framing on the delay it adds. A caller that says its buffers are whole access units is
+    // taken at its word; libavformat, which is where both of ours get theirs, splits them
+    // already.
+    //
+    // Length-prefixed input is the other exception, and that one is not the caller's to
+    // choose, because a parser is not merely unnecessary there but actively wrong -- see
+    // is_length_prefixed. libavcodec reads the configuration record out of extradata and
+    // splits the access units itself, so the packets go straight through.
     if ((codec == sve::InputCodec::H264 || codec == sve::InputCodec::H265)
+        && framing == Framing::Arbitrary
         && !is_length_prefixed(extradata, extradata_size)) {
         m_parser = av_parser_init(id);
     }
