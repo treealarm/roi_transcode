@@ -1,48 +1,13 @@
 #include "sve/frame.h"
 
-#include "backend/common/av_frame_buffer.h"
-
-#include <memory>
+// The encoder-facing half of §8.5's interop: submitting an AVFrame, and reading back the
+// device the encoder holds. Both name SmartVideoEncoder.
+//
+// AvFrameAdapter::Ref and ::Adopt are next door in av_frame_ref.cpp, deliberately: they
+// name no encoder, and keeping them in a separate object is what lets the standalone
+// decoder turn an AVFrame into a Frame without linking an encoder it never calls.
 
 namespace sve {
-
-namespace {
-
-/// An owned AVFrame behind the backend-neutral interface. AvFrameBuffer already knows how
-/// to own one -- CreateFrame relies on it -- so the adapter is a construction, not a new
-/// implementation.
-std::shared_ptr<IFrameBuffer> own_av_frame(AVFrame* frame)
-{
-    auto buffer = std::make_shared<AvFrameBuffer>(nullptr);
-    buffer->adopt(frame, nullptr, MemoryType::AVFRAME);
-    return buffer;
-}
-
-} // namespace
-
-Frame AvFrameAdapter::Ref(const AVFrame* frame)
-{
-    if (frame == nullptr) {
-        return {};
-    }
-    AVFrame* copy = av_frame_alloc();
-    if (copy == nullptr) {
-        return {};
-    }
-    if (av_frame_ref(copy, frame) < 0) {
-        av_frame_free(&copy);
-        return {};
-    }
-    return Frame(own_av_frame(copy));
-}
-
-Frame AvFrameAdapter::Adopt(AVFrame* frame)
-{
-    if (frame == nullptr) {
-        return {};
-    }
-    return Frame(own_av_frame(frame));
-}
 
 Status SubmitAvFrame(SmartVideoEncoder& encoder, const AVFrame* frame,
     const FrameMetadata& metadata)
