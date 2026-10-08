@@ -1,6 +1,6 @@
 // SEI payload round-trip (no codec).
 
-#include "sve/metadata.h"
+#include "ta_roienc/metadata.h"
 
 #include <cstddef>
 #include <cstdio>
@@ -30,10 +30,10 @@ void the_checksum_is_crc32c_and_not_crc32()
     //
     // Taken through the real encoder rather than a private copy: what is asserted is the
     // checksum this library actually writes.
-    sve::SeiFrame frame;
+    ta_roienc::SeiFrame frame;
     frame.frame_id = 7;
     frame.pts = 1234;
-    const std::vector<uint8_t> payload = sve::encode_sei_payload(frame, 64);
+    const std::vector<uint8_t> payload = ta_roienc::encode_sei_payload(frame, 64);
     check(payload.size() > 4, "payload.size() > 4");
 
     const std::size_t n = payload.size() - 4;
@@ -70,64 +70,70 @@ void a_payload_stays_under_sixteen_kilobytes()
     // The whole frame's payload is capped. The object count alone cannot enforce it: a
     // class name is up to 32 bytes, so a frame inside its object budget can still be over
     // its byte budget.
-    sve::SeiFrame frame;
+    ta_roienc::SeiFrame frame;
     frame.frame_id = 1;
     for (int i = 0; i < 2000; ++i) {
-        sve::SeiObject o;
+        ta_roienc::SeiObject o;
         o.track_id = static_cast<uint64_t>(i);
         o.class_name = "a_very_long_class_name_padded_to";  // 32 bytes
-        o.priority = (i % 2 == 0) ? sve::ObjectPriority::Background : sve::ObjectPriority::Critical;
+        o.priority = (i % 2 == 0) ? ta_roienc::ObjectPriority::Background
+                                  : ta_roienc::ObjectPriority::Critical;
         frame.objects.push_back(o);
     }
 
-    const std::vector<uint8_t> payload = sve::encode_sei_payload(frame, 0);
+    const std::vector<uint8_t> payload = ta_roienc::encode_sei_payload(frame, 0);
     check(payload.size() <= 16 * 1024, "payload.size() <= 16 * 1024");
 
-    sve::SeiFrame back;
-    check(sve::decode_sei_payload(payload, back), "sve::decode_sei_payload(payload, back)");
+    ta_roienc::SeiFrame back;
+    check(ta_roienc::decode_sei_payload(payload, back),
+        "ta_roienc::decode_sei_payload(payload, back)");
     check(!back.objects.empty(), "!back.objects.empty()");
     check(back.objects.size() < frame.objects.size(), "back.objects.size() < frame.objects.size()");
 
     // What survived is the important half: objects are dropped from the least important
     // upward.
-    for (const sve::SeiObject& o : back.objects) {
-        check(o.priority == sve::ObjectPriority::Critical, "o.priority == sve::ObjectPriority::Critical");
+    for (const ta_roienc::SeiObject& o : back.objects) {
+        check(o.priority == ta_roienc::ObjectPriority::Critical,
+            "o.priority == ta_roienc::ObjectPriority::Critical");
     }
 }
 
 void an_unknown_version_is_refused_rather_than_read()
 {
-    sve::SeiFrame frame;
+    ta_roienc::SeiFrame frame;
     frame.frame_id = 3;
-    std::vector<uint8_t> payload = sve::encode_sei_payload(frame, 8);
+    std::vector<uint8_t> payload = ta_roienc::encode_sei_payload(frame, 8);
 
     // The version is the first item inside the outer array, so it sits at byte 1.
     check(payload.size() > 2, "payload.size() > 2");
     check(payload[1] == 0x01, "payload[1] == 0x01");
     payload[1] = 0x02;
 
-    sve::SeiFrame back;
+    ta_roienc::SeiFrame back;
     // It fails on the checksum first, which is the correct order: a payload whose bytes
     // were altered is not to be parsed at all.
-    check(!sve::decode_sei_payload(payload, back), "!sve::decode_sei_payload(payload, back)");
+    check(!ta_roienc::decode_sei_payload(payload, back),
+        "!ta_roienc::decode_sei_payload(payload, back)");
 }
 
 void a_corrupted_byte_is_caught()
 {
-    sve::SeiFrame frame;
+    ta_roienc::SeiFrame frame;
     frame.frame_id = 9;
-    sve::SeiObject o;
+    ta_roienc::SeiObject o;
     o.track_id = 5;
     o.class_name = "plate";
     frame.objects.push_back(o);
 
-    std::vector<uint8_t> payload = sve::encode_sei_payload(frame, 8);
-    sve::SeiFrame ok;
-    check(sve::decode_sei_payload(payload, ok), "sve::decode_sei_payload(payload, ok)");
+    std::vector<uint8_t> payload = ta_roienc::encode_sei_payload(frame, 8);
+    ta_roienc::SeiFrame ok;
+    check(ta_roienc::decode_sei_payload(payload, ok),
+        "ta_roienc::decode_sei_payload(payload, ok)");
 
     payload[payload.size() / 2] ^= 0x40;
-    sve::SeiFrame bad;
-    check(!sve::decode_sei_payload(payload, bad), "!sve::decode_sei_payload(payload, bad)");
+    ta_roienc::SeiFrame bad;
+    check(!ta_roienc::decode_sei_payload(payload, bad),
+        "!ta_roienc::decode_sei_payload(payload, bad)");
 }
 
 int main()
@@ -136,28 +142,28 @@ int main()
     a_payload_stays_under_sixteen_kilobytes();
     an_unknown_version_is_refused_rather_than_read();
     a_corrupted_byte_is_caught();
-    sve::SeiFrame in;
+    ta_roienc::SeiFrame in;
     in.frame_id = 42;
     in.pts = 12345;
-    sve::SeiObject plate;
+    ta_roienc::SeiObject plate;
     plate.track_id = 7;
     plate.x = 0.1f;
     plate.y = 0.2f;
     plate.width = 0.05f;
     plate.height = 0.03f;
     plate.confidence = 0.9f;
-    plate.priority = sve::ObjectPriority::Critical;
+    plate.priority = ta_roienc::ObjectPriority::Critical;
     plate.class_name = "license_plate";
     plate.has_desired_qp_delta = true;
     plate.desired_qp_delta = -12;
     in.objects.push_back(plate);
 
-    const auto side = sve::encode_sei_side_data(in);
+    const auto side = ta_roienc::encode_sei_side_data(in);
     check(side.size() > 16, "side data has UUID + payload");
-    check(std::memcmp(side.data(), sve::sei_uuid().data(), 16) == 0, "UUID prefix");
+    check(std::memcmp(side.data(), ta_roienc::sei_uuid().data(), 16) == 0, "UUID prefix");
 
-    sve::SeiFrame out;
-    check(sve::decode_sei_payload(side, out), "decode side data");
+    ta_roienc::SeiFrame out;
+    check(ta_roienc::decode_sei_payload(side, out), "decode side data");
     check(out.frame_id == 42, "frame_id");
     check(out.pts == 12345, "pts");
     check(out.objects.size() == 1, "one object");
@@ -166,14 +172,14 @@ int main()
         check(out.objects[0].class_name == "license_plate", "class_name");
         check(out.objects[0].has_desired_qp_delta, "has qp");
         check(out.objects[0].desired_qp_delta == -12, "qp delta");
-        check(out.objects[0].priority == sve::ObjectPriority::Critical, "priority");
+        check(out.objects[0].priority == ta_roienc::ObjectPriority::Critical, "priority");
     }
 
     // Truncated / bad CRC must fail.
     auto bad = side;
     bad.back() ^= 0xff;
-    sve::SeiFrame junk;
-    check(!sve::decode_sei_payload(bad, junk), "bad CRC rejected");
+    ta_roienc::SeiFrame junk;
+    check(!ta_roienc::decode_sei_payload(bad, junk), "bad CRC rejected");
 
     if (failures > 0) {
         std::fprintf(stderr, "sei_payload_test: %d failure(s)\n", failures);

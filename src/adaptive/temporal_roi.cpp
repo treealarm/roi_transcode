@@ -4,7 +4,7 @@
 #include <cmath>
 #include <map>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -247,4 +247,4 @@ std::vector<Box> TemporalRoi::at(double t_sec) const
     return out;
 }
 
-} // namespace sve
+} // namespace ta_roienc

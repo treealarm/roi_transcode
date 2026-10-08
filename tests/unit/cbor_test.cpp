@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-using namespace sve;
+using namespace ta_roienc;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \
@@ -293,14 +293,14 @@ void nesting_deeper_than_the_format_allows_is_refused_not_followed()
     // 0x81 is "an array of one item". Repeated, each byte opens another level.
     std::vector<uint8_t> deep(100000, uint8_t{0x81});
     deep.push_back(0x00); // one integer at the bottom, so only the depth is wrong
-    sve::cbor::Reader reader(deep);
+    ta_roienc::cbor::Reader reader(deep);
     CHECK(!reader.skip());
 
     // And the legitimate depth still passes: the SEI payload nests three levels, the limit
     // is 32.
     std::vector<uint8_t> shallow(3, uint8_t{0x81});
     shallow.push_back(0x00);
-    sve::cbor::Reader ok(shallow);
+    ta_roienc::cbor::Reader ok(shallow);
     CHECK(ok.skip());
     CHECK(ok.done());
 }
@@ -311,7 +311,7 @@ void a_pair_count_that_overflows_is_not_read_as_empty()
 {
     // 0xBB + eight bytes: a map with 2^63 pairs, and nothing after it.
     const std::vector<uint8_t> absurd{0xBB, 0x80, 0, 0, 0, 0, 0, 0, 0};
-    sve::cbor::Reader reader(absurd);
+    ta_roienc::cbor::Reader reader(absurd);
     CHECK(!reader.skip());
 }
 

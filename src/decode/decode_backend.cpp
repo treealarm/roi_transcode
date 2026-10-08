@@ -1,9 +1,9 @@
-#include "sve/decode_backend.h"
+#include "ta_roienc/decode_backend.h"
 
 #include <format>
 #include <stdexcept>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -73,4 +73,4 @@ DecodeSelection decode_selection_from_name(std::string_view name)
         std::format("unknown decoder '{}', expected one of {}", name, decode_selection_names()));
 }
 
-} // namespace sve
+} // namespace ta_roienc

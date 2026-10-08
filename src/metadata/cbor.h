@@ -26,7 +26,7 @@
 #include <string_view>
 #include <vector>
 
-namespace sve::cbor {
+namespace ta_roienc::cbor {
 
 /// Appends one item's head: the major type in the top three bits, then the argument in the
 /// shortest form that holds it.
@@ -81,4 +81,4 @@ private:
     std::span<const uint8_t> m_in;
 };
 
-} // namespace sve::cbor
+} // namespace ta_roienc::cbor

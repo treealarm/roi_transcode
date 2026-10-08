@@ -1,5 +1,5 @@
 #include "backend/common/backend_common.h"
-#include "sve/backend_registry.h"
+#include "ta_roienc/backend_registry.h"
 
 #include "backend/common/av_frame_buffer.h"
 #include "backend/common/av_pixel_format.h"
@@ -15,7 +15,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-namespace sve {
+namespace ta_roienc {
 
 LibavSession& libav(BackendSession& session)
 {
@@ -516,4 +516,4 @@ Status RegisterFfmpegBackends(BackendRegistry& registry) noexcept
     return Status::Ok();
 }
 
-} // namespace sve
+} // namespace ta_roienc

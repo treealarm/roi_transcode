@@ -6,14 +6,14 @@
 // is the same everywhere and no caller writes to stderr directly. Held by value and
 // cheap to copy: it is a std::function and a bool.
 
-#include "sve/logging.h"
+#include "ta_roienc/logging.h"
 
 #include <cstdio>
 #include <string>
 #include <string_view>
 #include <utility>
 
-namespace sve {
+namespace ta_roienc {
 
 class Logger {
 public:
@@ -44,4 +44,4 @@ private:
     LogSink m_sink;
 };
 
-} // namespace sve
+} // namespace ta_roienc

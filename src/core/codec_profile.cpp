@@ -1,9 +1,9 @@
-// The spelling of a CodecProfile. Public API, declared in sve/types.h, and a name only:
+// The spelling of a CodecProfile. Public API, declared in ta_roienc/types.h, and a name only:
 // which profile an input's bit depth admits is decided in the encoder, not here.
 
-#include "sve/types.h"
+#include "ta_roienc/types.h"
 
-namespace sve {
+namespace ta_roienc {
 
 const char* codec_profile_name(CodecProfile p)
 {
@@ -18,4 +18,4 @@ const char* codec_profile_name(CodecProfile p)
     return "?";
 }
 
-} // namespace sve
+} // namespace ta_roienc

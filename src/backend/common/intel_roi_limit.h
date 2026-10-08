@@ -26,11 +26,11 @@
 // Four and eight are also the VDEnc AVC and HEVC region counts in the driver, so the
 // boundary is the driver's own and not a property of that clip.
 
-#include "sve/types.h"
+#include "ta_roienc/types.h"
 
 #include <cstdint>
 
-namespace sve {
+namespace ta_roienc {
 
 /// Regions the iHD driver accepts for `codec`. Requests above it are truncated
 /// strongest-first by the caller and counted.
@@ -39,4 +39,4 @@ constexpr uint32_t intel_max_roi_regions(Codec codec)
     return codec == Codec::H264 ? 4 : 8;
 }
 
-} // namespace sve
+} // namespace ta_roienc

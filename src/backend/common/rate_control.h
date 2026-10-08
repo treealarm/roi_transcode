@@ -11,13 +11,13 @@
 // from backend/common except this kind of file -- backend_common.h pulls libavcodec in
 // behind it, and those components stay clear of it.
 
-#include "sve/policy.h"
+#include "ta_roienc/policy.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <limits>
 
-namespace sve {
+namespace ta_roienc {
 
 /// What a codec's own rate control is asked for, in the kilobits both libraries speak.
 struct VbvPlan {
@@ -66,4 +66,4 @@ constexpr VbvPlan vbv_plan_for(uint64_t target_bitrate)
     return plan;
 }
 
-} // namespace sve
+} // namespace ta_roienc

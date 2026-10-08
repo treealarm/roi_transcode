@@ -1,6 +1,6 @@
 #pragma once
 
-// Building a SmartVideoEncoder against a deployment the caller assembled.
+// Building a VideoEncoder against a deployment the caller assembled.
 //
 // RoiEncoder takes a BackendRegistry the caller built; this is the same door one level up,
 // for the facade.
@@ -17,18 +17,18 @@
 // Header, not a friend declaration: the assembly is a function, not a privilege, and it is
 // how CreateVideoEncoder itself is written.
 
-#include "sve/encoder.h"
+#include "ta_roienc/encoder.h"
 
 #include <memory>
 
-namespace sve {
+namespace ta_roienc {
 
 /// Exactly CreateVideoEncoder, except that the backends come from `registry` rather than
 /// from the process-wide one. Same validation, same refusals, same exceptions.
 ///
 /// `registry` must outlive the encoder this returns: it is held by pointer all the way
 /// down to RoiEncoder, and every backend it names is consulted again on each open.
-std::unique_ptr<SmartVideoEncoder> CreateVideoEncoderIn(
+std::unique_ptr<VideoEncoder> CreateVideoEncoderIn(
     const EncoderConfig& config, const BackendRegistry& registry);
 
-} // namespace sve
+} // namespace ta_roienc

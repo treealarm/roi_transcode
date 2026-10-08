@@ -2,7 +2,7 @@
 
 #include "backend/common/av_frame_buffer.h"
 #include "frame_input.h"
-#include "sve/frame.h"
+#include "ta_roienc/frame.h"
 
 #include <exception>
 #include <utility>
@@ -12,7 +12,7 @@ extern "C" {
 #include <libavutil/pixfmt.h>
 }
 
-namespace sve {
+namespace ta_roienc {
 
 struct VideoDecoder::Impl {
     FrameDecoder decoder;
@@ -178,4 +178,4 @@ DecodeReport VideoDecoder::report() const noexcept
     return m_impl->report;
 }
 
-} // namespace sve
+} // namespace ta_roienc

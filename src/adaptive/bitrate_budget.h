@@ -21,15 +21,15 @@
 // authority -- a frame whose expensive part is inside a protected region cannot be made
 // cheaper by crushing what is left.
 
-#include "sve/policy.h"
-#include "sve/types.h"
+#include "ta_roienc/policy.h"
+#include "ta_roienc/types.h"
 
 #include "object_normalizer.h"
 
 #include <cstdint>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 class BitrateBudget {
 public:
@@ -108,4 +108,4 @@ private:
     int32_t m_roi_soften = 0;
 };
 
-} // namespace sve
+} // namespace ta_roienc

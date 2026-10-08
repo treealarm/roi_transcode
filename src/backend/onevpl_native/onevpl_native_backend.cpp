@@ -24,8 +24,8 @@
 #include "adaptive/importance_map.h"
 #include "backend/common/intel_roi_limit.h"
 #include "backend/common/rate_control.h"
-#include "sve/backend_registry.h"
-#include "sve/encoder_backend.h"
+#include "ta_roienc/backend_registry.h"
+#include "ta_roienc/encoder_backend.h"
 
 #include <algorithm>
 #include <cstring>
@@ -35,7 +35,7 @@
 #include <vpl/mfx.h>
 #include <vpl/mfxvideo.h>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -1116,4 +1116,4 @@ Status RegisterOneVplBackend(BackendRegistry& registry) noexcept
 }
 
 
-} // namespace sve
+} // namespace ta_roienc

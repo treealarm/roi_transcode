@@ -1,13 +1,13 @@
 #pragma once
 
 #include "importance.h"
-#include "sve/object.h"
-#include "sve/object_priority.h"
-#include "sve/types.h"
+#include "ta_roienc/object.h"
+#include "ta_roienc/object_priority.h"
+#include "ta_roienc/types.h"
 
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 // A box resolved to pixels, with its halo. Internal: it is a step in turning boxes into
 // rectangles, and nothing outside this library has a reason to build one.
@@ -79,4 +79,4 @@ public:
 void truncate_roi_rects(std::vector<Rect>& rects, int32_t budget, int32_t width, int32_t height,
     int32_t* dropped = nullptr);
 
-} // namespace sve
+} // namespace ta_roienc

@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -271,4 +271,4 @@ void BitrateBudget::soften_detections(std::vector<Detection>& detections) const
     }
 }
 
-} // namespace sve
+} // namespace ta_roienc

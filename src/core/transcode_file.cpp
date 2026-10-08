@@ -1,12 +1,12 @@
-#include "sve/sve.h"
+#include "ta_roienc/ta_roienc.h"
 
 #include "av_raii.h"
 #include "backend/common/av_pixel_format.h"
 #include "codec_id.h"
 #include "file_mux_sink.h"
 #include "temporal_roi.h"
-#include "sve/encoder.h"
-#include "sve/frame.h"
+#include "ta_roienc/encoder.h"
+#include "ta_roienc/frame.h"
 
 extern "C" {
 #include <libavutil/pixdesc.h>
@@ -18,7 +18,7 @@ extern "C" {
 #include <string>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -168,7 +168,7 @@ Report transcode_file(const std::string& input_path,
     if (cfg.settings.metadata.sidecar != SidecarFormat::None) {
         const std::filesystem::path base = std::filesystem::path(output_path);
         const std::filesystem::path path =
-            base.parent_path() / (base.stem().string() + ".svemeta.ndjson");
+            base.parent_path() / (base.stem().string() + ".roimeta.ndjson");
         sidecar.open(path);
         if (!sidecar) {
             fail("cannot open sidecar " + path.string());
@@ -179,8 +179,8 @@ Report transcode_file(const std::string& input_path,
         sidecar_path = path.string();
     }
 
-    const std::unique_ptr<SmartVideoEncoder> made = CreateVideoEncoder(cfg);
-    SmartVideoEncoder& enc = *made;
+    const std::unique_ptr<VideoEncoder> made = CreateVideoEncoder(cfg);
+    VideoEncoder& enc = *made;
 
     // Built once from the whole timeline: grouping boxes into tracks per frame would be
     // the same work repeated for every frame of the clip.
@@ -344,4 +344,4 @@ Report transcode_file(const std::string& input_path,
     return report;
 }
 
-} // namespace sve
+} // namespace ta_roienc

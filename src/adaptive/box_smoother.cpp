@@ -4,7 +4,7 @@
 #include <functional>
 #include <string>
 
-namespace sve {
+namespace ta_roienc {
 
 uint64_t BoxSmoother::key_of(const Box& b)
 {
@@ -44,4 +44,4 @@ void BoxSmoother::apply(std::vector<Box>& boxes, float temporal, float spatial)
     }
 }
 
-} // namespace sve
+} // namespace ta_roienc

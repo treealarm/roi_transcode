@@ -22,8 +22,8 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "$comment-backends": "Every backend this machine can build, so that the unit tests cover all of them: the libavcodec ones (QSV, VA-API, x264/x265) that consumers link, and the native oneVPL one, which needs the oneVPL SDK.",
-        "SVE_BUILD_BACKEND_FFMPEG": "ON",
-        "SVE_BUILD_BACKEND_ONEVPL": "ON",
+        "TA_ROIENC_BUILD_BACKEND_FFMPEG": "ON",
+        "TA_ROIENC_BUILD_BACKEND_ONEVPL": "ON",
         "$comment": "Manifest mode off deliberately: this preset reuses the tree already installed in VCPKG_ROOT, which is what makes a reconfigure take a second. The manifest presets are what a fresh checkout uses.",
         "VCPKG_MANIFEST_MODE": "OFF"
       }

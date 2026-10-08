@@ -15,7 +15,7 @@
 //   3. Capabilities answer the same thing to everyone.
 //
 // What this file deliberately does NOT test: one encoder driven from two threads. That is
-// not supported -- SmartVideoEncoder holds plain, unguarded state -- and a test that did it
+// not supported -- VideoEncoder holds plain, unguarded state -- and a test that did it
 // would be testing undefined behaviour, which passes and proves nothing. It is written down
 // in the header instead.
 //
@@ -23,10 +23,10 @@
 // thousand runs. Build this test with -fsanitize=thread and run it under ThreadSanitizer
 // for teeth.
 
-#include "sve/backend_registry.h"
-#include "sve/encoder.h"
-#include "sve/encoder_backend.h"
-#include "sve/raw_frame.h"
+#include "ta_roienc/backend_registry.h"
+#include "ta_roienc/encoder.h"
+#include "ta_roienc/encoder_backend.h"
+#include "ta_roienc/raw_frame.h"
 
 #include <atomic>
 #include <cstdio>
@@ -36,7 +36,7 @@
 #include <thread>
 #include <vector>
 
-using namespace sve;
+using namespace ta_roienc;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \
@@ -151,7 +151,7 @@ struct Digest {
 Digest encode_once()
 {
     Digest digest;
-    const std::unique_ptr<SmartVideoEncoder> enc = CreateVideoEncoder(config_for());
+    const std::unique_ptr<VideoEncoder> enc = CreateVideoEncoder(config_for());
 
     const auto drain = [&] {
         for (;;) {

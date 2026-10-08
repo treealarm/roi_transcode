@@ -28,10 +28,10 @@
 
 // The public interface and nothing else: backend_common.h exists for the libavcodec
 // backends and pulls libavcodec in behind it. All this backend needs is BackendSession,
-// which sve/encoder_backend.h declares.
+// which ta_roienc/encoder_backend.h declares.
 #include "backend/common/rate_control.h"
-#include "sve/backend_registry.h"
-#include "sve/encoder_backend.h"
+#include "ta_roienc/backend_registry.h"
+#include "ta_roienc/encoder_backend.h"
 #include "preset.h"
 
 #include <algorithm>
@@ -47,7 +47,7 @@ extern "C" {
 #include <x264.h>
 }
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -507,4 +507,4 @@ Status RegisterX264Backend(BackendRegistry& registry) noexcept
 }
 
 
-} // namespace sve
+} // namespace ta_roienc

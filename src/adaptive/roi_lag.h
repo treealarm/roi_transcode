@@ -5,13 +5,13 @@
 // Measures IoU between the applied ROI and the target box, and how many frames /
 // milliseconds the applied region trails the target. Pure geometry: no codec.
 
-#include "sve/types.h"
-#include "sve/report.h"
+#include "ta_roienc/types.h"
+#include "ta_roienc/report.h"
 
 #include <cstdint>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 /// Intersection-over-union of two axis-aligned boxes in normalized coordinates. Empty or
 /// non-overlapping boxes yield 0.
@@ -45,4 +45,4 @@ float center_distance_diag(const Box& a, const Box& b);
 /// Fills the ROI-lag fields in Report from runtime samples.
 void fill_lag_report(const std::vector<RoiLagSample>& samples, Report& report);
 
-} // namespace sve
+} // namespace ta_roienc

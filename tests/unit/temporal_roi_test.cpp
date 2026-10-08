@@ -28,9 +28,9 @@ void check_near(double got, double want, double tol, const std::string& what)
     }
 }
 
-sve::Box box(double t, uint64_t track, float x, float w = 0.1f)
+ta_roienc::Box box(double t, uint64_t track, float x, float w = 0.1f)
 {
-    sve::Box b;
+    ta_roienc::Box b;
     b.t_sec = t;
     b.kind = "person";
     b.track_id = track;
@@ -46,9 +46,9 @@ sve::Box box(double t, uint64_t track, float x, float w = 0.1f)
 void a_gap_is_filled_from_both_ends()
 {
     // Samples at 0 and 2 seconds, so the one at 1 is the frame the detector missed.
-    const std::vector<sve::Box> boxes{box(0.0, 7, 0.10f), box(2.0, 7, 0.30f)};
-    sve::TemporalROIConfig config;   // max_missing_frames 3
-    const sve::TemporalRoi roi(boxes, config, 0.5);
+    const std::vector<ta_roienc::Box> boxes{box(0.0, 7, 0.10f), box(2.0, 7, 0.30f)};
+    ta_roienc::TemporalROIConfig config;   // max_missing_frames 3
+    const ta_roienc::TemporalRoi roi(boxes, config, 0.5);
 
     const auto mid = roi.at(1.0);
     check(mid.size() == 1, "the region survives the miss");
@@ -68,11 +68,11 @@ void a_gap_is_filled_from_both_ends()
 // a region budget of 32 on six objects.
 void samples_of_one_track_do_not_pile_up()
 {
-    std::vector<sve::Box> boxes;
+    std::vector<ta_roienc::Box> boxes;
     for (int i = 0; i < 10; ++i) {
         boxes.push_back(box(i * 0.2, 7, 0.10f + 0.01f * static_cast<float>(i)));
     }
-    const sve::TemporalRoi roi(boxes, sve::TemporalROIConfig{}, 0.5);
+    const ta_roienc::TemporalRoi roi(boxes, ta_roienc::TemporalROIConfig{}, 0.5);
     const auto live = roi.at(1.0);
     check(live.size() == 1, "ten samples of one track give one region, not ten");
 }
@@ -81,10 +81,10 @@ void samples_of_one_track_do_not_pile_up()
 // from a gap; a track can.
 void a_track_that_ended_is_let_go()
 {
-    const std::vector<sve::Box> boxes{box(0.0, 7, 0.10f), box(1.0, 7, 0.20f)};
-    sve::TemporalROIConfig config;
+    const std::vector<ta_roienc::Box> boxes{box(0.0, 7, 0.10f), box(1.0, 7, 0.20f)};
+    ta_roienc::TemporalROIConfig config;
     config.max_missing_frames = 2;          // two missed samples of patience
-    const sve::TemporalRoi roi(boxes, config, 0.5);
+    const ta_roienc::TemporalRoi roi(boxes, config, 0.5);
 
     check(roi.at(2.5).size() == 1, "still held one and a half samples after the last sight");
     check(roi.at(4.0).empty(), "let go once the patience runs out");
@@ -94,17 +94,17 @@ void a_track_that_ended_is_let_go()
 // different rates -- which is the thing a single hold_sec cannot do.
 void patience_follows_the_source_s_own_rate()
 {
-    sve::TemporalROIConfig config;
+    ta_roienc::TemporalROIConfig config;
     config.max_missing_frames = 2;
 
     // A slow producer: one sample per second. Two frames of patience is two seconds.
-    const std::vector<sve::Box> slow{box(0.0, 1, 0.1f), box(1.0, 1, 0.1f)};
-    const sve::TemporalRoi slow_roi(slow, config, 0.5);
+    const std::vector<ta_roienc::Box> slow{box(0.0, 1, 0.1f), box(1.0, 1, 0.1f)};
+    const ta_roienc::TemporalRoi slow_roi(slow, config, 0.5);
     check(!slow_roi.at(2.5).empty(), "a 1 Hz source is still held at +1.5s");
 
     // A fast one: five samples per second. The same two frames is 0.4 seconds.
-    const std::vector<sve::Box> fast{box(0.0, 1, 0.1f), box(0.2, 1, 0.1f)};
-    const sve::TemporalRoi fast_roi(fast, config, 0.5);
+    const std::vector<ta_roienc::Box> fast{box(0.0, 1, 0.1f), box(0.2, 1, 0.1f)};
+    const ta_roienc::TemporalRoi fast_roi(fast, config, 0.5);
     check(fast_roi.at(1.0).empty(), "a 5 Hz source is let go by +0.8s");
 }
 
@@ -112,12 +112,12 @@ void patience_follows_the_source_s_own_rate()
 // of the gap are known.
 void confidence_decays_only_where_it_is_a_guess()
 {
-    sve::TemporalROIConfig config;
+    ta_roienc::TemporalROIConfig config;
     config.confidence_decay = 0.5f;
     config.use_track_prediction = false; // hold last box; test is about confidence only
 
-    const std::vector<sve::Box> boxes{box(0.0, 7, 0.1f), box(1.0, 7, 0.2f)};
-    const sve::TemporalRoi roi(boxes, config, 0.5);
+    const std::vector<ta_roienc::Box> boxes{box(0.0, 7, 0.1f), box(1.0, 7, 0.2f)};
+    const ta_roienc::TemporalRoi roi(boxes, config, 0.5);
 
     check_near(roi.at(0.5)[0].confidence, 0.9, 1e-4,
         "between two known samples the confidence is interpolated, not decayed");
@@ -130,12 +130,12 @@ void confidence_decays_only_where_it_is_a_guess()
 void prediction_continues_motion_past_the_last_sample()
 {
     // x: 0.10 at t=0, 0.30 at t=2 → at t=3 (one second past end) x = 0.40
-    const std::vector<sve::Box> boxes{box(0.0, 7, 0.10f), box(2.0, 7, 0.30f)};
-    sve::TemporalROIConfig config;
+    const std::vector<ta_roienc::Box> boxes{box(0.0, 7, 0.10f), box(2.0, 7, 0.30f)};
+    ta_roienc::TemporalROIConfig config;
     config.max_missing_frames = 3;
     config.use_track_prediction = true;
     config.confidence_decay = 1.0f;
-    const sve::TemporalRoi roi(boxes, config, 0.5);
+    const ta_roienc::TemporalRoi roi(boxes, config, 0.5);
 
     const auto past = roi.at(3.0);
     check(past.size() == 1, "still held with prediction");
@@ -144,7 +144,7 @@ void prediction_continues_motion_past_the_last_sample()
     }
 
     config.use_track_prediction = false;
-    const sve::TemporalRoi held(boxes, config, 0.5);
+    const ta_roienc::TemporalRoi held(boxes, config, 0.5);
     const auto frozen = held.at(3.0);
     check(frozen.size() == 1 && std::fabs(frozen[0].x - 0.30f) < 1e-4,
         "without prediction the last box is frozen");
@@ -153,8 +153,8 @@ void prediction_continues_motion_past_the_last_sample()
 // A source that reports no track has nothing to stitch, and keeps the old behaviour.
 void untracked_boxes_keep_the_symmetric_window()
 {
-    sve::Box b = box(1.0, 0, 0.1f);   // track_id 0 == not reported
-    const sve::TemporalRoi roi({&b, 1}, sve::TemporalROIConfig{}, 0.5);
+    ta_roienc::Box b = box(1.0, 0, 0.1f);   // track_id 0 == not reported
+    const ta_roienc::TemporalRoi roi({&b, 1}, ta_roienc::TemporalROIConfig{}, 0.5);
     check(roi.untracked_count() == 1, "an untracked box is kept apart");
     check(roi.at(1.4).size() == 1, "held inside the window");
     check(roi.at(1.6).empty(), "dropped outside it");
@@ -165,8 +165,8 @@ void untracked_boxes_keep_the_symmetric_window()
 void at_attaches_track_evidence_for_importance()
 {
     // Moves 0.20 of the frame in x over 2 s → speed = 0.20 / (√2 * 2) ≈ 0.0707 diagonals/s.
-    const std::vector<sve::Box> boxes{box(0.0, 7, 0.10f), box(2.0, 7, 0.30f)};
-    const sve::TemporalRoi roi(boxes, sve::TemporalROIConfig{}, 0.5);
+    const std::vector<ta_roienc::Box> boxes{box(0.0, 7, 0.10f), box(2.0, 7, 0.30f)};
+    const ta_roienc::TemporalRoi roi(boxes, ta_roienc::TemporalROIConfig{}, 0.5);
 
     const auto mid = roi.at(1.0);
     check(mid.size() == 1 && mid[0].track.present, "interpolated box carries evidence");
@@ -175,8 +175,8 @@ void at_attaches_track_evidence_for_importance()
     check_near(mid[0].track.speed, 0.20 / (std::sqrt(2.0) * 2.0), 1e-4,
         "speed is centre displacement in frame-diagonals per second");
 
-    sve::Box lone = box(1.0, 3, 0.5f);
-    const sve::TemporalRoi single({&lone, 1}, sve::TemporalROIConfig{}, 0.5);
+    ta_roienc::Box lone = box(1.0, 3, 0.5f);
+    const ta_roienc::TemporalRoi single({&lone, 1}, ta_roienc::TemporalROIConfig{}, 0.5);
     const auto one = single.at(1.0);
     check(one.size() == 1 && one[0].track.present && one[0].track.speed == 0.0f,
         "a single-sample track has age but no speed");
@@ -186,11 +186,11 @@ void at_attaches_track_evidence_for_importance()
 /// them.
 void switched_off_nothing_is_kept_alive()
 {
-    const std::vector<sve::Box> boxes{box(0.0, 7, 0.10f), box(2.0, 7, 0.30f)};
+    const std::vector<ta_roienc::Box> boxes{box(0.0, 7, 0.10f), box(2.0, 7, 0.30f)};
 
-    sve::TemporalROIConfig off;
+    ta_roienc::TemporalROIConfig off;
     off.enabled = false;
-    const sve::TemporalRoi cold(boxes, off, 0.5);
+    const ta_roienc::TemporalRoi cold(boxes, off, 0.5);
 
     // The miss the whole feature exists to cover: switched on this is one interpolated
     // region, and switched off there is nothing between the samples.
@@ -205,15 +205,15 @@ void switched_off_nothing_is_kept_alive()
 
     // The same boxes with the default config, so the difference is the flag and not the
     // fixture. Without this the test above would pass against a broken TemporalRoi.
-    const sve::TemporalRoi warm(boxes, sve::TemporalROIConfig{}, 0.5);
+    const ta_roienc::TemporalRoi warm(boxes, ta_roienc::TemporalROIConfig{}, 0.5);
     check(warm.at(1.0).size() == 1, "the same gap is bridged when temporal ROI is on");
     check(warm.at(2.5).size() == 1, "the same box is held past the last sample when on");
 
     // And the untracked path, which the tracked assertions above cannot reach. It runs on
     // its own symmetric window rather than on reach, so it is switched off separately in
     // the code and would stay on unnoticed while everything above still passed.
-    sve::Box lone = box(1.0, 0, 0.1f);   // track_id 0 == the producer numbered nothing
-    const sve::TemporalRoi cold_untracked({&lone, 1}, off, 0.5);
+    ta_roienc::Box lone = box(1.0, 0, 0.1f);   // track_id 0 == the producer numbered nothing
+    const ta_roienc::TemporalRoi cold_untracked({&lone, 1}, off, 0.5);
     check(cold_untracked.at(1.4).empty(), "an untracked box is not held either when off");
     check(cold_untracked.at(1.0).size() == 1, "and its own instant still arrives");
 }

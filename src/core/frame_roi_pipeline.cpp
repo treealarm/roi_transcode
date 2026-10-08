@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace sve {
+namespace ta_roienc {
 
 int32_t effective_coding_block(const EncoderCapabilities& caps)
 {
@@ -80,4 +80,4 @@ FrameRoiPipelineOutput FrameRoiPipeline::process(const FrameRoiPipelineInput& in
     return out;
 }
 
-} // namespace sve
+} // namespace ta_roienc

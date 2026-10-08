@@ -3,15 +3,15 @@
 // Each test names the event it covers, so that an event removed from the code shows up here
 // as a failure rather than as a line nobody missed.
 //
-// It also covers the FFmpeg routing of sve/ffmpeg_log.h: diagnostics that go to stderr
+// It also covers the FFmpeg routing of ta_roienc/ffmpeg_log.h: diagnostics that go to stderr
 // behind the application's back are not observable through the sink it named, and a log
 // with a hole in it is what this whole contract is arguing against.
 
 #include "encoder_runtime_warnings.h"
-#include "sve/encoder.h"
-#include "sve/ffmpeg_log.h"
-#include "sve/logging.h"
-#include "sve/raw_frame.h"
+#include "ta_roienc/encoder.h"
+#include "ta_roienc/ffmpeg_log.h"
+#include "ta_roienc/logging.h"
+#include "ta_roienc/raw_frame.h"
 
 #include <cstdio>
 #include <memory>
@@ -22,7 +22,7 @@ extern "C" {
 #include <libavutil/log.h>
 }
 
-using namespace sve;
+using namespace ta_roienc;
 
 namespace {
 
@@ -119,7 +119,7 @@ void every_level_the_spec_names_exists_and_has_a_name()
 void opening_reports_the_backend_and_what_it_can_do()
 {
     Captured log;
-    const std::unique_ptr<SmartVideoEncoder> enc = CreateVideoEncoder(config_with(log.sink()));
+    const std::unique_ptr<VideoEncoder> enc = CreateVideoEncoder(config_with(log.sink()));
     check(enc != nullptr, "the encoder opened");
     if (!log.said_at(LogLevel::Info, "backend: x264direct")) {
         log.dump("open");
@@ -133,7 +133,7 @@ void opening_reports_the_backend_and_what_it_can_do()
 void reconfigure_and_stop_are_announced()
 {
     Captured log;
-    const std::unique_ptr<SmartVideoEncoder> enc = CreateVideoEncoder(config_with(log.sink()));
+    const std::unique_ptr<VideoEncoder> enc = CreateVideoEncoder(config_with(log.sink()));
 
     RuntimeEncoderSettings change;
     change.quality = Quality{};
@@ -208,12 +208,12 @@ void ffmpeg_diagnostics_arrive_through_the_sink()
     av_log_set_level(AV_LOG_DEBUG);
     SetFFmpegLogSink(log.sink());
 
-    av_log(nullptr, AV_LOG_WARNING, "sve logging test: %d\n", 42);
-    av_log(nullptr, AV_LOG_ERROR, "sve logging test error\n");
+    av_log(nullptr, AV_LOG_WARNING, "ta_roienc logging test: %d\n", 42);
+    av_log(nullptr, AV_LOG_ERROR, "ta_roienc logging test error\n");
 
-    check(log.said_at(LogLevel::Warning, "sve logging test: 42"),
+    check(log.said_at(LogLevel::Warning, "ta_roienc logging test: 42"),
         "an FFmpeg warning arrives, formatted, at Warning");
-    check(log.said_at(LogLevel::Error, "sve logging test error"),
+    check(log.said_at(LogLevel::Error, "ta_roienc logging test error"),
         "and an FFmpeg error arrives at Error");
     for (const auto& [level, text] : log.lines) {
         (void)level;
@@ -243,12 +243,12 @@ void a_tinted_level_is_still_the_level_it_is()
     Captured log;
     SetFFmpegLogSink(log.sink());
 
-    av_log(nullptr, AV_LOG_ERROR | AV_LOG_C(196), "sve logging test tinted\n");
+    av_log(nullptr, AV_LOG_ERROR | AV_LOG_C(196), "ta_roienc logging test tinted\n");
 
-    if (!log.said_at(LogLevel::Error, "sve logging test tinted")) {
+    if (!log.said_at(LogLevel::Error, "ta_roienc logging test tinted")) {
         log.dump("tinted");
     }
-    check(log.said_at(LogLevel::Error, "sve logging test tinted"),
+    check(log.said_at(LogLevel::Error, "ta_roienc logging test tinted"),
         "a tinted error is delivered, and delivered as an error");
 
     SetFFmpegLogSink(nullptr);

@@ -14,11 +14,11 @@
 // Annex-B with the parameter sets in band -- which is the case that would install a parser
 // -- and it needs nothing checked in.
 
-#include "sve/decoder.h"
-#include "sve/encoder.h"
-#include "sve/frame.h"
-#include "sve/packet.h"
-#include "sve/raw_frame.h"
+#include "ta_roienc/decoder.h"
+#include "ta_roienc/encoder.h"
+#include "ta_roienc/frame.h"
+#include "ta_roienc/packet.h"
+#include "ta_roienc/raw_frame.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -26,7 +26,7 @@
 #include <string>
 #include <vector>
 
-using namespace sve;
+using namespace ta_roienc;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \

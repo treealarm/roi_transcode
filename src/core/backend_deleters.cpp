@@ -8,9 +8,9 @@
 // backend returns one, so the definitions cannot live in an optional component a build is
 // allowed not to have.
 
-#include "sve/encoder_backend.h"
+#include "ta_roienc/encoder_backend.h"
 
-namespace sve {
+namespace ta_roienc {
 
 void SessionDeleter::operator()(BackendSession* session) const noexcept
 {
@@ -22,4 +22,4 @@ void FrameBufferDeleter::operator()(IFrameBuffer* buffer) const noexcept
     delete buffer;
 }
 
-} // namespace sve
+} // namespace ta_roienc

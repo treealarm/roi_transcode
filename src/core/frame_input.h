@@ -4,7 +4,7 @@
 // copy; H.264, H.265 and JPEG go through a decoder.
 
 #include "av_raii.h"
-#include "sve/session.h"
+#include "ta_roienc/session.h"
 
 #include <functional>
 #include <string>
@@ -14,7 +14,7 @@ extern "C" {
 #include <libavutil/hwcontext.h>
 }
 
-namespace sve {
+namespace ta_roienc {
 
 class FrameDecoder {
 public:
@@ -42,7 +42,7 @@ public:
         CompleteAccessUnits,
     };
 
-    void open(sve::InputCodec codec, const uint8_t* extradata, int extradata_size,
+    void open(ta_roienc::InputCodec codec, const uint8_t* extradata, int extradata_size,
         AVBufferRef* hw_device = nullptr, Framing framing = Framing::Arbitrary);
 
     // Which libavcodec decoder opened ("hevc", "h264", "mjpeg"); empty for a raw session.
@@ -69,7 +69,7 @@ private:
     // libavcodec's get_format: picks the hardware format when the decoder offers it.
     static AVPixelFormat choose_format(AVCodecContext* ctx, const AVPixelFormat* formats);
 
-    sve::InputCodec m_codec = sve::InputCodec::Raw;
+    ta_roienc::InputCodec m_codec = ta_roienc::InputCodec::Raw;
     roiav::CodecCtx m_dec;
     AVCodecParserContext* m_parser = nullptr;
     roiav::Frame m_frame;
@@ -88,4 +88,4 @@ public:
     FrameDecoder& operator=(const FrameDecoder&) = delete;
 };
 
-} // namespace sve
+} // namespace ta_roienc

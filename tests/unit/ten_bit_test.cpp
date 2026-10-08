@@ -8,8 +8,8 @@
 // it was told: "catch, continue, PASS" with a skip nobody can audit would be a silent pass
 // wearing a different hat.
 
-#include "sve/encoder.h"
-#include "sve/frame.h"
+#include "ta_roienc/encoder.h"
+#include "ta_roienc/frame.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-using namespace sve;
+using namespace ta_roienc;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \
@@ -97,7 +97,7 @@ void ten_bit_encodes(Backend backend, const char* label)
 {
     EncoderConfig cfg = config_for(backend);
 
-    std::unique_ptr<SmartVideoEncoder> enc;
+    std::unique_ptr<VideoEncoder> enc;
     try {
         enc = CreateVideoEncoder(cfg);
     } catch (const EncoderError& e) {

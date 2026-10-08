@@ -9,14 +9,14 @@
 // and catching it here rather than inside an encoder is the whole difference between an
 // InvalidArgument and a read past the end of somebody's buffer.
 
-#include "sve/frame.h"
+#include "ta_roienc/frame.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <vector>
 
-using namespace sve;
+using namespace ta_roienc;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \

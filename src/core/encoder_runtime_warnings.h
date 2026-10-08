@@ -11,16 +11,16 @@
 // warning nobody reads.
 
 #include "logger.h"
-#include "sve/capabilities.h"
-#include "sve/policy.h"
-#include "sve/status.h"
-#include "sve/types.h"
+#include "ta_roienc/capabilities.h"
+#include "ta_roienc/policy.h"
+#include "ta_roienc/status.h"
+#include "ta_roienc/types.h"
 
 #include <format>
 #include <string>
 #include <utility>
 
-namespace sve {
+namespace ta_roienc {
 
 /// A refusal under FallbackPolicy::Strict -- the "unsupported feature" event.
 ///
@@ -142,4 +142,4 @@ inline Status guard_cpu_h265_target(const bool requested, const FallbackPolicy p
     return Status::Ok();
 }
 
-} // namespace sve
+} // namespace ta_roienc

@@ -1,8 +1,8 @@
 #include "object_normalizer.h"
 
 #include "importance.h"
-#include "sve/geometry.h"
-#include "sve/object_priority.h"
+#include "ta_roienc/geometry.h"
+#include "ta_roienc/object_priority.h"
 
 #include <algorithm>
 #include <cmath>
@@ -12,7 +12,7 @@
 #include <span>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 /// The region budget used when neither the caller nor the backend names one.
 ///
@@ -604,4 +604,4 @@ void truncate_roi_rects(std::vector<Rect>& rects, int32_t budget, int32_t width,
     }
 }
 
-} // namespace sve
+} // namespace ta_roienc

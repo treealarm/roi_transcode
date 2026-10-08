@@ -1,6 +1,6 @@
-#include "sve/memory.h"
+#include "ta_roienc/memory.h"
 
-namespace sve {
+namespace ta_roienc {
 
 const char* memory_type_name(MemoryType t)
 {
@@ -13,4 +13,4 @@ const char* memory_type_name(MemoryType t)
     return "?";
 }
 
-} // namespace sve
+} // namespace ta_roienc

@@ -5,14 +5,14 @@
 // corner outside the outline is not protected. The AABB of the same outline stays available
 // for anything that only draws boxes.
 
-#include "sve/object.h"
+#include "ta_roienc/object.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -178,4 +178,4 @@ void dilate_mask(uint8_t* mask, int32_t width, int32_t height, int32_t radius)
     }
 }
 
-} // namespace sve
+} // namespace ta_roienc

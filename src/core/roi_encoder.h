@@ -7,15 +7,15 @@
 // What lives here is backend selection: walking the fallback chain, honouring a probe, and
 // reporting which one opened. The frames themselves go through IEncoderBackend.
 
-#include "sve/backend_registry.h"
-#include "sve/encoder_backend.h"
-#include "sve/types.h"
+#include "ta_roienc/backend_registry.h"
+#include "ta_roienc/encoder_backend.h"
+#include "ta_roienc/types.h"
 
 #include <span>
 #include <string>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 class PacketSink;
 
@@ -129,4 +129,4 @@ private:
     PacketSink* m_sink = nullptr;
 };
 
-} // namespace sve
+} // namespace ta_roienc

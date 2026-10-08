@@ -17,15 +17,15 @@
 // as_avframe hands libavcodec a frame that borrows these pixels, and it can only do that
 // without copying if it can also hand over the owner. See backend/common/backend_common.cpp.
 
-#include "sve/frame_buffer.h"
-#include "sve/raw_frame.h"
+#include "ta_roienc/frame_buffer.h"
+#include "ta_roienc/raw_frame.h"
 
 #include <array>
 #include <cstddef>
 #include <memory>
 #include <span>
 
-namespace sve {
+namespace ta_roienc {
 
 class OwnedPlaneBuffer final : public IFrameBuffer {
 public:
@@ -71,4 +71,4 @@ private:
     std::shared_ptr<const void> m_owner;
 };
 
-} // namespace sve
+} // namespace ta_roienc

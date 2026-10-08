@@ -4,7 +4,7 @@
 #include <cmath>
 #include <limits>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -133,4 +133,4 @@ void fill_lag_report(const std::vector<RoiLagSample>& samples, Report& report)
     report.roi_lag_acceptance = roi_lag_acceptance(samples);
 }
 
-} // namespace sve
+} // namespace ta_roienc

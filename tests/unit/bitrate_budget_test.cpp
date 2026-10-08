@@ -28,7 +28,7 @@ void check_eq(int32_t got, int32_t want, const std::string& what)
 
 void inactive_without_a_target()
 {
-    const sve::BitrateBudget b;
+    const ta_roienc::BitrateBudget b;
     check(!b.active(), "default budget is inactive");
     check_eq(b.background_extra(), 0, "no background extra");
     check_eq(b.roi_soften(), 0, "no ROI soften");
@@ -36,10 +36,10 @@ void inactive_without_a_target()
 
 void overshoot_crushes_background_before_roi()
 {
-    sve::RateControlPolicy policy;
+    ta_roienc::RateControlPolicy policy;
     policy.target_bitrate = 1'000'000;
     policy.max_average_overshoot = 0.1f;
-    sve::BitrateBudget b(policy);
+    ta_roienc::BitrateBudget b(policy);
     check(b.active(), "a target activates the budget");
 
     for (int32_t i = 0; i < 4; ++i) {
@@ -57,10 +57,10 @@ void overshoot_crushes_background_before_roi()
 
 void undershoot_releases_only_after_debt_is_paid()
 {
-    sve::RateControlPolicy policy;
+    ta_roienc::RateControlPolicy policy;
     policy.target_bitrate = 1'000'000;
     policy.recovery_window_ms = 1000;
-    sve::BitrateBudget b(policy);
+    ta_roienc::BitrateBudget b(policy);
     for (int32_t i = 0; i < 100; ++i) {
         b.observe(62500, 0.25); // hot
     }
@@ -107,10 +107,10 @@ void undershoot_releases_only_after_debt_is_paid()
 /// oscillating.
 void a_quiet_stream_is_released_in_bounded_time()
 {
-    sve::RateControlPolicy policy;
+    ta_roienc::RateControlPolicy policy;
     policy.target_bitrate = 2'000'000;
     policy.recovery_window_ms = 1000;
-    sve::BitrateBudget b(policy);
+    ta_roienc::BitrateBudget b(policy);
 
     constexpr double dt = 1.0 / 25.0;
     for (int32_t i = 0; i < 100; ++i) {
@@ -135,11 +135,11 @@ void a_quiet_stream_is_released_in_bounded_time()
 
 void peak_overshoot_climbs_inside_a_wide_average_deadband()
 {
-    sve::RateControlPolicy policy;
+    ta_roienc::RateControlPolicy policy;
     policy.target_bitrate = 1'000'000;
     policy.max_average_overshoot = 0.5f; // ±50%: a brief burst stays inside the avg band
     policy.max_peak_overshoot = 0.2f;    // 1.2 Mbps peak ceiling
-    sve::BitrateBudget b(policy);
+    ta_roienc::BitrateBudget b(policy);
 
     for (int32_t i = 0; i < 12; ++i) {
         b.observe(31250, 0.25); // 1 Mbps -- on target
@@ -155,23 +155,23 @@ void peak_overshoot_climbs_inside_a_wide_average_deadband()
 
 void apply_and_soften_respect_critical_objects()
 {
-    sve::RateControlPolicy policy;
+    ta_roienc::RateControlPolicy policy;
     policy.target_bitrate = 1'000'000;
     policy.critical_importance = 0.95f;
-    sve::BitrateBudget b(policy);
+    ta_roienc::BitrateBudget b(policy);
     for (int32_t i = 0; i < 100; ++i) {
         b.observe(62500, 0.25);
     }
     check(b.background_extra() > 0 && b.roi_soften() > 0, "precondition: extras up");
 
-    sve::Quality q;
+    ta_roienc::Quality q;
     q.background_qp_delta = 6;
     const auto adjusted = b.apply(q);
     check(adjusted.background_qp_delta == 6 + b.background_extra(),
         "apply raises background by the extra");
     check(q.background_qp_delta == 6, "apply does not mutate the original");
 
-    std::vector<sve::Detection> dets(2);
+    std::vector<ta_roienc::Detection> dets(2);
     dets[0].importance = 1.00f;
     dets[0].qp_delta = -12;
     dets[0].pad_qp_delta = -6;
@@ -191,9 +191,9 @@ void apply_and_soften_respect_critical_objects()
 void the_correction_is_sized_from_the_miss()
 {
     const auto level_after_one_correction = [](double bps_multiple) {
-        sve::RateControlPolicy policy;
+        ta_roienc::RateControlPolicy policy;
         policy.target_bitrate = 1'000'000;
-        sve::BitrateBudget b(policy);
+        ta_roienc::BitrateBudget b(policy);
         // Two observations to pass kMinSeconds, then the one that carries the miss.
         const int64_t bytes = static_cast<int64_t>(bps_multiple * 1'000'000.0 * 0.25 / 8.0);
         for (int32_t i = 0; i < 3; ++i) {
@@ -215,9 +215,9 @@ void the_correction_is_sized_from_the_miss()
 /// 114%.
 void the_loop_lets_go_more_slowly_than_it_clamps_down()
 {
-    sve::RateControlPolicy policy;
+    ta_roienc::RateControlPolicy policy;
     policy.target_bitrate = 1'000'000;
-    sve::BitrateBudget b(policy);
+    ta_roienc::BitrateBudget b(policy);
 
     // 1.5x over for one tick: how far one correction climbs.
     for (int32_t i = 0; i < 3; ++i) {
@@ -227,8 +227,8 @@ void the_loop_lets_go_more_slowly_than_it_clamps_down()
     check(climbed > 0, "precondition: being over the target climbs");
 
     // The mirror image: 1/1.5 of the target, the same distance in the other direction.
-    sve::RateControlPolicy same = policy;
-    sve::BitrateBudget under(same);
+    ta_roienc::RateControlPolicy same = policy;
+    ta_roienc::BitrateBudget under(same);
     for (int32_t i = 0; i < 3; ++i) {
         under.observe(46875, 0.25);
     }
@@ -254,9 +254,9 @@ void it_converges_against_a_plant_it_does_not_model_exactly()
     constexpr double kPlantStepsPerDoubling = 9.0;
     constexpr double kPlantShare = 0.7;
 
-    sve::RateControlPolicy policy;
+    ta_roienc::RateControlPolicy policy;
     policy.target_bitrate = static_cast<uint64_t>(kTarget);
-    sve::BitrateBudget b(policy);
+    ta_roienc::BitrateBudget b(policy);
 
     constexpr double dt = 1.0 / 25.0;
     double worst_late_ratio = 0.0;
@@ -281,9 +281,9 @@ void it_converges_against_a_plant_it_does_not_model_exactly()
 /// penalty from +6 to +30 changed the rate by four percent.
 void an_unreachable_target_is_reported_rather_than_missed_quietly()
 {
-    sve::RateControlPolicy policy;
+    ta_roienc::RateControlPolicy policy;
     policy.target_bitrate = 1'000'000;
-    sve::BitrateBudget b(policy);
+    ta_roienc::BitrateBudget b(policy);
     check(!b.target_unreachable(), "nothing to report before anything is encoded");
 
     // Three times the target, and it stays there whatever the loop does: a plant the
@@ -302,9 +302,9 @@ void an_unreachable_target_is_reported_rather_than_missed_quietly()
 /// the loop working, not the loop failing.
 void a_burst_the_loop_absorbs_is_not_reported()
 {
-    sve::RateControlPolicy policy;
+    ta_roienc::RateControlPolicy policy;
     policy.target_bitrate = 1'000'000;
-    sve::BitrateBudget b(policy);
+    ta_roienc::BitrateBudget b(policy);
 
     constexpr double dt = 1.0 / 25.0;
     for (int32_t i = 0; i < 25; ++i) {

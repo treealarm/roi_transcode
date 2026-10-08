@@ -10,13 +10,13 @@
 // library and read by another is exactly where a "why does the last digit differ" bug
 // comes from.
 
-#include "sve/metadata.h"
+#include "ta_roienc/metadata.h"
 
 #include <array>
 #include <cstdio>
 #include <string>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -110,4 +110,4 @@ std::string encode_sidecar_ndjson(const SeiFrame& frame, uint64_t frame_index,
     return out;
 }
 
-} // namespace sve
+} // namespace ta_roienc

@@ -6,8 +6,8 @@
 //
 // Everything runs on the software backend, so this test needs no GPU.
 
-#include "sve/encoder.h"
-#include "sve/frame.h"
+#include "ta_roienc/encoder.h"
+#include "ta_roienc/frame.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-using namespace sve;
+using namespace ta_roienc;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \
@@ -74,7 +74,7 @@ Frame make_frame(const std::shared_ptr<Pixels>& pixels, int64_t pts)
     return frame;
 }
 
-std::unique_ptr<SmartVideoEncoder> open_encoder(const EncoderConfig& cfg)
+std::unique_ptr<VideoEncoder> open_encoder(const EncoderConfig& cfg)
 {
     return CreateVideoEncoder(cfg);
 }

@@ -25,14 +25,14 @@
 // max_missing_frames patience -- that is the live-shaped case an archive still hits at the
 // ends of a track.
 
-#include "sve/policy.h"
-#include "sve/types.h"
+#include "ta_roienc/policy.h"
+#include "ta_roienc/types.h"
 
 #include <cstdint>
 #include <span>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 class TemporalRoi {
 public:
@@ -68,4 +68,4 @@ private:
     double m_fallback_hold_sec;
 };
 
-} // namespace sve
+} // namespace ta_roienc

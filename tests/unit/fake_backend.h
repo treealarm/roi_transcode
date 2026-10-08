@@ -16,14 +16,14 @@
 // same backend refusing at a different point, and a class per refusal would be eight copies
 // of the parts that succeed.
 
-#include "sve/backend_registry.h"
-#include "sve/encoder_backend.h"
+#include "ta_roienc/backend_registry.h"
+#include "ta_roienc/encoder_backend.h"
 
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
 
-namespace sve::testing {
+namespace ta_roienc::testing {
 
 class FakeSession : public BackendSession {
 };
@@ -247,4 +247,4 @@ inline BackendRegistry registry_with(const FakeBackend& backend)
     return registry;
 }
 
-} // namespace sve::testing
+} // namespace ta_roienc::testing

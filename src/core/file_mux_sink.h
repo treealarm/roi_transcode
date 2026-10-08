@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 // Muxes into a container chosen by the output file extension.
 class FileMuxSink : public PacketSink {
@@ -61,4 +61,4 @@ private:
     int64_t m_last_dts = AV_NOPTS_VALUE;
 };
 
-} // namespace sve
+} // namespace ta_roienc

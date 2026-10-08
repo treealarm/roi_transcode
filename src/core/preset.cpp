@@ -8,7 +8,7 @@
 
 #include <cstring>
 
-namespace sve {
+namespace ta_roienc {
 
 const char* preset_name(Preset p)
 {
@@ -76,4 +76,4 @@ const char* qsv_preset(Preset p)
     return "medium";
 }
 
-} // namespace sve
+} // namespace ta_roienc

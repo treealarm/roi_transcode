@@ -4,14 +4,14 @@
 // refusal message, and any help text that asks backend_choice_names() what the parser
 // accepts, so none of them can drift from what the parser does.
 
-#include "sve/backend_selection.h"
+#include "ta_roienc/backend_selection.h"
 
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 
-namespace sve {
+namespace ta_roienc {
 
 const char* backend_name(Backend e)
 {
@@ -112,4 +112,4 @@ BackendChoice backend_choice_from_name(const char* name)
         "unknown encoder '" + std::string(s) + "' (" + backend_choice_names() + ")");
 }
 
-} // namespace sve
+} // namespace ta_roienc

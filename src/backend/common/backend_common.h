@@ -9,11 +9,11 @@
 // each backend keeps one copy of it.
 
 #include "backend/common/backend_session.h"
-#include "sve/encoder_backend.h"
+#include "ta_roienc/encoder_backend.h"
 
 #include <span>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace backend_common {
 
@@ -83,4 +83,4 @@ protected:
         LibavSession& session, const BackendConfig& config) const = 0;
 };
 
-} // namespace sve
+} // namespace ta_roienc

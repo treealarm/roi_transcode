@@ -3,14 +3,14 @@
 // EMA on box geometry across frames (spatial_smoothing / temporal_smoothing).
 // Stops a detector's jitter from painting a flickering ROI even when QP is already slewed.
 
-#include "sve/policy.h"
-#include "sve/types.h"
+#include "ta_roienc/policy.h"
+#include "ta_roienc/types.h"
 
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 class BoxSmoother {
 public:
@@ -43,4 +43,4 @@ private:
     std::unordered_map<uint64_t, State> m_state;
 };
 
-} // namespace sve
+} // namespace ta_roienc

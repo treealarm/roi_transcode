@@ -3,7 +3,7 @@
     "The default dependency set is FFmpeg alone: the library depends on nothing else,",
     "which is what lets another project embed it with add_subdirectory()."
   ],
-  "name": "smart-video-encoder",
+  "name": "ta-roienc",
   "version": "2.0.0",
   "$comment-baseline": [
     "builtin-baseline rather than a git default-registry in vcpkg-configuration.json: the",

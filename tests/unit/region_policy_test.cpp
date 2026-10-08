@@ -5,9 +5,9 @@
 #include "object_normalizer.h"
 #include "qp_slew.h"
 #include "roi_lag.h"
-#include "sve/object_priority.h"
-#include "sve/policy.h"
-#include "sve/types.h"
+#include "ta_roienc/object_priority.h"
+#include "ta_roienc/policy.h"
+#include "ta_roienc/types.h"
 
 #include <cmath>
 #include <cstdio>
@@ -44,28 +44,28 @@ void check_near(double got, double want, double tol, const std::string& what)
 
 void ladder_maps_kinds_to_canonical_deltas()
 {
-    check_eq(sve::qp_delta_for(sve::ObjectPriority::Critical), -8, "critical");
-    check_eq(sve::qp_delta_for(sve::ObjectPriority::High), -6, "high");
-    check_eq(sve::qp_delta_for(sve::ObjectPriority::Normal), -4, "normal");
-    check_eq(sve::qp_delta_for(sve::ObjectPriority::Low), -2, "low");
-    check_eq(sve::qp_delta_for(sve::ObjectPriority::Background), 0, "background");
+    check_eq(ta_roienc::qp_delta_for(ta_roienc::ObjectPriority::Critical), -8, "critical");
+    check_eq(ta_roienc::qp_delta_for(ta_roienc::ObjectPriority::High), -6, "high");
+    check_eq(ta_roienc::qp_delta_for(ta_roienc::ObjectPriority::Normal), -4, "normal");
+    check_eq(ta_roienc::qp_delta_for(ta_roienc::ObjectPriority::Low), -2, "low");
+    check_eq(ta_roienc::qp_delta_for(ta_roienc::ObjectPriority::Background), 0, "background");
 
-    check(sve::priority_from_importance(1.00f) == sve::ObjectPriority::Critical,
+    check(ta_roienc::priority_from_importance(1.00f) == ta_roienc::ObjectPriority::Critical,
         "plate importance is Critical");
-    check(sve::priority_from_importance(0.80f) == sve::ObjectPriority::High,
+    check(ta_roienc::priority_from_importance(0.80f) == ta_roienc::ObjectPriority::High,
         "person importance is High");
-    check(sve::priority_from_importance(0.60f) == sve::ObjectPriority::Normal,
+    check(ta_roienc::priority_from_importance(0.60f) == ta_roienc::ObjectPriority::Normal,
         "vehicle importance is Normal");
 }
 
 void detections_use_ladder_by_default()
 {
-    sve::Quality q;
-    q.margin_mode = sve::MarginMode::FixedPixels;
+    ta_roienc::Quality q;
+    q.margin_mode = ta_roienc::MarginMode::FixedPixels;
     q.margin_px = 0; // isolate QP from geometry
     q.min_roi_side = 0;
-    sve::RoiMapBuilder builder;
-    sve::Box plate;
+    ta_roienc::RoiMapBuilder builder;
+    ta_roienc::Box plate;
     plate.kind = "license_plate";
     plate.x = 0.1f;
     plate.y = 0.1f;
@@ -74,41 +74,41 @@ void detections_use_ladder_by_default()
     const auto dets = builder.detections_from({plate}, q, 1280, 720);
     check(dets.size() == 1, "one detection");
     check_eq(dets[0].qp_delta, -8, "plate lands on Critical −8");
-    check(dets[0].priority == sve::ObjectPriority::Critical, "priority Critical");
+    check(dets[0].priority == ta_roienc::ObjectPriority::Critical, "priority Critical");
 }
 
 void explicit_priority_on_the_box_wins_over_kind()
 {
-    sve::Quality q;
-    q.margin_mode = sve::MarginMode::FixedPixels;
+    ta_roienc::Quality q;
+    q.margin_mode = ta_roienc::MarginMode::FixedPixels;
     q.margin_px = 0;
     q.min_roi_side = 0;
-    sve::Box b;
+    ta_roienc::Box b;
     b.kind = "vehicle"; // would be Normal (−4)
     b.has_priority = true;
-    b.priority = sve::ObjectPriority::Critical;
+    b.priority = ta_roienc::ObjectPriority::Critical;
     b.x = 0.1f;
     b.y = 0.1f;
     b.width = 0.2f;
     b.height = 0.2f;
-    sve::RoiMapBuilder builder;
+    ta_roienc::RoiMapBuilder builder;
     const auto dets = builder.detections_from({b}, q, 640, 480);
     check_eq(dets[0].qp_delta, -8, "explicit Critical beats vehicle kind");
 }
 
 void min_roi_side_expands_a_tiny_box()
 {
-    sve::Quality q;
-    q.margin_mode = sve::MarginMode::FixedPixels;
+    ta_roienc::Quality q;
+    q.margin_mode = ta_roienc::MarginMode::FixedPixels;
     q.margin_px = 0;
     q.min_roi_side = 64;
-    sve::Box tiny;
+    ta_roienc::Box tiny;
     tiny.kind = "license_plate";
     tiny.x = 0.5f;
     tiny.y = 0.5f;
     tiny.width = 10.0f / 1280.0f;
     tiny.height = 10.0f / 720.0f;
-    sve::RoiMapBuilder builder;
+    ta_roienc::RoiMapBuilder builder;
     const auto dets = builder.detections_from({tiny}, q, 1280, 720);
     check(dets.size() == 1, "one detection");
     check(dets[0].x2 - dets[0].x1 >= 64, "width at least 64");
@@ -117,17 +117,17 @@ void min_roi_side_expands_a_tiny_box()
 
 void fixed_margin_grows_the_body()
 {
-    sve::Quality q;
-    q.margin_mode = sve::MarginMode::FixedPixels;
+    ta_roienc::Quality q;
+    q.margin_mode = ta_roienc::MarginMode::FixedPixels;
     q.margin_px = 8;
     q.min_roi_side = 0;
-    sve::Box b;
+    ta_roienc::Box b;
     b.kind = "vehicle";
     b.x = 0.25f;
     b.y = 0.25f;
     b.width = 0.10f;
     b.height = 0.10f;
-    sve::RoiMapBuilder builder;
+    ta_roienc::RoiMapBuilder builder;
     const auto dets = builder.detections_from({b}, q, 1000, 1000);
     // 0.25*1000=250, width 100 → without margin 250..350; with 8px → 242..358
     check_eq(dets[0].x1, 242, "left expanded by 8");
@@ -136,14 +136,14 @@ void fixed_margin_grows_the_body()
 
 void qp_slew_limits_a_jump()
 {
-    sve::QpSlewLimiter slew;
-    std::vector<sve::Detection> a(1);
+    ta_roienc::QpSlewLimiter slew;
+    std::vector<ta_roienc::Detection> a(1);
     a[0].track_id = 7;
     a[0].qp_delta = -2;
     slew.apply(a, 2);
     check_eq(a[0].qp_delta, -2, "first sample free");
 
-    std::vector<sve::Detection> b(1);
+    std::vector<ta_roienc::Detection> b(1);
     b[0].track_id = 7;
     b[0].qp_delta = -8;
     slew.apply(b, 2);
@@ -152,22 +152,22 @@ void qp_slew_limits_a_jump()
 
 void box_smoother_blends_toward_history()
 {
-    sve::BoxSmoother smooth;
-    sve::Box a;
+    ta_roienc::BoxSmoother smooth;
+    ta_roienc::Box a;
     a.track_id = 3;
     a.kind = "person";
     a.x = 0.10f;
     a.y = 0.20f;
     a.width = 0.10f;
     a.height = 0.40f;
-    std::vector<sve::Box> first{a};
+    std::vector<ta_roienc::Box> first{a};
     smooth.apply(first, 0.35f, 0.25f);
     check_near(first[0].x, 0.10, 1e-5, "first frame seeds state");
 
-    sve::Box b = a;
+    ta_roienc::Box b = a;
     b.x = 0.50f;
     b.width = 0.30f;
-    std::vector<sve::Box> second{b};
+    std::vector<ta_roienc::Box> second{b};
     smooth.apply(second, 0.35f, 0.25f);
     // 0.35*0.50 + 0.65*0.10 = 0.240
     check_near(second[0].x, 0.35 * 0.50 + 0.65 * 0.10, 1e-4, "temporal EMA on x");
@@ -177,7 +177,7 @@ void box_smoother_blends_toward_history()
 
 void v3_temporal_defaults_match_the_spec()
 {
-    sve::TemporalROIConfig t;
+    ta_roienc::TemporalROIConfig t;
     check(t.max_missing_frames == 3, "max_missing_frames");
     check_near(t.confidence_decay, 0.85, 1e-6, "confidence_decay");
     check_near(t.spatial_smoothing, 0.25, 1e-6, "spatial_smoothing");
@@ -188,23 +188,23 @@ void v3_temporal_defaults_match_the_spec()
 
 void roi_lag_acceptance_matches_v3_thresholds()
 {
-    sve::Box a{.x = 0.1f, .y = 0.1f, .width = 0.2f, .height = 0.2f};
-    sve::Box b = a;
+    ta_roienc::Box a{.x = 0.1f, .y = 0.1f, .width = 0.2f, .height = 0.2f};
+    ta_roienc::Box b = a;
     b.x = 0.12f;
-    const float iou = sve::box_iou(a, b);
+    const float iou = ta_roienc::box_iou(a, b);
     check(iou >= 0.50f, "near boxes still overlap enough");
 
-    std::vector<sve::RoiLagSample> good;
+    std::vector<ta_roienc::RoiLagSample> good;
     for (int32_t i = 0; i < 100; ++i) {
-        good.push_back(sve::measure_roi_lag(a, b, i < 95 ? 1 : 2, 0.033));
+        good.push_back(ta_roienc::measure_roi_lag(a, b, i < 95 ? 1 : 2, 0.033));
     }
-    check(sve::roi_lag_acceptance(good), "P95/P99 inside the ROI-lag bounds");
+    check(ta_roienc::roi_lag_acceptance(good), "P95/P99 inside the ROI-lag bounds");
 
-    std::vector<sve::RoiLagSample> bad;
+    std::vector<ta_roienc::RoiLagSample> bad;
     for (int32_t i = 0; i < 100; ++i) {
-        bad.push_back(sve::measure_roi_lag(a, b, 10, 0.033));
+        bad.push_back(ta_roienc::measure_roi_lag(a, b, 10, 0.033));
     }
-    check(!sve::roi_lag_acceptance(bad), "ten-frame lag fails acceptance");
+    check(!ta_roienc::roi_lag_acceptance(bad), "ten-frame lag fails acceptance");
 }
 
 } // namespace

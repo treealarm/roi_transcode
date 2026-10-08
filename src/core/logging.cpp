@@ -1,6 +1,6 @@
-#include "sve/logging.h"
+#include "ta_roienc/logging.h"
 
-namespace sve {
+namespace ta_roienc {
 
 const char* log_level_name(LogLevel level)
 {
@@ -14,4 +14,4 @@ const char* log_level_name(LogLevel level)
     return "?";
 }
 
-} // namespace sve
+} // namespace ta_roienc

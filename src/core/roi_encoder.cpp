@@ -7,7 +7,7 @@
 #include <cstring>
 #include <format>
 
-namespace sve {
+namespace ta_roienc {
 
 
 using roiav::fail;
@@ -260,4 +260,4 @@ void RoiEncoder::flush()
 }
 
 
-} // namespace sve
+} // namespace ta_roienc

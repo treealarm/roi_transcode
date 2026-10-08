@@ -9,10 +9,10 @@
 // FileMuxSink -- the one implementation that does need libavformat -- lives next door in
 // file_mux_sink.h.
 
-#include "sve/codec_parameters.h"
-#include "sve/packet.h"
+#include "ta_roienc/codec_parameters.h"
+#include "ta_roienc/packet.h"
 
-namespace sve {
+namespace ta_roienc {
 
 class PacketSink {
 public:
@@ -30,4 +30,4 @@ public:
     virtual void end() = 0;
 };
 
-} // namespace sve
+} // namespace ta_roienc

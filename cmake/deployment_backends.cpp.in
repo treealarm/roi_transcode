@@ -6,14 +6,14 @@
 // Generated rather than self-registering: depending on global constructors or
 // --whole-archive would push the burden onto whoever links us.
 
-#include "sve/backend_registry.h"
+#include "ta_roienc/backend_registry.h"
 
-namespace sve {
+namespace ta_roienc {
 
 Status RegisterDeploymentBackends(BackendRegistry& registry) noexcept
 {
-@SVE_REGISTER_CALLS@    (void)registry;
+@TA_ROIENC_REGISTER_CALLS@    (void)registry;
     return Status::Ok();
 }
 
-} // namespace sve
+} // namespace ta_roienc

@@ -29,10 +29,10 @@ void check_near(double got, double want, double tol, const std::string& what)
     }
 }
 
-sve::Box box(const std::string& kind, float x, float y, float w, float h,
+ta_roienc::Box box(const std::string& kind, float x, float y, float w, float h,
     float confidence = 0.0f)
 {
-    sve::Box b;
+    ta_roienc::Box b;
     b.kind = kind;
     b.x = x;
     b.y = y;
@@ -45,7 +45,7 @@ sve::Box box(const std::string& kind, float x, float y, float w, float h,
 // The semantic table.
 void semantic_priorities_match_the_table()
 {
-    using sve::default_semantic_priority;
+    using ta_roienc::default_semantic_priority;
     check_near(default_semantic_priority("license_plate"), 1.00, 1e-6, "plate priority");
     check_near(default_semantic_priority("face"), 0.95, 1e-6, "face priority");
     check_near(default_semantic_priority("person"), 0.80, 1e-6, "person priority");
@@ -57,31 +57,31 @@ void semantic_priorities_match_the_table()
 // The importance-to-QP line: vehicle 0.60 -> -4, plate 1.00 -> -10.
 void the_qp_line_passes_through_vehicle_and_plate()
 {
-    const sve::ImportancePolicy policy;
-    check(sve::qp_from_importance(0.60f, policy) == -4, "vehicle lands on -4");
-    check(sve::qp_from_importance(1.00f, policy) == -10, "plate lands on -10");
+    const ta_roienc::ImportancePolicy policy;
+    check(ta_roienc::qp_from_importance(0.60f, policy) == -4, "vehicle lands on -4");
+    check(ta_roienc::qp_from_importance(1.00f, policy) == -10, "plate lands on -10");
     // The background falls out of the same line rather than being set separately.
-    check(sve::qp_from_importance(0.05f, policy) == 4, "background lands on +4");
+    check(ta_roienc::qp_from_importance(0.05f, policy) == 4, "background lands on +4");
 }
 
 // The product operating point on the same slope: plate −12, vehicle −6.
 void the_product_qp_line_lands_on_minus_twelve_and_minus_six()
 {
-    sve::ImportancePolicy policy;
+    ta_roienc::ImportancePolicy policy;
     policy.qp_at_zero = 3;
     policy.qp_at_one = -12;
-    check(sve::qp_from_importance(1.00f, policy) == -12, "plate lands on -12");
-    check(sve::qp_from_importance(0.60f, policy) == -6, "vehicle lands on -6");
+    check(ta_roienc::qp_from_importance(1.00f, policy) == -12, "plate lands on -12");
+    check(ta_roienc::qp_from_importance(0.60f, policy) == -6, "vehicle lands on -6");
 }
 
 // A class we recognise is worth what its class is worth, however sure the detector was.
 void a_known_class_is_not_scaled_by_confidence()
 {
-    const sve::ImportancePolicy policy;
+    const ta_roienc::ImportancePolicy policy;
     for (float c : {1.0f, 0.6f, 0.51f}) {
-        const sve::Object person = sve::object_from_box(
+        const ta_roienc::Object person = ta_roienc::object_from_box(
             box("person", 0.1f, 0.1f, 0.2f, 0.2f, c), policy);
-        check_near(sve::importance_of(person, policy), 0.80, 1e-5,
+        check_near(ta_roienc::importance_of(person, policy), 0.80, 1e-5,
             "a person is worth 0.80 at confidence " + std::to_string(c));
     }
 }
@@ -94,65 +94,65 @@ void a_known_class_is_not_scaled_by_confidence()
 // 0.714, and the body wins.
 void the_class_hierarchy_survives_an_unhelpful_detector()
 {
-    const sve::ImportancePolicy policy;
-    const auto face = sve::object_from_box(
+    const ta_roienc::ImportancePolicy policy;
+    const auto face = ta_roienc::object_from_box(
         box("face", 0.4f, 0.2f, 0.05f, 0.06f, 0.633f), policy);
-    const auto person = sve::object_from_box(
+    const auto person = ta_roienc::object_from_box(
         box("person", 0.3f, 0.2f, 0.3f, 0.6f, 0.892f), policy);
-    check(sve::importance_of(face, policy) > sve::importance_of(person, policy),
+    check(ta_roienc::importance_of(face, policy) > ta_roienc::importance_of(person, policy),
         "a face outranks a person despite being detected less confidently");
 
-    const auto plate = sve::object_from_box(
+    const auto plate = ta_roienc::object_from_box(
         box("license_plate", 0.4f, 0.5f, 0.08f, 0.03f, 0.50f), policy);
-    const auto vehicle = sve::object_from_box(
+    const auto vehicle = ta_roienc::object_from_box(
         box("vehicle", 0.2f, 0.2f, 0.5f, 0.5f, 0.95f), policy);
-    check(sve::importance_of(plate, policy)
-            > sve::importance_of(vehicle, policy),
+    check(ta_roienc::importance_of(plate, policy)
+            > ta_roienc::importance_of(vehicle, policy),
         "a plate outranks a vehicle despite being detected less confidently");
 
     // And multiplying confidence in is still reachable, for a deployment that wants it.
-    sve::ImportancePolicy literal = policy;
+    ta_roienc::ImportancePolicy literal = policy;
     literal.weigh_confidence_on_known_classes = true;
-    check(sve::importance_of(face, literal) < sve::importance_of(person, literal),
+    check(ta_roienc::importance_of(face, literal) < ta_roienc::importance_of(person, literal),
         "with confidence weighed, the table inverts -- which is why it is off");
 }
 
 // A class nobody named has nothing but the detector's word, so there confidence weighs.
 void an_unknown_class_is_scaled_by_confidence()
 {
-    const sve::ImportancePolicy policy;   // unknown_priority 0.5
-    const auto sure = sve::object_from_box(
+    const ta_roienc::ImportancePolicy policy;   // unknown_priority 0.5
+    const auto sure = ta_roienc::object_from_box(
         box("bag", 0.1f, 0.1f, 0.2f, 0.2f, 1.0f), policy);
-    const auto unsure = sve::object_from_box(
+    const auto unsure = ta_roienc::object_from_box(
         box("bag", 0.1f, 0.1f, 0.2f, 0.2f, 0.6f), policy);
-    check_near(sve::importance_of(sure, policy), 0.50, 1e-5, "a certain unknown");
-    check_near(sve::importance_of(unsure, policy), 0.30, 1e-5, "an unsure unknown");
+    check_near(ta_roienc::importance_of(sure, policy), 0.50, 1e-5, "a certain unknown");
+    check_near(ta_roienc::importance_of(unsure, policy), 0.30, 1e-5, "an unsure unknown");
 
     // Silence is not zero: most ONVIF cameras report no confidence at all, and reading that
     // as zero would multiply every one of their regions away.
-    const auto silent = sve::object_from_box(
+    const auto silent = ta_roienc::object_from_box(
         box("bag", 0.1f, 0.1f, 0.2f, 0.2f), policy);
-    check_near(sve::importance_of(silent, policy), 0.50, 1e-5, "a silent detector");
+    check_near(ta_roienc::importance_of(silent, policy), 0.50, 1e-5, "a silent detector");
 
     // Even at full confidence an unnamed object stays below the least of the named ones.
-    check(sve::importance_of(sure, policy)
-            < sve::default_semantic_priority("vehicle"),
+    check(ta_roienc::importance_of(sure, policy)
+            < ta_roienc::default_semantic_priority("vehicle"),
         "an unknown never outranks a class we recognise");
 }
 
 // Nesting: a plate inside a vehicle.
 void a_plate_inside_a_vehicle_keeps_the_plate_s_quality()
 {
-    sve::Quality quality;
+    ta_roienc::Quality quality;
     quality.background_qp_delta = 0;   // isolate the two regions
     quality.kinds.clear();            // nothing configured, so the model decides
 
-    const std::vector<sve::Box> boxes{
+    const std::vector<ta_roienc::Box> boxes{
         box("vehicle", 0.20f, 0.20f, 0.40f, 0.40f, 1.0f),
         box("license_plate", 0.35f, 0.45f, 0.10f, 0.05f, 1.0f),
     };
 
-    sve::RoiMapBuilder builder;
+    ta_roienc::RoiMapBuilder builder;
     const auto dets = builder.detections_from(boxes, quality, 1000, 1000);
     const auto rects = builder.build(1000, 1000, dets, quality);
 
@@ -168,8 +168,8 @@ void a_plate_inside_a_vehicle_keeps_the_plate_s_quality()
 
     // And the plate's rectangle really is inside the vehicle's, which is what makes this
     // the nested case rather than two regions side by side.
-    const sve::Rect& plate = rects[0];
-    const sve::Rect& vehicle = rects[1];
+    const ta_roienc::Rect& plate = rects[0];
+    const ta_roienc::Rect& vehicle = rects[1];
     check(plate.left >= vehicle.left && plate.right <= vehicle.right
             && plate.top >= vehicle.top && plate.bottom <= vehicle.bottom,
         "the plate is nested inside the vehicle");
@@ -178,16 +178,16 @@ void a_plate_inside_a_vehicle_keeps_the_plate_s_quality()
 // A halo softens the step outside a region; it must never cut into another one.
 void a_nested_halo_does_not_degrade_its_parent()
 {
-    sve::Quality quality;
+    ta_roienc::Quality quality;
     quality.background_qp_delta = 0;
     quality.kinds.clear();
 
-    const std::vector<sve::Box> boxes{
+    const std::vector<ta_roienc::Box> boxes{
         box("person", 0.30f, 0.20f, 0.30f, 0.60f, 1.0f),
         box("face", 0.40f, 0.22f, 0.08f, 0.10f, 1.0f),
     };
 
-    sve::RoiMapBuilder builder;
+    ta_roienc::RoiMapBuilder builder;
     const auto dets = builder.detections_from(boxes, quality, 1000, 1000);
     const auto rects = builder.build(1000, 1000, dets, quality);
 
@@ -212,11 +212,11 @@ void a_nested_halo_does_not_degrade_its_parent()
 // An explicit per-kind delta is a decision, not a suggestion.
 void a_configured_kind_keeps_its_own_number()
 {
-    sve::Quality quality;
+    ta_roienc::Quality quality;
     quality.background_qp_delta = 0;
-    quality.kinds["person"] = sve::KindQuality{-20, 0.0};
+    quality.kinds["person"] = ta_roienc::KindQuality{-20, 0.0};
 
-    sve::RoiMapBuilder builder;
+    ta_roienc::RoiMapBuilder builder;
     const auto dets = builder.detections_from(
         {box("person", 0.2f, 0.2f, 0.3f, 0.3f, 1.0f)}, quality, 1000, 1000);
     check(dets.size() == 1 && dets[0].qp_delta == -20,
@@ -229,17 +229,17 @@ void a_configured_kind_keeps_its_own_number()
 // thing in it -- keeps everything it asked for.
 void the_budget_protects_the_face_and_lets_the_body_go()
 {
-    sve::Quality quality;
+    ta_roienc::Quality quality;
     quality.background_qp_delta = 6;
     quality.kinds.clear();
     quality.max_protected_fraction = 0.25f;
 
-    const std::vector<sve::Box> boxes{
+    const std::vector<ta_roienc::Box> boxes{
         box("person", 0.25f, 0.10f, 0.50f, 0.85f, 1.0f),   // 42.5% of the frame
         box("face", 0.44f, 0.14f, 0.09f, 0.09f, 1.0f),     //  0.8% of the frame
     };
 
-    sve::RoiMapBuilder builder;
+    ta_roienc::RoiMapBuilder builder;
     const auto dets = builder.detections_from(boxes, quality, 1000, 1000);
     const auto rects = builder.build(1000, 1000, dets, quality);
 
@@ -265,15 +265,15 @@ void the_budget_protects_the_face_and_lets_the_body_go()
 // With the budget off, nothing changes -- the setting has to be able to get out of the way.
 void a_budget_of_zero_changes_nothing()
 {
-    sve::Quality quality;
+    ta_roienc::Quality quality;
     quality.background_qp_delta = 6;
     quality.kinds.clear();
 
-    const std::vector<sve::Box> boxes{
+    const std::vector<ta_roienc::Box> boxes{
         box("person", 0.25f, 0.10f, 0.50f, 0.85f, 1.0f),
     };
 
-    sve::RoiMapBuilder builder;
+    ta_roienc::RoiMapBuilder builder;
     const auto dets = builder.detections_from(boxes, quality, 1000, 1000);
 
     // 1.0, not 0.0. One frame's worth of budget is enough for this single box; it is not
@@ -295,7 +295,7 @@ void a_budget_of_zero_changes_nothing()
     // default 0.25 either -- without a box that *does* fit, zero and the default would
     // agree by accident and the test would prove nothing. A tenth of the frame fits a
     // quarter and does not fit nothing.
-    const std::vector<sve::Box> small{
+    const std::vector<ta_roienc::Box> small{
         box("person", 0.40f, 0.40f, 0.10f, 0.10f, 1.0f),
     };
     const auto small_dets = builder.detections_from(small, quality, 1000, 1000);
@@ -319,34 +319,34 @@ void a_budget_of_zero_changes_nothing()
 // TemporalStability rises with track age; an untracked box is not punished.
 void temporal_stability_rises_with_track_age()
 {
-    const sve::ImportancePolicy policy;
-    sve::TrackEvidence none;
-    check_near(sve::temporal_stability_of(none, policy), 1.0, 1e-6,
+    const ta_roienc::ImportancePolicy policy;
+    ta_roienc::TrackEvidence none;
+    check_near(ta_roienc::temporal_stability_of(none, policy), 1.0, 1e-6,
         "no track leaves stability at 1");
 
-    sve::TrackEvidence newborn;
+    ta_roienc::TrackEvidence newborn;
     newborn.present = true;
     newborn.age_sec = 0.0f;
     newborn.sample_count = 1;
-    check_near(sve::temporal_stability_of(newborn, policy),
+    check_near(ta_roienc::temporal_stability_of(newborn, policy),
         policy.temporal_stability_floor, 1e-5, "a brand-new track is at the floor");
 
-    sve::TrackEvidence older = newborn;
+    ta_roienc::TrackEvidence older = newborn;
     older.age_sec = policy.temporal_stability_tau_sec;
-    const float mid = sve::temporal_stability_of(older, policy);
+    const float mid = ta_roienc::temporal_stability_of(older, policy);
     check(mid > policy.temporal_stability_floor + 0.2f
             && mid < 1.0f - 1e-3f,
         "after one tau the track has climbed but is not yet full");
 
-    sve::TrackEvidence settled = newborn;
+    ta_roienc::TrackEvidence settled = newborn;
     settled.age_sec = 20.0f;
-    check_near(sve::temporal_stability_of(settled, policy), 1.0, 1e-3,
+    check_near(ta_roienc::temporal_stability_of(settled, policy), 1.0, 1e-3,
         "a long-lived track is essentially full");
 
-    const auto person = sve::object_from_box(
+    const auto person = ta_roienc::object_from_box(
         box("person", 0.1f, 0.1f, 0.2f, 0.2f), policy);
-    const float young_i = sve::importance_of(person, policy, newborn);
-    const float old_i = sve::importance_of(person, policy, settled);
+    const float young_i = ta_roienc::importance_of(person, policy, newborn);
+    const float old_i = ta_roienc::importance_of(person, policy, settled);
     check(old_i > young_i, "the same person is worth more once the track has settled");
     check_near(young_i, 0.80 * policy.temporal_stability_floor, 1e-4,
         "a newborn person is semantic x floor");
@@ -355,27 +355,27 @@ void temporal_stability_rises_with_track_age()
 // MotionWeight stays 1.0 until opted in; then a mover outranks a parkéd object.
 void motion_weight_is_optional_and_prefers_movers()
 {
-    sve::ImportancePolicy policy;
-    sve::TrackEvidence parked;
+    ta_roienc::ImportancePolicy policy;
+    ta_roienc::TrackEvidence parked;
     parked.present = true;
     parked.age_sec = 10.0f;
     parked.speed = 0.0f;
-    check_near(sve::motion_weight_of(parked, policy), 1.0, 1e-6,
+    check_near(ta_roienc::motion_weight_of(parked, policy), 1.0, 1e-6,
         "motion is off by default");
 
     policy.use_motion_weight = true;
-    check_near(sve::motion_weight_of(parked, policy),
+    check_near(ta_roienc::motion_weight_of(parked, policy),
         policy.motion_weight_floor, 1e-5, "a parked track is at the floor");
 
-    sve::TrackEvidence moving = parked;
+    ta_roienc::TrackEvidence moving = parked;
     moving.speed = policy.motion_speed_at_full;
-    check_near(sve::motion_weight_of(moving, policy), 1.0, 1e-5,
+    check_near(ta_roienc::motion_weight_of(moving, policy), 1.0, 1e-5,
         "a track at the reference speed is full");
 
-    const auto vehicle = sve::object_from_box(
+    const auto vehicle = ta_roienc::object_from_box(
         box("vehicle", 0.1f, 0.1f, 0.2f, 0.2f), policy);
-    check(sve::importance_of(vehicle, policy, moving)
-            > sve::importance_of(vehicle, policy, parked),
+    check(ta_roienc::importance_of(vehicle, policy, moving)
+            > ta_roienc::importance_of(vehicle, policy, parked),
         "a moving vehicle outranks a parked one when motion weighs");
 }
 

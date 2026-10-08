@@ -1,13 +1,13 @@
 // bounding_box_of: polygon and mask reduced to the rectangle the encoder can take.
 
-#include "sve/object.h"
+#include "ta_roienc/object.h"
 
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
 
-using namespace sve;
+using namespace ta_roienc;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \

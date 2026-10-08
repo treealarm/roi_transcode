@@ -1,6 +1,6 @@
 #include "qp_slew.h"
 
-namespace sve {
+namespace ta_roienc {
 
 uint64_t QpSlewLimiter::key_of(const Detection& d)
 {
@@ -37,4 +37,4 @@ void QpSlewLimiter::apply(std::vector<Detection>& detections, int32_t max_step)
     }
 }
 
-} // namespace sve
+} // namespace ta_roienc

@@ -1,12 +1,12 @@
 #pragma once
 
-#include "sve/geometry.h"
-#include "sve/types.h"
+#include "ta_roienc/geometry.h"
+#include "ta_roienc/types.h"
 
 #include <cstdint>
 #include <span>
 #include <vector>
-namespace sve {
+namespace ta_roienc {
 
 
 // The block QP map: signed QP delta per CTU/MB, raster order.
@@ -39,4 +39,4 @@ public:
         std::span<int8_t> out) const;
 };
 
-} // namespace sve
+} // namespace ta_roienc

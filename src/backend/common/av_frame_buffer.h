@@ -9,7 +9,7 @@
 
 #include "av_raii.h"
 #include "backend/common/av_pixel_format.h"
-#include "sve/frame_buffer.h"
+#include "ta_roienc/frame_buffer.h"
 
 #include <cstddef>
 #include <span>
@@ -19,7 +19,7 @@ extern "C" {
 #include <libavutil/pixdesc.h>
 }
 
-namespace sve {
+namespace ta_roienc {
 
 class AvFrameBuffer final : public IFrameBuffer {
 public:
@@ -115,4 +115,4 @@ private:
     bool m_owned = false;
 };
 
-} // namespace sve
+} // namespace ta_roienc

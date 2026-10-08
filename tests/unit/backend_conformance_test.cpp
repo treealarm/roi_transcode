@@ -17,9 +17,9 @@
 // A backend whose device is absent is a SKIP with the reason it gave -- never a silent
 // pass: "catch, continue, PASS" with an unauditable skip is a silent fallback in a hat.
 
-#include "sve/encoder.h"
-#include "sve/frame.h"
-#include "sve/metadata.h"
+#include "ta_roienc/encoder.h"
+#include "ta_roienc/frame.h"
+#include "ta_roienc/metadata.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -33,7 +33,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 }
 
-using namespace sve;
+using namespace ta_roienc;
 
 namespace {
 
@@ -257,7 +257,7 @@ int count_our_sei(const std::vector<std::vector<uint8_t>>& payloads, Codec codec
 /// could not run.
 void conformance(Backend backend, Codec codec, const char* label)
 {
-    std::unique_ptr<SmartVideoEncoder> enc;
+    std::unique_ptr<VideoEncoder> enc;
     try {
         enc = CreateVideoEncoder(config_for(backend, codec));
     } catch (const EncoderError& e) {
@@ -453,7 +453,7 @@ void nv12_input_is_answered_and_never_crashes(Backend backend, const char* label
     EncoderConfig cfg = config_for(backend, Codec::H264);
     cfg.input.pixel_format = PixelFormat::NV12;
 
-    std::unique_ptr<SmartVideoEncoder> enc;
+    std::unique_ptr<VideoEncoder> enc;
     try {
         enc = CreateVideoEncoder(cfg);
     } catch (const std::exception& e) {

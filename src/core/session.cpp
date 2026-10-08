@@ -1,17 +1,17 @@
-#include "sve/session.h"
+#include "ta_roienc/session.h"
 
 #include "av_raii.h"
 #include "frame_input.h"
 #include "file_mux_sink.h"
-#include "sve/encoder.h"
-#include "sve/frame.h"
+#include "ta_roienc/encoder.h"
+#include "ta_roienc/frame.h"
 
 #include <algorithm>
 #include <cstdio>
 #include <map>
 #include <span>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -70,7 +70,7 @@ HeldRegions hold(const Regions& in)
 // access units, somewhere for the packets to go, and the bookkeeping that reconciles the
 // two.
 //
-// It owns a SmartVideoEncoder and adds nothing to it: the ROI pipeline, the bitrate budget,
+// It owns a VideoEncoder and adds nothing to it: the ROI pipeline, the bitrate budget,
 // the slew limiter and the region builder are assembled once, inside the encoder. This
 // class is the application layer on top -- decoding and muxing are outside the encoder's
 // scope.
@@ -78,7 +78,7 @@ struct Session::Impl {
     SessionParams params;
     std::unique_ptr<FileMuxSink> file;
     PacketHandler* handler = nullptr;
-    std::unique_ptr<SmartVideoEncoder> encoder;
+    std::unique_ptr<VideoEncoder> encoder;
     FrameDecoder decoder;
     Report report;
     CodecParameters codec_params;
@@ -342,4 +342,4 @@ Report Session::finish()
     return m_impl->report;
 }
 
-} // namespace sve
+} // namespace ta_roienc

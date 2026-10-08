@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <unordered_map>
 
-namespace sve {
+namespace ta_roienc {
 
 class QpSlewLimiter {
 public:
@@ -23,4 +23,4 @@ private:
     std::unordered_map<uint64_t, int32_t> m_last_qp;
 };
 
-} // namespace sve
+} // namespace ta_roienc

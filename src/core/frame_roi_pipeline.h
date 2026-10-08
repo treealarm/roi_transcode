@@ -5,14 +5,14 @@
 #include "object_normalizer.h"
 #include "qp_slew.h"
 #include "roi_lag.h"
-#include "sve/capabilities.h"
-#include "sve/policy.h"
-#include "sve/types.h"
+#include "ta_roienc/capabilities.h"
+#include "ta_roienc/policy.h"
+#include "ta_roienc/types.h"
 
 #include <span>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 int32_t effective_coding_block(const EncoderCapabilities& caps);
 int32_t effective_region_budget(const Quality& quality, const EncoderCapabilities& caps);
@@ -55,4 +55,4 @@ private:
     RoiMapBuilder& m_roi_builder;
 };
 
-} // namespace sve
+} // namespace ta_roienc

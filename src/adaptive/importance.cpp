@@ -2,12 +2,12 @@
 
 #include "importance.h"
 
-#include "sve/object_priority.h"
+#include "ta_roienc/object_priority.h"
 
 #include <algorithm>
 #include <cmath>
 
-namespace sve {
+namespace ta_roienc {
 
 ObjectPriority priority_from_importance(float importance)
 {
@@ -153,4 +153,4 @@ int32_t qp_from_importance(float importance, const ImportancePolicy& policy)
     return std::clamp(static_cast<int32_t>(std::lround(qp)), kMinQpDelta, kMaxQpDelta);
 }
 
-} // namespace sve
+} // namespace ta_roienc

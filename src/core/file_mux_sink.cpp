@@ -10,7 +10,7 @@ extern "C" {
 #include <libavcodec/packet.h>
 #include <libavutil/dict.h>
 }
-namespace sve {
+namespace ta_roienc {
 
 
 FileMuxSink::FileMuxSink(std::string path, std::string movflags)
@@ -174,4 +174,4 @@ void FileMuxSink::end()
     roiav::check(av_write_trailer(m_out.p), "write trailer");
 }
 
-} // namespace sve
+} // namespace ta_roienc

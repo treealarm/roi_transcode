@@ -1,13 +1,13 @@
-#include "sve/metadata.h"
+#include "ta_roienc/metadata.h"
 
 #include "cbor.h"
-#include "sve/types.h"
+#include "ta_roienc/types.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -19,9 +19,9 @@ namespace {
 /// reserve for four billion before reading the first one.
 constexpr uint64_t kMaxDecodedObjects = 4096;
 
-// "sve-roimeta\0\0\0\1" -- stable id for this schema, not a random UUID.
+// "ta_roienc-meta\0\1" -- stable id for this schema, not a random UUID.
 constexpr uint8_t kUuid[16] = {
-    's', 'v', 'e', '-', 'r', 'o', 'i', 'm', 'e', 't', 'a', 0, 0, 0, 1};
+    't', 'a', '_', 'r', 'o', 'i', 'e', 'n', 'c', '-', 'm', 'e', 't', 'a', 0, 1};
 
 /// Bumped only by an incompatible change. A parser refuses a version it does not know rather
 /// than read what it can of it, so this is checked before anything else in the payload.
@@ -271,4 +271,4 @@ std::vector<SeiObject> sei_objects_from_boxes(std::span<const Box> boxes, uint32
     return out;
 }
 
-} // namespace sve
+} // namespace ta_roienc

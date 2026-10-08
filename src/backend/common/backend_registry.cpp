@@ -14,16 +14,16 @@
 // what was asked for is skipped here, with its reason recorded, rather than opened and
 // found wanting.
 
-#include "sve/backend_registry.h"
-#include "sve/backend_selection.h"
-#include "sve/encoder_backend.h"
+#include "ta_roienc/backend_registry.h"
+#include "ta_roienc/backend_selection.h"
+#include "ta_roienc/encoder_backend.h"
 
 #include <algorithm>
 #include <format>
 #include <string>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 Status BackendRegistry::Register(const IEncoderBackend& backend) noexcept
 {
@@ -155,4 +155,4 @@ std::vector<BackendRef> resolve_backends(Backend requested, const BackendSelecti
     return out;
 }
 
-} // namespace sve
+} // namespace ta_roienc

@@ -1,8 +1,8 @@
 // The facade when the backend misbehaves.
 //
-// encoder_test drives SmartVideoEncoder through libx264, which works: it opens, it takes
+// encoder_test drives VideoEncoder through libx264, which works: it opens, it takes
 // frames, it hands packets back, and it has rate control of its own. That leaves the other
-// half of smart_video_encoder.cpp unexecuted -- the exception that has to become a Status,
+// half of video_encoder.cpp unexecuted -- the exception that has to become a Status,
 // the Failed state every entry point must then report, the outer bitrate loop that only
 // runs for a backend without its own, and the degradation counters that only move when a
 // backend says something went wrong.
@@ -14,7 +14,7 @@
 #include "encoder_assembly.h"
 
 #include "fake_backend.h"
-#include "sve/encoder.h"
+#include "ta_roienc/encoder.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -22,10 +22,10 @@
 #include <utility>
 #include <vector>
 
-using namespace sve;
-using sve::testing::FakeBackend;
-using sve::testing::FakeBuffer;
-using sve::testing::registry_with;
+using namespace ta_roienc;
+using ta_roienc::testing::FakeBackend;
+using ta_roienc::testing::FakeBuffer;
+using ta_roienc::testing::registry_with;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \
@@ -68,7 +68,7 @@ FakeBackend backend_for_facade()
 
 /// Submits one frame through the borrowing overload, which is the shortest way in that
 /// needs no pixel plumbing of its own.
-Status submit_one(SmartVideoEncoder& encoder, FakeBuffer& pixels, int64_t index)
+Status submit_one(VideoEncoder& encoder, FakeBuffer& pixels, int64_t index)
 {
     FrameMetadata meta;
     meta.timestamp = MediaTimestamp{index * FakeBackend::kTicksPerFrame,

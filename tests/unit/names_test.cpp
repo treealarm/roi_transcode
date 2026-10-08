@@ -17,15 +17,15 @@
 
 #include "enum_table.h"
 
-#include "sve/backend_selection.h"
-#include "sve/encoder.h"
-#include "sve/frame_buffer.h"
-#include "sve/logging.h"
-#include "sve/memory.h"
-#include "sve/object_priority.h"
-#include "sve/policy.h"
-#include "sve/status.h"
-#include "sve/types.h"
+#include "ta_roienc/backend_selection.h"
+#include "ta_roienc/encoder.h"
+#include "ta_roienc/frame_buffer.h"
+#include "ta_roienc/logging.h"
+#include "ta_roienc/memory.h"
+#include "ta_roienc/object_priority.h"
+#include "ta_roienc/policy.h"
+#include "ta_roienc/status.h"
+#include "ta_roienc/types.h"
 
 #include <cstdio>
 #include <map>
@@ -50,7 +50,7 @@ template <class E, class Fn>
 void every_enumerator_is_named(const char* enum_name, Fn name_of, const char* fallback)
 {
     std::map<std::string, int> seen;
-    sve_enum_table::for_each<E>([&](E value, const char* spelling) {
+    ta_roienc_enum_table::for_each<E>([&](E value, const char* spelling) {
         const std::string name = name_of(value);
         const std::string where = std::string(enum_name) + "::" + spelling;
         check(!name.empty(), where + " has an empty name");
@@ -67,7 +67,7 @@ void every_enumerator_is_named(const char* enum_name, Fn name_of, const char* fa
 
 int main()
 {
-    using namespace sve;
+    using namespace ta_roienc;
 
     every_enumerator_is_named<Backend>("Backend", backend_name, "?");
     every_enumerator_is_named<StatusCode>("StatusCode", status_code_name, "?");
@@ -117,7 +117,7 @@ int main()
     // Backends parse into a choice rather than a value: "auto" and "cpu" name an order
     // rather than one backend, so what round-trips is the kind, and the two spellings that
     // name a list are checked for what they are instead.
-    sve_enum_table::for_each<Backend>([](Backend value, const char* spelling) {
+    ta_roienc_enum_table::for_each<Backend>([](Backend value, const char* spelling) {
         const char* name = backend_name(value);
         const BackendChoice choice = backend_choice_from_name(name);
         check(choice.kind == value,

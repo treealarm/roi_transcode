@@ -4,7 +4,7 @@ extern "C" {
 #include <libavutil/pixfmt.h>
 }
 
-namespace sve {
+namespace ta_roienc {
 
 int to_av_pix_fmt(PixelFormat f)
 {
@@ -42,4 +42,4 @@ PixelFormat from_av_pix_fmt(int f)
     }
 }
 
-} // namespace sve
+} // namespace ta_roienc
