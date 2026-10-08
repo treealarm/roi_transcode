@@ -15,9 +15,9 @@
 // -- and it needs nothing checked in.
 
 #include "sve/decoder.h"
+#include "sve/encoder.h"
 #include "sve/frame.h"
 #include "sve/packet.h"
-#include "sve/push_encoder.h"
 #include "sve/raw_frame.h"
 
 #include <cstdio>
@@ -64,14 +64,19 @@ std::vector<std::vector<uint8_t>> annex_b_stream()
     cfg.log = [](LogLevel, std::string_view) {};
 
     std::vector<std::vector<uint8_t>> units;
-    auto encoder = CreatePushVideoEncoder(cfg);
-    CHECK(encoder->Subscribe([&units](EncoderEvent event) {
-                     if (event.type == EncoderEventType::Packet) {
-                         const std::span<const uint8_t> bytes = event.packet->payload.bytes();
-                         units.emplace_back(bytes.begin(), bytes.end());
-                     }
-                 })
-              .ok());
+    auto encoder = CreateVideoEncoder(cfg);
+    const auto drain = [&units, &encoder] {
+        for (;;) {
+            EncodedPacket packet;
+            const Status s = encoder->ReceivePacket(&packet);
+            if (s.code() == StatusCode::Again || s.code() == StatusCode::EndOfStream) {
+                return;
+            }
+            CHECK(s.ok());
+            const std::span<const uint8_t> bytes = packet.payload.bytes();
+            units.emplace_back(bytes.begin(), bytes.end());
+        }
+    };
 
     auto pixels = std::make_shared<Pixels>();
     for (int64_t i = 0; i < kFrames; ++i) {
@@ -100,9 +105,11 @@ std::vector<std::vector<uint8_t>> annex_b_stream()
         TimedFrame timed;
         CHECK(WrapRawFrame(view, &timed.frame).ok());
         timed.metadata.timestamp = view.timestamp;
-        CHECK(encoder->Process(timed).ok());
+        CHECK(encoder->SubmitFrame(timed).ok());
+        drain();
     }
     CHECK(encoder->Flush().ok());
+    drain();
     CHECK(static_cast<int64_t>(units.size()) == kFrames);
     return units;
 }

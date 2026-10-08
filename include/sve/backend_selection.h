@@ -41,7 +41,6 @@ enum class Backend {
     /// the four-region limit on Intel H.264 (see the measurements in STATUS.md). Whether
     /// it survives is question 10 to the customer, not something to decide by deleting it.
     Vaapi,
-    NvidiaNvenc,
     X264,
     X265,
     /// libx264 through its own API rather than through libavcodec -- TZ v4.1 §5.4.

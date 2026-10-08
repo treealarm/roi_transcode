@@ -514,7 +514,6 @@ int main()
         {Backend::IntelOneVpl, "onevpl"},
         {Backend::IntelOneVplDirect, "onevpldirect"},
         {Backend::Vaapi, "vaapi"},
-        {Backend::NvidiaNvenc, "nvenc"},
     };
 
     std::printf("AT-002 (H.264: encode, decode, frame count, PTS, EOS):\n");

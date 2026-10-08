@@ -76,18 +76,4 @@ const char* qsv_preset(Preset p)
     return "medium";
 }
 
-const char* nvenc_preset(Preset p)
-{
-    // p1 is fastest, p7 slowest. The older named presets are deprecated in NVENC and map
-    // onto these anyway.
-    switch (p) {
-    case Preset::Fastest:  return "p1";
-    case Preset::Fast:     return "p3";
-    case Preset::Balanced: return "p4";
-    case Preset::Slow:     return "p6";
-    case Preset::Slowest:  return "p7";
-    }
-    return "p4";
-}
-
 } // namespace sve

@@ -28,7 +28,6 @@ inline const char* spell(sve::Backend e)
     case sve::Backend::Auto:              return "Auto";
     case sve::Backend::IntelOneVpl:       return "IntelOneVpl";
     case sve::Backend::Vaapi:             return "Vaapi";
-    case sve::Backend::NvidiaNvenc:       return "NvidiaNvenc";
     case sve::Backend::X264:              return "X264";
     case sve::Backend::X265:              return "X265";
     case sve::Backend::X264Direct:        return "X264Direct";

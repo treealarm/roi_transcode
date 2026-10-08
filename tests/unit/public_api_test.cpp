@@ -237,7 +237,7 @@ int main()
     // parser and every help text now read, so the failure this guards against is an
     // enumerator added without a spelling -- which is how the list went stale before.
     for (const sve::Backend kind : {sve::Backend::IntelOneVpl, sve::Backend::Vaapi,
-             sve::Backend::NvidiaNvenc, sve::Backend::X264, sve::Backend::X265,
+             sve::Backend::X264, sve::Backend::X265,
              sve::Backend::X264Direct, sve::Backend::X265Direct,
              sve::Backend::IntelOneVplDirect}) {
         if (sve::backend_choice_from_name(sve::backend_name(kind)).kind != kind) {

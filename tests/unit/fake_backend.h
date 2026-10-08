@@ -16,7 +16,6 @@
 // same backend refusing at a different point, and a class per refusal would be eight copies
 // of the parts that succeed.
 
-#include "sve/backend_plugin.h"
 #include "sve/backend_registry.h"
 #include "sve/encoder_backend.h"
 
@@ -237,32 +236,12 @@ private:
     mutable std::vector<int64_t> m_queued;
 };
 
-/// The descriptor's acquire() is a plain function pointer, so the backend under test has to
-/// be reachable from one. Set by registry_with() for the length of a case.
-inline const IEncoderBackend*& fake_slot()
-{
-    static const IEncoderBackend* slot = nullptr;
-    return slot;
-}
-
-inline const IEncoderBackend* acquire_fake() noexcept
-{
-    return fake_slot();
-}
-
 /// A registry holding nothing but the fake. Local to each case: two cases configuring the
 /// same backend differently must not be able to see each other's.
 inline BackendRegistry registry_with(const FakeBackend& backend)
 {
-    fake_slot() = &backend;
     BackendRegistry registry;
-    const SveBackendPluginDescriptorV1 descriptor{
-        .abi_version = kBackendPluginAbiVersion,
-        .descriptor_size = sizeof(SveBackendPluginDescriptorV1),
-        .backend_id = static_cast<int32_t>(backend.kind()),
-        .acquire = &acquire_fake,
-    };
-    if (!registry.Register(descriptor).ok()) {
+    if (!registry.Register(backend).ok()) {
         throw std::runtime_error("the fake backend would not register");
     }
     return registry;

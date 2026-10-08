@@ -87,10 +87,6 @@ private:
     (void)frame.buffer().width();
     (void)timed.metadata.force_key_frame;
 
-    const sve::EncoderCallback on_event = [](sve::EncoderEvent) {};
-    (void)on_event;
-    (void)sve::EncoderEventType::EndOfStream;
-
     // §7: the backend contract, opaque session and all.
     sve::BackendConfig config;
     sve::BackendFrameControl control;
@@ -127,7 +123,6 @@ private:
     // §8 and §10: memory types, objects, policies.
     const sve::MemoryType memory = sve::MemoryType::ONEVPL;
     sve::Object object;
-    sve::QualityPolicy policy = sve::QualityPolicy::OBJECT_FIRST;
 
     CallerOwnedBuffer caller_buffer;
     caller_buffer.commit();
@@ -181,7 +176,7 @@ private:
     std::shared_ptr<sve::IFrameBuffer> shared_buffer = std::move(owned_buffer);
     (void)shared_buffer; (void)owned_session;
 
-    (void)object; (void)policy; (void)caller_buffer;
+    (void)object; (void)caller_buffer;
 }
 
 } // namespace

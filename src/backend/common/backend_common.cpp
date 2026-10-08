@@ -1,5 +1,4 @@
 #include "backend/common/backend_common.h"
-#include "sve/backend_plugin.h"
 #include "sve/backend_registry.h"
 
 #include "backend/common/av_frame_buffer.h"
@@ -504,46 +503,16 @@ Status LibavBackend::Flush(BackendSession& session) const
 
 const IEncoderBackend& onevpl_backend();
 const IEncoderBackend& vaapi_backend();
-const IEncoderBackend& nvenc_backend();
 const IEncoderBackend& x264_backend();
 const IEncoderBackend& x265_backend();
 
-namespace {
-
-const IEncoderBackend* acquire_libav_x264() noexcept { return &x264_backend(); }
-const IEncoderBackend* acquire_libav_x265() noexcept { return &x265_backend(); }
-const IEncoderBackend* acquire_libav_onevpl() noexcept { return &onevpl_backend(); }
-const IEncoderBackend* acquire_libav_vaapi() noexcept { return &vaapi_backend(); }
-const IEncoderBackend* acquire_libav_nvenc() noexcept { return &nvenc_backend(); }
-
-/// Five descriptors and not one, because this component provides five backends while
-/// §26.4's descriptor describes exactly one. That is the shape of this component rather
-/// than a gap in the contract: it is the libavcodec reference group, it is off by default,
-/// and it is the one component never shipped as a plugin -- §5.5 does not list it in the
-/// dependency graph at all. The shippable components describe one backend each.
-constexpr SveBackendPluginDescriptorV1 kDescriptors[] = {
-    {kBackendPluginAbiVersion, sizeof(SveBackendPluginDescriptorV1),
-        static_cast<int32_t>(Backend::X264), &acquire_libav_x264},
-    {kBackendPluginAbiVersion, sizeof(SveBackendPluginDescriptorV1),
-        static_cast<int32_t>(Backend::X265), &acquire_libav_x265},
-    {kBackendPluginAbiVersion, sizeof(SveBackendPluginDescriptorV1),
-        static_cast<int32_t>(Backend::IntelOneVpl), &acquire_libav_onevpl},
-    {kBackendPluginAbiVersion, sizeof(SveBackendPluginDescriptorV1),
-        static_cast<int32_t>(Backend::Vaapi), &acquire_libav_vaapi},
-    {kBackendPluginAbiVersion, sizeof(SveBackendPluginDescriptorV1),
-        static_cast<int32_t>(Backend::NvidiaNvenc), &acquire_libav_nvenc},
-};
-
-} // namespace
-
 /// The libavcodec-backed group, registered together because that is how they are built:
-/// they share LibavBackend and one CMake option. §5.5 does not list them in its dependency
-/// graph at all -- they are kept as the reference the direct backends are compared against,
-/// which is why the option is off by default.
+/// they share LibavBackend and one CMake option.
 Status RegisterFfmpegBackends(BackendRegistry& registry) noexcept
 {
-    for (const SveBackendPluginDescriptorV1& descriptor : kDescriptors) {
-        if (const Status s = registry.Register(descriptor); !s.ok()) {
+    for (const IEncoderBackend* backend :
+         {&x264_backend(), &x265_backend(), &onevpl_backend(), &vaapi_backend()}) {
+        if (const Status s = registry.Register(*backend); !s.ok()) {
             return s;
         }
     }

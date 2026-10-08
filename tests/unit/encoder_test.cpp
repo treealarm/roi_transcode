@@ -277,29 +277,18 @@ void the_selection_orders_the_backends_and_can_exclude_them()
     // nothing else. §8.4 dropped the separate allow_software_fallback switch: two ways to
     // say the same thing is one way to have them disagree.
     BackendSelection hardware_only;
-    hardware_only.preferred = {Backend::IntelOneVpl, Backend::Vaapi, Backend::NvidiaNvenc};
+    hardware_only.preferred = {Backend::IntelOneVpl, Backend::Vaapi};
     for (const BackendRef& ref : resolve_backends(Backend::Auto, hardware_only, Codec::H264)) {
         CHECK(ref.get().kind() != Backend::X264);
         CHECK(ref.get().kind() != Backend::X265);
     }
 
     // And a backend absent from the list is not reached unless unlisted ones are allowed.
-    // Asked with x264, which this build certainly has: nvenc used to serve here and stopped
-    // being usable for it the moment its capability started reporting the build rather than
-    // the hardware -- a list of one unbuildable backend now resolves to nothing at all,
-    // which is right, and would have made this assert the wrong thing.
     BackendSelection only_x264;
     only_x264.preferred = {Backend::X264};
     CHECK(resolve_backends(Backend::Auto, only_x264, Codec::H264).size() == 1);
     only_x264.allow_unlisted = true;
     CHECK(resolve_backends(Backend::Auto, only_x264, Codec::H264).size() > 1);
-
-    // A backend the build cannot provide leaves the chain empty rather than in it.
-    BackendSelection only_nvenc;
-    only_nvenc.preferred = {Backend::NvidiaNvenc};
-    std::vector<std::string> skipped;
-    CHECK(resolve_backends(Backend::Auto, only_nvenc, Codec::H264, &skipped).empty());
-    CHECK(!skipped.empty());
 }
 
 void a_backend_that_cannot_encode_the_codec_is_left_out_with_its_reason()
@@ -350,10 +339,11 @@ void an_unusable_preference_order_is_refused_before_anything_opens()
     CHECK(create_refusal(twice) == StatusCode::InvalidArgument);
 
     // A well-formed order that no backend in this build can serve fails at open, which is
-    // a different answer: the request was valid, the machine could not meet it.
-    EncoderConfig hardware_only = config_for(Backend::Auto);
-    hardware_only.settings.backend_selection.preferred = {Backend::NvidiaNvenc};
-    CHECK(create_refusal(hardware_only) != StatusCode::Ok);
+    // a different answer: the request was valid, the machine could not meet it. libx265
+    // does not produce H.264, so a list naming only it has nothing to open.
+    EncoderConfig unservable = config_for(Backend::Auto);
+    unservable.settings.backend_selection.preferred = {Backend::X265Direct};
+    CHECK(create_refusal(unservable) != StatusCode::Ok);
 }
 
 void the_preference_order_is_read_where_the_backend_is_named()

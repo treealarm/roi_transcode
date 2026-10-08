@@ -96,13 +96,9 @@ int main()
              CodecProfile::H265Main10}) {
         check(std::string(codec_profile_name(p)) != "?", "CodecProfile has an unnamed value");
     }
-    for (const MemoryType m : {MemoryType::CPU, MemoryType::AVFRAME, MemoryType::CUDA,
-             MemoryType::VAAPI, MemoryType::ONEVPL, MemoryType::ROCKCHIP_MPP}) {
+    for (const MemoryType m : {MemoryType::CPU, MemoryType::AVFRAME, MemoryType::VAAPI,
+             MemoryType::ONEVPL}) {
         check(std::string(memory_type_name(m)) != "?", "MemoryType has an unnamed value");
-    }
-    for (const QualityPolicy q : {QualityPolicy::OBJECT_FIRST, QualityPolicy::BALANCED,
-             QualityPolicy::BITRATE_FIRST}) {
-        check(std::string(quality_policy_name(q)) != "?", "QualityPolicy has an unnamed value");
     }
     for (const FallbackPolicy f : {FallbackPolicy::Strict, FallbackPolicy::Permissive}) {
         check(std::string(fallback_policy_name(f)) != "?",

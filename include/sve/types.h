@@ -304,10 +304,6 @@ struct Settings {
     CodecProfile profile = CodecProfile::Auto;
     Quality quality;
 
-    /// §14. Only OBJECT_FIRST is implemented; the others are refused at open rather than
-    /// treated as the default, so asking for one and getting the other cannot happen.
-    QualityPolicy policy = QualityPolicy::OBJECT_FIRST;
-
     /// §22 and Appendix C. Whether a capability the hardware lacks is worked around and
     /// announced, or refused outright.
     FallbackPolicy fallback = FallbackPolicy::Permissive;

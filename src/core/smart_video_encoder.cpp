@@ -424,7 +424,6 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoderIn(
     ep.backend_selection = config.settings.backend_selection;
     ep.kind = config.settings.encoder;
     ep.codec = config.settings.codec;
-    ep.policy = config.settings.policy;
     ep.temporal = config.settings.temporal;
     ep.rate_control = config.settings.rate_control;
     ep.crf = config.settings.crf;
@@ -611,11 +610,6 @@ Status SmartVideoEncoder::Impl::submit(const FrameMetadata& metadata, const Hand
         std::vector<Rect> rects;
         if (const Status made = s.rects_for(metadata, &rects); !made.ok()) {
             return made;
-        }
-        if (!s.warned_roi && s.encoder.kind() == Backend::NvidiaNvenc) {
-            s.log.warn("warning: stock FFmpeg hevc_nvenc ignores ROI; "
-                       "qpDeltaMap is built but not submitted to NVENC SDK");
-            s.warned_roi = true;
         }
         std::vector<uint8_t> sei;
         if (const Status made = s.metadata_for(metadata, pts, &sei); !made.ok()) {

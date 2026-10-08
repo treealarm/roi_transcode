@@ -29,16 +29,6 @@ enum class FallbackPolicy {
 
 const char* fallback_policy_name(FallbackPolicy p);
 
-/// §14. OBJECT_FIRST is the default and the only one implemented; the others are rejected
-/// at configure time rather than quietly treated as the default.
-enum class QualityPolicy {
-    OBJECT_FIRST,
-    BALANCED,
-    BITRATE_FIRST,
-};
-
-const char* quality_policy_name(QualityPolicy p);
-
 /// §13. Keeping a region alive across a detector miss (TZ v3 defaults).
 ///
 /// Between two known samples an archive *interpolates*. Past the last sample, patience

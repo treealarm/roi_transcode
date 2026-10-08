@@ -26,7 +26,6 @@
 #include "adaptive/importance_map.h"
 #include "backend/common/intel_roi_limit.h"
 #include "backend/common/rate_control.h"
-#include "sve/backend_plugin.h"
 #include "sve/backend_registry.h"
 #include "sve/encoder_backend.h"
 
@@ -1122,44 +1121,12 @@ const IEncoderBackend& onevpl_native_backend()
     return instance;
 }
 
-namespace {
-
-const IEncoderBackend* acquire_onevpl_backend() noexcept
-{
-    return &onevpl_native_backend();
-}
-
-/// One description for both delivery paths -- see the x264 component and §26.4.
-constexpr SveBackendPluginDescriptorV1 kDescriptor{
-    .abi_version = kBackendPluginAbiVersion,
-    .descriptor_size = sizeof(SveBackendPluginDescriptorV1),
-    .backend_id = static_cast<int32_t>(Backend::IntelOneVplDirect),
-    .acquire = &acquire_onevpl_backend,
-};
-
-} // namespace
-
-/// §26.4's static registration for this component.
+/// Explicit registration, so the core never names this component and a build without it
+/// simply does not call this.
 Status RegisterOneVplBackend(BackendRegistry& registry) noexcept
 {
-    return registry.Register(kDescriptor);
+    return registry.Register(onevpl_native_backend());
 }
-
-#ifdef SVE_BACKEND_AS_PLUGIN
-/// §26.4's dynamic delivery: one exported symbol, and it returns the very descriptor the
-/// static registration above hands the registry. Compiled only into the module build,
-/// because §26.4 fixes the symbol's name -- two static components carrying it would put two
-/// definitions of one name on a deployment's link line.
-///
-/// extern "C" for the linkage, not for the types: what comes back is still the C++
-/// descriptor, and noexcept is on the declaration because an exception leaving here would
-/// unwind through a frame in the core that cannot see this module's types.
-extern "C" SVE_BACKEND_EXPORT
-const SveBackendPluginDescriptorV1* sve_backend_plugin_v1() noexcept
-{
-    return &kDescriptor;
-}
-#endif
 
 
 } // namespace sve

@@ -24,7 +24,6 @@ const char* backend_name(Backend e)
     case Backend::Auto:  return "auto";
     case Backend::IntelOneVpl:   return "qsv";
     case Backend::Vaapi: return "vaapi";
-    case Backend::NvidiaNvenc: return "nvenc";
     case Backend::X264:  return "x264";
     case Backend::X265:  return "x265";
     case Backend::X264Direct: return "x264direct";
@@ -88,7 +87,6 @@ constexpr NamedBackend kNamedBackends[] = {
     {"cpu", Backend::Auto, kCpuOrder},
     {"qsv", Backend::IntelOneVpl, {}},
     {"vaapi", Backend::Vaapi, {}},
-    {"nvenc", Backend::NvidiaNvenc, {}},
     {"x264", Backend::X264, {}},
     {"x265", Backend::X265, {}},
     {"x264direct", Backend::X264Direct, {}},

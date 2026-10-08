@@ -119,19 +119,6 @@ void a_working_backend_opens_and_delivers()
     CHECK(encoder.backends_declined() == 0);
 }
 
-void a_policy_the_library_does_not_implement_is_refused_by_name()
-{
-    FakeBackend backend;
-    const BackendRegistry registry = registry_with(backend);
-    RoiEncoder encoder(registry);
-    BackendConfig config = config_for(backend);
-    config.policy = QualityPolicy::BITRATE_FIRST;
-
-    const std::string why = refusal_of(encoder, config);
-    CHECK(why.find("BITRATE_FIRST") != std::string::npos);
-    CHECK(why.find("not implemented") != std::string::npos);
-}
-
 void a_backend_that_cannot_serve_the_codec_leaves_its_reason()
 {
     FakeBackend backend;
@@ -397,10 +384,6 @@ void each_backend_identifier_gets_its_own_label()
         {Backend::IntelOneVpl, Codec::H265, "hevc_qsv (Intel VPL mfxExtEncoderROI)"},
         {Backend::Vaapi, Codec::H264, "h264_vaapi (Intel iHD VAEncROI)"},
         {Backend::Vaapi, Codec::H265, "hevc_vaapi (Intel iHD VAEncROI)"},
-        {Backend::NvidiaNvenc, Codec::H264,
-            "h264_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)"},
-        {Backend::NvidiaNvenc, Codec::H265,
-            "hevc_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)"},
         {Backend::X264, Codec::H264, "libx264 (CPU, via libavcodec)"},
         {Backend::X264Direct, Codec::H264,
             "libx264 (CPU, direct API, per-macroblock quant_offsets)"},
@@ -426,7 +409,6 @@ void each_backend_identifier_gets_its_own_label()
 int main()
 {
     a_working_backend_opens_and_delivers();
-    a_policy_the_library_does_not_implement_is_refused_by_name();
     a_backend_that_cannot_serve_the_codec_leaves_its_reason();
     a_backend_that_declines_is_counted_and_quoted();
     a_probe_that_encodes_nothing_declines_the_backend();

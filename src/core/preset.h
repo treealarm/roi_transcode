@@ -9,6 +9,5 @@ namespace sve {
 
 const char* libx26x_preset(Preset p);
 const char* qsv_preset(Preset p);
-const char* nvenc_preset(Preset p);
 
 } // namespace sve

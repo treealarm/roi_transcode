@@ -107,8 +107,6 @@ struct BackendConfig {
     Preset preset = Preset::Balanced;
     /// §8.2 and §15.3. Auto follows input.pixel_format's bit depth.
     CodecProfile profile = CodecProfile::Auto;
-    /// §14; only OBJECT_FIRST opens, see RoiEncoder::open_deferred.
-    QualityPolicy policy = QualityPolicy::OBJECT_FIRST;
 
     TemporalROIConfig temporal;
     RateControlPolicy rate_control;

@@ -37,44 +37,6 @@ option(SVE_INSTALL           "Install the C++ package (headers, libs, pkg-config
 # that only converts frames. The libavcodec-backed encoders are not in that graph at all --
 # they stay as the reference backend-compare.sh measures the direct paths against, and the
 # linux-dev preset turns them on so the development loop and check.sh keep their coverage.
-# §26.4's deployment profile. STATIC is the default and the only one that changes nothing:
-# DYNAMIC and BOTH additionally build each shippable component a second time as a shared
-# module, from the same sources, exporting the one C entry point §26.4 names.
-#
-# A plugin links the core, and in the profiles that build plugins the core is shared, so
-# there is exactly one copy of it in the process. Both halves of that are necessary and the
-# reason is measured rather than argued.
-#
-# A module carrying its *own* copy of the core would carry its own copy of every
-# function-local static in it -- default_backend_registry() among them -- so the registry a
-# plugin registered into would not be the registry the process asks.
-#
-# Leaving the references undefined and binding them to the host at load time was tried
-# first, on 2026-09-01, and does not hold: -rdynamic exports only what is already in the
-# executable, and a static archive contributes only the object files something referenced.
-# The parity check caught it at once -- libsve.a contains sve::pixel_format_name and
-# roi-transcode did not, so every plugin was refused with "undefined symbol" and the
-# deployment had no backends at all. Forcing hosts to --whole-archive the core would fix it
-# by pushing a linker flag onto everyone who embeds us, including ta_vms, and §26.4 names
-# that flag as something not to lean on.
-#
-# So the core is SHARED under DYNAMIC and BOTH, and only there. STATIC is untouched: the
-# default build and ta_vms keep the static core they have always had.
-set(SVE_BACKEND_PACKAGING "STATIC" CACHE STRING
-    "How backend components are delivered: STATIC, DYNAMIC or BOTH (TZ v4.2 §26.4)")
-set_property(CACHE SVE_BACKEND_PACKAGING PROPERTY STRINGS STATIC DYNAMIC BOTH)
-if(NOT SVE_BACKEND_PACKAGING MATCHES "^(STATIC|DYNAMIC|BOTH)$")
-    message(FATAL_ERROR
-        "SVE_BACKEND_PACKAGING must be STATIC, DYNAMIC or BOTH, not '${SVE_BACKEND_PACKAGING}'")
-endif()
-if(SVE_BACKEND_PACKAGING STREQUAL "STATIC")
-    set(SVE_BUILD_PLUGINS OFF)
-    set(SVE_CORE_LIBRARY_TYPE "")
-else()
-    set(SVE_BUILD_PLUGINS ON)
-    set(SVE_CORE_LIBRARY_TYPE SHARED)
-endif()
-
 option(SVE_BUILD_BACKEND_X264   "Build the direct libx264 backend component"      ON)
 option(SVE_BUILD_BACKEND_X265   "Build the direct libx265 backend component"      ON)
 # §5.2's native OneVplBackend. Off by default because it needs the oneVPL SDK, and §26.4
@@ -84,30 +46,16 @@ option(SVE_BUILD_BACKEND_FFMPEG "Build the libavcodec-backed backends (reference
 option(SVE_BUILD_FFMPEG_INTEROP "Build the AVFrame interop adapter (§8.5)"        ON)
 option(SVE_BUILD_EXAMPLES       "Build transcode_file and Session (§52)"          ON)
 
-# Which components the deployment registers by linking them, as opposed to loading them.
-# Under DYNAMIC the shippable ones are delivered as plugins and this list is empty of them:
-# registering them here as well would make DYNAMIC indistinguishable from STATIC, and the
-# parity that §26.4 asks CI to check would be a comparison of a thing with itself.
-#
-# BOTH does register them and builds the plugins too, which is the configuration where a
-# deployment can walk into §26.4's duplicate case on purpose and be refused.
-set(SVE_STATIC_REGISTRATION ON)
-if(SVE_BACKEND_PACKAGING STREQUAL "DYNAMIC")
-    set(SVE_STATIC_REGISTRATION OFF)
-endif()
-
 set(SVE_REGISTER_CALLS "")
-if(SVE_BUILD_BACKEND_X264 AND SVE_STATIC_REGISTRATION)
+if(SVE_BUILD_BACKEND_X264)
     string(APPEND SVE_REGISTER_CALLS "    if (const Status s = RegisterX264Backend(registry); !s.ok()) return s;\n")
 endif()
-if(SVE_BUILD_BACKEND_X265 AND SVE_STATIC_REGISTRATION)
+if(SVE_BUILD_BACKEND_X265)
     string(APPEND SVE_REGISTER_CALLS "    if (const Status s = RegisterX265Backend(registry); !s.ok()) return s;\n")
 endif()
-if(SVE_BUILD_BACKEND_ONEVPL AND SVE_STATIC_REGISTRATION)
+if(SVE_BUILD_BACKEND_ONEVPL)
     string(APPEND SVE_REGISTER_CALLS "    if (const Status s = RegisterOneVplBackend(registry); !s.ok()) return s;\n")
 endif()
-# Always static, whatever the profile: the libavcodec reference group is not shipped as a
-# plugin and §5.5 does not list it in the dependency graph at all.
 if(SVE_BUILD_BACKEND_FFMPEG)
     string(APPEND SVE_REGISTER_CALLS "    if (const Status s = RegisterFfmpegBackends(registry); !s.ok()) return s;\n")
 endif()
@@ -149,7 +97,7 @@ pkg_check_modules(X265 x265)
 # link without dragging FFmpeg along; now that the core itself drags nothing, the split has
 # nothing left to protect.
 # ---------------------------------------------------------------------------
-add_library(sve ${SVE_CORE_LIBRARY_TYPE}
+add_library(sve
     src/adaptive/importance.cpp
     src/adaptive/object_normalizer.cpp
     src/adaptive/object_geometry.cpp
@@ -166,15 +114,12 @@ add_library(sve ${SVE_CORE_LIBRARY_TYPE}
     src/backend/common/backend_registry.cpp
     src/core/backend_selection.cpp
     src/core/codec_profile.cpp
-    src/core/backend_loader.cpp
     src/core/logging.cpp
     src/core/memory_type.cpp
-    src/core/shared_library.cpp
     src/core/policy.cpp
     src/core/pixel_format.cpp
     src/core/preset.cpp
     src/core/frame_roi_pipeline.cpp
-    src/core/push_encoder.cpp
     src/core/raw_frame.cpp
     src/core/roi_encoder.cpp
     src/core/smart_video_encoder.cpp
@@ -207,15 +152,6 @@ set_target_properties(sve PROPERTIES
     SOVERSION ${PROJECT_VERSION_MAJOR}
     POSITION_INDEPENDENT_CODE ON)
 
-# Where the loader looks when it is not told where to look -- §26.4's install-relative and
-# system-configured directories. They come from the install layout rather than from a
-# constant in the source, because the layout is CMake's to decide and a second copy of it
-# would be exactly the meaningful number that drifts. GNUInstallDirs is included above.
-target_compile_definitions(sve PRIVATE
-    SVE_PLUGIN_SYSTEM_DIR="${CMAKE_INSTALL_FULL_LIBDIR}/sve/backends"
-    SVE_PLUGIN_RELATIVE_DIR="../${CMAKE_INSTALL_LIBDIR}/sve/backends")
-# dlopen. Empty on the platforms that have it in libc, which is what this variable is for.
-target_link_libraries(sve PRIVATE ${CMAKE_DL_LIBS})
 add_library(sve::sve ALIAS sve)
 
 # A component links the core and is linked by the deployment, never the other way round.
@@ -232,49 +168,6 @@ function(sve_add_backend_component name)
     set_target_properties(${name} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endfunction()
 
-# The same component, delivered the other way -- §26.4's dynamic plugin packaging.
-#
-# Same source file, and that is the requirement rather than a convenience: "static и dynamic
-# варианты одного backend используют одну реализацию и один SveBackendPluginDescriptorV1".
-# What differs is one compile definition, which is what admits the exported entry point.
-# That entry point cannot be in the static build: §26.4 fixes its name, so two static
-# components carrying it would put two definitions of one symbol on a deployment's link
-# line and it would not link at all.
-#
-# Hidden visibility so that the module exports that one symbol and nothing else, and the
-# core linked in the ordinary way -- shared in these profiles, so the process holds one copy
-# of it. See SVE_BACKEND_PACKAGING above for why neither half is optional.
-function(sve_add_backend_plugin base source)
-    if(NOT SVE_BUILD_PLUGINS)
-        return()
-    endif()
-    set(plugin ${base}_plugin)
-    add_library(${plugin} MODULE ${source})
-    target_include_directories(${plugin}
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
-    target_compile_options(${plugin} PRIVATE ${SVE_WARNINGS})
-    target_compile_definitions(${plugin}
-        PRIVATE SVE_BACKEND_AS_PLUGIN _CRT_SECURE_NO_WARNINGS)
-    target_link_libraries(${plugin} PRIVATE sve)
-    set_target_properties(${plugin} PROPERTIES
-        OUTPUT_NAME "${base}"
-        PREFIX "lib"
-        CXX_VISIBILITY_PRESET hidden
-        VISIBILITY_INLINES_HIDDEN ON
-        POSITION_INDEPENDENT_CODE ON)
-    # Hidden visibility covers what we compile; the codec library arrives from a static
-    # archive already compiled and default-visible, and without this the x265 module
-    # exported 1318 symbols instead of one. See cmake/backend_plugin.map.
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        target_link_options(${plugin} PRIVATE
-            "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/backend_plugin.map")
-        set_property(TARGET ${plugin} APPEND PROPERTY LINK_DEPENDS
-            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/backend_plugin.map")
-    endif()
-endfunction()
-
 # ---------------------------------------------------------------------------
 # sve_backend_x264 / sve_backend_x265 -- §5.4, §5.5
 #
@@ -288,15 +181,6 @@ if(SVE_BUILD_BACKEND_X264)
     target_link_directories(sve_backend_x264 PUBLIC $<BUILD_INTERFACE:${X264_LIBRARY_DIRS}>)
     target_link_libraries(sve_backend_x264 PUBLIC ${X264_LIBRARIES})
     add_library(sve::backend_x264_static ALIAS sve_backend_x264)
-
-    sve_add_backend_plugin(sve_backend_x264 src/backend/x264/x264_backend.cpp)
-    if(TARGET sve_backend_x264_plugin)
-        install(TARGETS sve_backend_x264_plugin
-                LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/sve/backends)
-        target_include_directories(sve_backend_x264_plugin SYSTEM PRIVATE ${X264_INCLUDE_DIRS})
-        target_link_directories(sve_backend_x264_plugin PRIVATE ${X264_LIBRARY_DIRS})
-        target_link_libraries(sve_backend_x264_plugin PRIVATE ${X264_LIBRARIES})
-    endif()
 endif()
 
 if(SVE_BUILD_BACKEND_X265)
@@ -306,15 +190,6 @@ if(SVE_BUILD_BACKEND_X265)
     target_link_directories(sve_backend_x265 PUBLIC $<BUILD_INTERFACE:${X265_LIBRARY_DIRS}>)
     target_link_libraries(sve_backend_x265 PUBLIC ${X265_LIBRARIES})
     add_library(sve::backend_x265_static ALIAS sve_backend_x265)
-
-    sve_add_backend_plugin(sve_backend_x265 src/backend/x265/x265_backend.cpp)
-    if(TARGET sve_backend_x265_plugin)
-        install(TARGETS sve_backend_x265_plugin
-                LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/sve/backends)
-        target_include_directories(sve_backend_x265_plugin SYSTEM PRIVATE ${X265_INCLUDE_DIRS})
-        target_link_directories(sve_backend_x265_plugin PRIVATE ${X265_LIBRARY_DIRS})
-        target_link_libraries(sve_backend_x265_plugin PRIVATE ${X265_LIBRARIES})
-    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -343,15 +218,6 @@ if(SVE_BUILD_BACKEND_ONEVPL)
     target_link_directories(sve_backend_onevpl PUBLIC $<BUILD_INTERFACE:${VPL_LIBRARY_DIRS}>)
     target_link_libraries(sve_backend_onevpl PUBLIC ${VPL_LIBRARIES})
     add_library(sve::backend_onevpl_static ALIAS sve_backend_onevpl)
-
-    sve_add_backend_plugin(sve_backend_onevpl src/backend/onevpl_native/onevpl_native_backend.cpp)
-    if(TARGET sve_backend_onevpl_plugin)
-        install(TARGETS sve_backend_onevpl_plugin
-                LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/sve/backends)
-        target_include_directories(sve_backend_onevpl_plugin SYSTEM PRIVATE ${VPL_INCLUDE_DIRS})
-        target_link_directories(sve_backend_onevpl_plugin PRIVATE ${VPL_LIBRARY_DIRS})
-        target_link_libraries(sve_backend_onevpl_plugin PRIVATE ${VPL_LIBRARIES})
-    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -395,7 +261,6 @@ if(SVE_BUILD_BACKEND_FFMPEG)
         src/backend/software/software_backend.cpp
         src/backend/onevpl/onevpl_backend.cpp
         src/backend/ffmpeg/vaapi_backend.cpp
-        src/backend/nvenc/nvenc_backend.cpp
     )
     sve_add_backend_component(sve_backend_ffmpeg)
     target_include_directories(sve_backend_ffmpeg SYSTEM PUBLIC ${FFMPEG_INCLUDE_DIRS})
@@ -507,14 +372,8 @@ target_compile_options(sve_deployment PRIVATE ${SVE_WARNINGS})
 # add_subdirectory() users -- ta_vms among them -- do not have to learn the component list.
 add_library(sve_all INTERFACE)
 target_link_libraries(sve_all INTERFACE sve $<TARGET_OBJECTS:sve_deployment>)
-set(SVE_ALL_COMPONENTS sve_backend_ffmpeg sve_ffmpeg_interop sve_decode sve_examples)
-if(SVE_STATIC_REGISTRATION)
-    # Under DYNAMIC these are not linked in at all: their backends arrive through the
-    # loader, and an archive whose registration function nobody calls would only be dead
-    # weight on every consumer's link line.
-    list(APPEND SVE_ALL_COMPONENTS sve_backend_x264 sve_backend_x265 sve_backend_onevpl)
-endif()
-foreach(component ${SVE_ALL_COMPONENTS})
+foreach(component sve_backend_ffmpeg sve_ffmpeg_interop sve_decode sve_examples
+                  sve_backend_x264 sve_backend_x265 sve_backend_onevpl)
     if(TARGET ${component})
         target_link_libraries(sve_all INTERFACE ${component})
     endif()
@@ -663,63 +522,6 @@ if(SVE_BUILD_TESTS)
     # behind it are safe to reach simultaneously, and a build with no backends registered
     # would pass it by having nothing to contend over.
     find_package(Threads REQUIRED)
-    # Four modules out of one source -- tests/plugins/test_plugin.cpp says what separates
-    # them. Each lands in its own directory so a test can state exactly what is in scope,
-    # which is also how §26.4's search order gets checked: the same identifier in two
-    # directories, and the first one has to win.
-    function(sve_add_test_plugin dir output)
-        set(target test_plugin_${dir})
-        add_library(${target} MODULE tests/plugins/test_plugin.cpp)
-        target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-        target_compile_options(${target} PRIVATE ${SVE_WARNINGS})
-        target_compile_definitions(${target} PRIVATE ${ARGN})
-        # The same rule the shipped plugins follow: a plugin links the core. In this
-        # profile the core is an archive, so each test module gets its own copy -- which is
-        # harmless here (these stubs touch no shared state) and makes the loader test about
-        # the loader rather than about how the host was linked.
-        target_link_libraries(${target} PRIVATE sve)
-        set_target_properties(${target} PROPERTIES
-            OUTPUT_NAME "${output}"
-            PREFIX "lib"
-            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-plugins/${dir}"
-            CXX_VISIBILITY_PRESET hidden
-            VISIBILITY_INLINES_HIDDEN ON
-            POSITION_INDEPENDENT_CODE ON)
-        # Not on the module that deliberately has no entry point: a version script naming a
-        # symbol the module does not define is an error to some linkers and a warning to
-        # others, and hidden visibility already leaves that one exporting nothing.
-        if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT dir STREQUAL "no_entry")
-            target_link_options(${target} PRIVATE
-                "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/backend_plugin.map")
-        endif()
-    endfunction()
-
-    sve_add_test_plugin(good     sve_backend_test          SVE_TEST_PLUGIN_GOOD)
-    sve_add_test_plugin(dup      sve_backend_test_dup      SVE_TEST_PLUGIN_DUP)
-    sve_add_test_plugin(bad_abi  sve_backend_test_bad_abi  SVE_TEST_PLUGIN_BAD_ABI)
-    sve_add_test_plugin(no_entry sve_backend_test_no_entry SVE_TEST_PLUGIN_NO_ENTRY)
-
-    add_executable(plugin_loader_test tests/unit/plugin_loader_test.cpp)
-    # sve_all rather than the core alone, and the link error that says why is worth keeping
-    # in mind: BackendRegistry lives in the core, but default_backend_registry() fills
-    # itself from RegisterDeploymentBackends, which by §26.4's own rule is on the
-    # deployment's side of the line and not in the core. Anything that touches the registry
-    # needs the deployment. The test builds registries of its own regardless.
-    target_link_libraries(plugin_loader_test PRIVATE sve_all)
-    target_compile_options(plugin_loader_test PRIVATE ${SVE_WARNINGS})
-    target_compile_definitions(plugin_loader_test PRIVATE
-        SVE_TEST_PLUGIN_DIR="${CMAKE_CURRENT_BINARY_DIR}/test-plugins")
-    add_dependencies(plugin_loader_test
-        test_plugin_good test_plugin_dup test_plugin_bad_abi test_plugin_no_entry)
-    add_test(NAME plugin_loader COMMAND plugin_loader_test)
-
-    # §26.4's descriptor checks. Links sve_all because the descriptors it builds acquire a
-    # real backend, which means the deployment registry has to have one.
-    add_executable(backend_plugin_test tests/unit/backend_plugin_test.cpp)
-    target_link_libraries(backend_plugin_test PRIVATE sve_all)
-    target_compile_options(backend_plugin_test PRIVATE ${SVE_WARNINGS})
-    add_test(NAME backend_plugin COMMAND backend_plugin_test)
-
     add_executable(concurrency_test tests/unit/concurrency_test.cpp)
     target_link_libraries(concurrency_test PRIVATE sve_all Threads::Threads)
     target_compile_options(concurrency_test PRIVATE ${SVE_WARNINGS})
@@ -788,11 +590,6 @@ if(SVE_BUILD_TESTS)
     target_include_directories(names_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/unit)
     target_compile_options(names_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME names COMMAND names_test)
-
-    add_executable(push_encoder_test tests/unit/push_encoder_test.cpp)
-    target_link_libraries(push_encoder_test PRIVATE sve_all)
-    target_compile_options(push_encoder_test PRIVATE ${SVE_WARNINGS})
-    add_test(NAME push_encoder COMMAND push_encoder_test)
 
     # AT-009 from §48. Runs where a backend reports main10 and skips with the encoder's own
     # words where it does not, which is the capability evidence §50 asks a SKIP to carry.

@@ -22,9 +22,6 @@ const char* RoiEncoder::label() const
     case Backend::Vaapi:
         return h264 ? "h264_vaapi (Intel iHD VAEncROI)"
                     : "hevc_vaapi (Intel iHD VAEncROI)";
-    case Backend::NvidiaNvenc:
-        return h264 ? "h264_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)"
-                    : "hevc_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)";
     case Backend::X264:
         return "libx264 (CPU, via libavcodec)";
     case Backend::X264Direct:
@@ -124,16 +121,6 @@ Result<FrameBufferPtr> RoiEncoder::create_frame(MemoryType memory)
 
 void RoiEncoder::open_deferred(const BackendConfig& config)
 {
-    if (config.policy != QualityPolicy::OBJECT_FIRST) {
-        // Refused rather than approximated. BALANCED and BITRATE_FIRST both need the
-        // bitrate budget of §15, and running OBJECT_FIRST while reporting otherwise would
-        // make every measurement taken against it wrong.
-        fail(std::format("quality policy {} is not implemented",
-            quality_policy_name(config.policy)));
-    }
-    // Same rule for settings that exist only as declarations. A caller who asks for a
-    // bitrate target and gets neither has been misled.
-
     std::string errors;
     const std::vector<BackendRef> chain = resolve_backends(config.kind,
         config.backend_selection, config.codec, &m_backends_skipped, *m_registry);
