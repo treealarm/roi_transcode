@@ -17,14 +17,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(SVE_BUILD_TESTS       "Build the unit tests"                       ON)
-option(SVE_BUILD_INTEGRATION "Build the ta_vms gRPC service, CLI and tools" OFF)
-# §23 names both the directory and the switch. Separate from SVE_BUILD_INTEGRATION because
-# the specification does describe this one: sve-capabilities is part of the deliverable,
-# where the CLI and the scripts are not.
-option(SVE_BUILD_TOOLS       "Build sve-capabilities (§23)"               ON)
-# §58.8: off by default, and the core never depends on Python, NumPy or pybind11 whether it
-# is on or off -- the bindings live in python/ and link the public library from outside.
-option(SVE_BUILD_PYTHON      "Build the Python extension (§58)"           OFF)
 # Decode on its own, without an encoder behind it: sve/decoder.h and the device selection
 # beside it. On by default because Session needs the same FrameDecoder and would otherwise
 # have to keep a private copy of it -- the point of the component is that there is one
@@ -135,7 +127,6 @@ pkg_check_modules(FFMPEG REQUIRED
     libavcodec
     libavutil
     libswscale
-    libswresample
 )
 message(STATUS "smart-video-encoder FFmpeg: ${FFMPEG_INCLUDE_DIRS}")
 
@@ -145,9 +136,6 @@ message(STATUS "smart-video-encoder FFmpeg: ${FFMPEG_INCLUDE_DIRS}")
 # find it, which is precisely the accident the split exists to remove.
 pkg_check_modules(X264 x264)
 pkg_check_modules(X265 x265)
-
-# Build provenance for §58.7 and §38, gathered once for everything that needs it.
-include(cmake/build_manifest.cmake)
 
 # ---------------------------------------------------------------------------
 # sve -- the core of §5.5's dependency graph
@@ -533,32 +521,6 @@ foreach(component ${SVE_ALL_COMPONENTS})
 endforeach()
 
 # ---------------------------------------------------------------------------
-# tools -- §23
-#
-# Linked against sve_all rather than sve alone: the report is about which backends this
-# build has, so it needs them present. It compiles against include/ and nothing else, which
-# is the other half of what §23 asks -- a tool that had to reach into src/ would be
-# describing a library nobody else can use.
-# ---------------------------------------------------------------------------
-if(SVE_BUILD_TOOLS)
-    add_executable(sve-capabilities tools/sve_capabilities.cpp)
-    target_link_libraries(sve-capabilities PRIVATE sve_all)
-    target_compile_options(sve-capabilities PRIVATE ${SVE_WARNINGS})
-
-    # §38's calibration run. It reads the build manifest for the exact encoder version a
-    # profile is pinned to, which is why the generated header is on its include path.
-    add_executable(sve-baseline tools/sve_baseline.cpp)
-    target_link_libraries(sve-baseline PRIVATE sve_all)
-    target_include_directories(sve-baseline PRIVATE "${SVE_BUILD_MANIFEST_DIR}")
-    target_compile_options(sve-baseline PRIVATE ${SVE_WARNINGS})
-
-    if(SVE_INSTALL)
-        install(TARGETS sve-capabilities sve-baseline
-            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-    endif()
-endif()
-
-# ---------------------------------------------------------------------------
 # Install and export -- §26.3
 #
 # find_package(sve CONFIG) yields sve::sve, and each component is its own explicitly
@@ -737,15 +699,6 @@ if(SVE_BUILD_TESTS)
     sve_add_test_plugin(bad_abi  sve_backend_test_bad_abi  SVE_TEST_PLUGIN_BAD_ABI)
     sve_add_test_plugin(no_entry sve_backend_test_no_entry SVE_TEST_PLUGIN_NO_ENTRY)
 
-    # §43's soak driver. An executable rather than a ctest case with a fixed duration: the
-    # specification asks for an hour in CI, eight overnight and twenty-four on a release
-    # candidate, so how long it runs is the caller's to say. ctest gets a short one so that
-    # the driver itself cannot rot unnoticed between the long runs.
-    add_executable(sve-soak tests/soak/soak.cpp)
-    target_link_libraries(sve-soak PRIVATE sve_all Threads::Threads)
-    target_compile_options(sve-soak PRIVATE ${SVE_WARNINGS})
-    add_test(NAME soak_smoke COMMAND sve-soak --seconds 5)
-
     add_executable(plugin_loader_test tests/unit/plugin_loader_test.cpp)
     # sve_all rather than the core alone, and the link error that says why is worth keeping
     # in mind: BackendRegistry lives in the core, but default_backend_registry() fills
@@ -821,16 +774,6 @@ if(SVE_BUILD_TESTS)
     target_compile_options(logging_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME logging COMMAND logging_test)
 
-    # One half of §58.10.1's C++/Python equivalence. Not an add_test: on its own it proves
-    # nothing, because what it prints only means something beside what the wrapper prints
-    # for the same configuration. check.sh runs the pair and diffs them.
-    add_executable(parity_digest tests/unit/parity_digest.cpp)
-    target_link_libraries(parity_digest PRIVATE sve_all)
-    target_compile_options(parity_digest PRIVATE ${SVE_WARNINGS})
-
-    # The other half of a surface check, and not an add_test for the same reason: what it
-    # prints means something only against what the Python module exposes.
-    # integration/scripts/python-enum-parity.py is that comparison.
     # §50's guards, tested directly: they are pure functions, and the Strict half of each
     # had never run until the coverage measurement said so.
     add_executable(runtime_warnings_test tests/unit/runtime_warnings_test.cpp)
@@ -845,18 +788,6 @@ if(SVE_BUILD_TESTS)
     target_include_directories(names_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/unit)
     target_compile_options(names_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME names COMMAND names_test)
-
-    add_executable(enum_surface tests/unit/enum_surface.cpp)
-    target_link_libraries(enum_surface PRIVATE sve)
-    target_include_directories(enum_surface PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/unit)
-    target_compile_options(enum_surface PRIVATE ${SVE_WARNINGS})
-
-    # The C++ reference for §58.10.8's overhead budget, and not an add_test for the same
-    # reason parity_digest is not: a submit time on its own is a number without a claim in
-    # it. check.sh runs this beside the wrapper and compares the two P95s.
-    add_executable(submit_overhead tests/unit/submit_overhead.cpp)
-    target_link_libraries(submit_overhead PRIVATE sve_all)
-    target_compile_options(submit_overhead PRIVATE ${SVE_WARNINGS})
 
     add_executable(push_encoder_test tests/unit/push_encoder_test.cpp)
     target_link_libraries(push_encoder_test PRIVATE sve_all)
@@ -918,12 +849,4 @@ if(SVE_BUILD_TESTS)
     target_include_directories(public_headers_isolated
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_options(public_headers_isolated PRIVATE ${SVE_WARNINGS})
-endif()
-
-if(SVE_BUILD_PYTHON)
-    add_subdirectory(python)
-endif()
-
-if(SVE_BUILD_INTEGRATION)
-    add_subdirectory(integration)
 endif()
