@@ -56,11 +56,13 @@ COPY triplets/ /vcpkg-overlay-triplets/
 # but ROI on Intel also needs a current iHD driver in the runtime image and
 # /dev/dri passed into the container. Without either, `--encoder auto` falls back
 # to libx264 and everything still looks fine.
+#
+# VCPKG_MAX_CONCURRENCY=2: more than that and some port runs the Docker VM out of memory.
 RUN --mount=type=cache,target=/vcpkg/buildtrees \
     --mount=type=cache,target=/vcpkg/packages \
     --mount=type=cache,target=/vcpkg/downloads \
     --mount=type=cache,target=/vcpkg/binary-cache \
-    VCPKG_MAX_CONCURRENCY=1 \
+    VCPKG_MAX_CONCURRENCY=2 \
     /vcpkg/vcpkg install \
         --overlay-triplets=/vcpkg-overlay-triplets \
         protobuf \
