@@ -1,6 +1,6 @@
 // The public headers, compiled with include/ and nothing else on the path.
 //
-// public_api_test cannot prove this on its own: it links sve, and sve
+// public_api_test cannot prove this on its own: it links ta_roienc, and ta_roienc
 // publishes ${FFMPEG_INCLUDE_DIRS} as PUBLIC, so libavcodec is on that test's include path
 // whether or not a public header asks for it. A header that started including
 // <libavcodec/avcodec.h> would keep compiling there and nobody would notice until an
@@ -8,13 +8,13 @@
 //
 // This translation unit has no library behind it and nothing to link. If it stops
 // compiling, a public header grew a dependency it must not have -- which is exactly the
-// property TZ v2.0 §7 and §8 rely on, and the reason BackendSession is opaque.
+// property the public interface relies on, and the reason BackendSession is opaque.
 
-#include "sve/ffmpeg_log.h"
-#include "sve/input_format.h"
-#include "sve/packet.h"
-#include "sve/sve.h"
-#include "sve/timestamp.h"
+#include "ta_roienc/ffmpeg_log.h"
+#include "ta_roienc/input_format.h"
+#include "ta_roienc/packet.h"
+#include "ta_roienc/ta_roienc.h"
+#include "ta_roienc/timestamp.h"
 
 #include <cstddef>
 #include <memory>
@@ -29,21 +29,21 @@ namespace {
 // of the surface that would be impossible if Frame carried a void* to an AVFrame: there
 // would be nothing to implement, only a pointer to produce, and producing it would need
 // FFmpeg. That it compiles here is the whole claim.
-class CallerOwnedBuffer final : public sve::IFrameBuffer {
+class CallerOwnedBuffer final : public ta_roienc::IFrameBuffer {
 public:
-    sve::MemoryType memory() const override { return sve::MemoryType::CPU; }
+    ta_roienc::MemoryType memory() const override { return ta_roienc::MemoryType::CPU; }
     int32_t width() const override { return 64; }
     int32_t height() const override { return 64; }
-    sve::PixelFormat format() const override
+    ta_roienc::PixelFormat format() const override
     {
-        return sve::PixelFormat::GRAY8;
+        return ta_roienc::PixelFormat::GRAY8;
     }
-    sve::PlaneView plane(int32_t index) override
+    ta_roienc::PlaneView plane(int32_t index) override
     {
         if (index != 0) {
             return {};
         }
-        return sve::PlaneView{std::span<uint8_t>(m_pixels, sizeof(m_pixels)), 64};
+        return ta_roienc::PlaneView{std::span<uint8_t>(m_pixels, sizeof(m_pixels)), 64};
     }
 
 private:
@@ -54,114 +54,101 @@ private:
 // whatever its header includes.
 [[maybe_unused]] void the_public_vocabulary_is_self_contained()
 {
-    sve::Settings settings;
-    sve::SessionParams params;
-    sve::Report report;
-    sve::StreamInfo info;
-    sve::EncodedPacket packet;
-    sve::Rect rect;
-    sve::Box box;
-    sve::Mask mask;
-    sve::Rational rational;
+    ta_roienc::Settings settings;
+    ta_roienc::SessionParams params;
+    ta_roienc::Report report;
+    ta_roienc::StreamInfo info;
+    ta_roienc::EncodedPacket packet;
+    ta_roienc::Rect rect;
+    ta_roienc::Box box;
+    ta_roienc::Mask mask;
+    ta_roienc::Rational rational;
 
-    // §8.3, §8.6 and §8.7. These three are named here rather than only in frame_test
-    // because the claim being made is not that they work -- it is that they compile with
-    // no FFmpeg anywhere. frame.h is deliberately absent: it is the one public header that
-    // does name an AVFrame, and it is not reachable from sve.h.
-    sve::InputVideoFormat input_format;
-    sve::MediaTimestamp timestamp;
-    sve::PacketBuffer payload;
+    // Input format, packet and timestamp. Named here rather than only in frame_test because
+    // the claim being made is not that they work -- it is that they compile with no FFmpeg
+    // anywhere. frame.h is deliberately absent: it is the one public header that
+    // does name an AVFrame, and it is not reachable from ta_roienc.h.
+    ta_roienc::InputVideoFormat input_format;
+    ta_roienc::MediaTimestamp timestamp;
+    ta_roienc::PacketBuffer payload;
     (void)input_format.valid();
     (void)timestamp.valid();
     (void)payload.empty();
 
-    // §8.5 and §8.8, and this is the claim 4.1 added. Submitting a frame and receiving
-    // packets through a callback used to need frame.h, because Frame was a wrapper around
-    // an AVFrame -- so the two entry points a caller actually uses were exactly the two
-    // that dragged FFmpeg in. Frame is a handle to an IFrameBuffer now, which an embedder
-    // implements with include/ and nothing else, and this compiles to prove it.
+    // Submitting a frame and receiving packets: Frame is a handle to an IFrameBuffer, which
+    // an embedder implements with include/ and nothing else, and this compiles to prove it.
     auto owned = std::make_shared<CallerOwnedBuffer>();
-    sve::Frame frame(owned);
-    sve::TimedFrame timed{frame, sve::FrameMetadata{}};
+    ta_roienc::Frame frame(owned);
+    ta_roienc::TimedFrame timed{frame, ta_roienc::FrameMetadata{}};
     (void)static_cast<bool>(frame);
     (void)frame.buffer().width();
     (void)timed.metadata.force_key_frame;
 
-    const sve::EncoderCallback on_event = [](sve::EncoderEvent) {};
-    (void)on_event;
-    (void)sve::EncoderEventType::EndOfStream;
+    // The backend contract, opaque session and all.
+    ta_roienc::BackendConfig config;
+    ta_roienc::BackendFrameControl control;
+    ta_roienc::EncoderCapabilities caps;
+    const ta_roienc::Status status = ta_roienc::Status::Ok();
+    const ta_roienc::BackendSelection selection;
+    const std::vector<ta_roienc::BackendRef> backend =
+        ta_roienc::resolve_backends(ta_roienc::Backend::X264, selection, ta_roienc::Codec::H264);
 
-    // §7: the backend contract, opaque session and all.
-    sve::BackendConfig config;
-    sve::BackendFrameControl control;
-    sve::EncoderCapabilities caps;
-    const sve::Status status = sve::Status::Ok();
-    const sve::BackendSelection selection;
-    const std::vector<sve::BackendRef> backend =
-        sve::resolve_backends(sve::Backend::X264, selection, sve::Codec::H264);
-
-    // §22 and §29: the policy and the log sink are part of the public vocabulary, and
+    // Fallback policy and the log sink: both are part of the public vocabulary, and
     // neither drags FFmpeg in with it.
-    sve::Settings with_policy;
-    with_policy.fallback = sve::FallbackPolicy::Strict;
-    const sve::LogSink sink = [](sve::LogLevel, std::string_view) {};
-    (void)sve::fallback_policy_name(with_policy.fallback);
-    (void)sve::log_level_name(sve::LogLevel::Warning);
-    (void)sve::log_level_name(sve::LogLevel::Trace);
+    ta_roienc::Settings with_policy;
+    with_policy.fallback = ta_roienc::FallbackPolicy::Strict;
+    const ta_roienc::LogSink sink = [](ta_roienc::LogLevel, std::string_view) {};
+    (void)ta_roienc::fallback_policy_name(with_policy.fallback);
+    (void)ta_roienc::log_level_name(ta_roienc::LogLevel::Warning);
+    (void)ta_roienc::log_level_name(ta_roienc::LogLevel::Trace);
     (void)sink;
 
-    // §29's FFmpeg routing, and it is here for the reason the whole file exists. The header
-    // is about FFmpeg and deliberately names no FFmpeg type, so that an embedder without
-    // FFmpeg on the include path can still compile against the public surface. Reached from
-    // neither sve.h nor the includes above until 2026-09-02, that claim was made in a commit
-    // message and checked nowhere -- only public_headers_selfcontained compiled it, and it
-    // does so with ${FFMPEG_INCLUDE_DIRS} on the path, which proves the opposite of what was
-    // wanted. Naming the function is what puts it under this target.
+    // The FFmpeg log routing. The header is about FFmpeg and deliberately names no FFmpeg
+    // type, so that an embedder without FFmpeg on the include path can still compile
+    // against the public surface. public_headers_selfcontained compiles it with
+    // ${FFMPEG_INCLUDE_DIRS} on the path, which proves the opposite of what is wanted;
+    // naming the function here is what puts it under this target.
     //
     // Declared, never called: this object library is never linked, and the definition lives
     // in the FFmpeg interop component that an isolated build does not have.
-    const auto route = &sve::SetFFmpegLogSink;
+    const auto route = &ta_roienc::SetFFmpegLogSink;
     (void)route;
     (void)selection.allow_unlisted;
 
-    // §8 and §10: memory types, objects, policies.
-    const sve::MemoryType memory = sve::MemoryType::ONEVPL;
-    sve::Object object;
-    sve::QualityPolicy policy = sve::QualityPolicy::OBJECT_FIRST;
+    // Memory types and objects.
+    const ta_roienc::MemoryType memory = ta_roienc::MemoryType::ONEVPL;
+    ta_roienc::Object object;
 
     CallerOwnedBuffer caller_buffer;
     caller_buffer.commit();
 
     // Planes the caller already has, without writing a class for them.
     uint8_t pixels[16 * 16] = {};
-    const sve::PlaneBuffer::Plane described[4] = {
+    const ta_roienc::PlaneBuffer::Plane described[4] = {
         {std::span<uint8_t>(pixels, sizeof(pixels)), 16}, {}, {}, {}};
-    sve::PlaneBuffer plain(16, 16, sve::PixelFormat::GRAY8,
-        std::span<const sve::PlaneBuffer::Plane>(described, 4));
+    ta_roienc::PlaneBuffer plain(16, 16, ta_roienc::PixelFormat::GRAY8,
+        std::span<const ta_roienc::PlaneBuffer::Plane>(described, 4));
     // A row past the end comes back empty rather than pointing somewhere.
     (void)plain.plane(0).row(999).size();
-    (void)sve::pixel_format_name(sve::PixelFormat::NV12);
+    (void)ta_roienc::pixel_format_name(ta_roienc::PixelFormat::NV12);
 
-    // §8.10, and the reason it moved out of sve/frame.h: wrapping planes the caller owns
-    // is an operation on plain memory, and it now compiles in a translation unit that has
-    // never seen libavutil. Before this, reaching WrapRawFrame meant including the one
-    // public header that names an AVFrame -- so the FFmpeg-free API had an FFmpeg-only
-    // door in it.
+    // Wrapping planes the caller owns is an operation on plain memory, and it compiles in a
+    // translation unit that has never seen libavutil.
     //
     // Nothing below runs: this target is an OBJECT library that is never linked, and
-    // building it is passing it. What it proves is exactly one thing -- that §8.10 can be
-    // spelled without FFmpeg on the include path. The owner contract and the no-copy
-    // guarantee are behaviour, and frame_test is what checks them.
+    // building it is passing it. What it proves is exactly one thing -- that the raw-plane
+    // API can be spelled without FFmpeg on the include path. The owner contract and the
+    // no-copy guarantee are behaviour, and frame_test is what checks them.
     auto owner = std::make_shared<std::vector<uint8_t>>(16 * 16, 0);
-    sve::RawFrameView view;
+    ta_roienc::RawFrameView view;
     view.format.width = 16;
     view.format.height = 16;
-    view.format.pixel_format = sve::PixelFormat::GRAY8;
-    view.planes[0] = sve::RawFramePlane{owner->data(), 16, owner->size()};
+    view.format.pixel_format = ta_roienc::PixelFormat::GRAY8;
+    view.planes[0] = ta_roienc::RawFramePlane{owner->data(), 16, owner->size()};
     view.plane_count = 1;
     view.owner = owner;
-    sve::Frame wrapped;
-    const sve::Status wrap_status = sve::WrapRawFrame(view, &wrapped);
+    ta_roienc::Frame wrapped;
+    const ta_roienc::Status wrap_status = ta_roienc::WrapRawFrame(view, &wrapped);
     (void)wrap_status; (void)wrapped;
 
     (void)settings; (void)params; (void)report; (void)info; (void)packet;
@@ -170,18 +157,18 @@ private:
     (void)control; (void)caps; (void)status; (void)backend; (void)memory;
 
     // The owning types are named, and the caller never writes a delete.
-    sve::FrameBufferPtr owned_buffer;
-    sve::SessionPtr owned_session;
+    ta_roienc::FrameBufferPtr owned_buffer;
+    ta_roienc::SessionPtr owned_session;
 
     // And unique ownership is not a ceiling. A caller who needs a frame in a map, or alive
     // across threads, converts -- the deleter travels with it, so the library still frees
     // it with the allocator that made it. This compiles, which is the point: returning
     // unique_ptr from the factory leaves that choice open, and returning shared_ptr would
     // have charged every caller an atomic refcount for a choice most of them never make.
-    std::shared_ptr<sve::IFrameBuffer> shared_buffer = std::move(owned_buffer);
+    std::shared_ptr<ta_roienc::IFrameBuffer> shared_buffer = std::move(owned_buffer);
     (void)shared_buffer; (void)owned_session;
 
-    (void)object; (void)policy; (void)caller_buffer;
+    (void)object; (void)caller_buffer;
 }
 
 } // namespace

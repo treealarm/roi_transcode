@@ -1,25 +1,8 @@
 {
-  // Editor tasks for the things this repository is actually driven by. Not a substitute
-  // for the scripts -- every task below runs one of them, so what the editor does and what
-  // a terminal does cannot drift apart.
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "bench: serve (ROI quality, browser)",
-      "detail": "Local bench at http://127.0.0.1:8765 -- original beside ROI-encoded, the knobs, the difference view. Needs integration/ built.",
-      "type": "shell",
-      "command": "python3",
-      "args": ["integration/bench/serve.py"],
-      "options": {
-        "cwd": "${workspaceFolder}",
-        "env": { "BUILD": "${workspaceFolder}/build/integration" }
-      },
-      "isBackground": true,
-      "problemMatcher": [],
-      "presentation": { "reveal": "always", "panel": "dedicated" }
-    },
-    {
-      "label": "build (library + integration)",
+      "label": "build",
       "type": "shell",
       "command": "cmake",
       "args": ["--build", "build", "-j", "${env:NPROC}"],
@@ -46,68 +29,6 @@
       "args": ["--test-dir", "build", "--output-on-failure"],
       "options": { "cwd": "${workspaceFolder}" },
       "group": { "kind": "test", "isDefault": true },
-      "problemMatcher": []
-    },
-    {
-      "label": "acceptance (check.sh)",
-      "detail": "The full run. Read the step count, not just the last line -- CLAUDE.md explains why.",
-      "type": "shell",
-      "command": "./integration/scripts/check.sh",
-      "options": {
-        "cwd": "${workspaceFolder}",
-        "env": {
-          "BUILD": "${workspaceFolder}/build/integration",
-          "LIBBUILD": "${workspaceFolder}/build"
-        }
-      },
-      "problemMatcher": []
-    },
-    {
-      "label": "dependency scan (§26.4, §44)",
-      "detail": "Configures a shared build, installs it, and reads what each object links. Costs a Release build from scratch.",
-      "type": "shell",
-      "command": "./integration/scripts/dependency-scan.sh",
-      "options": {
-        "cwd": "${workspaceFolder}",
-        "env": { "VCPKG_ROOT": "/mnt/wdblue/vcpkg" }
-      },
-      "problemMatcher": []
-    },
-    {
-      "label": "build python extension (Debug)",
-      "detail": "Configures build-python-debug and builds the extension with symbols, so breakpoints in the bindings actually bind. Its own directory because a Python extension is a shared object and the libavcodec-backed components cannot go into one here -- see python/CMakeLists.txt.",
-      "type": "shell",
-      "command": "cmake",
-      "args": [
-        "-S", ".", "-B", "build-python-debug", "-G", "Ninja",
-        "-DCMAKE_TOOLCHAIN_FILE=${env:VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-        "-DVCPKG_MANIFEST_MODE=OFF", "-DCMAKE_BUILD_TYPE=Debug",
-        "-DSVE_BUILD_PYTHON=ON", "-DSVE_BUILD_TESTS=OFF", "-DSVE_BUILD_TOOLS=OFF",
-        "-DSVE_BUILD_INTEGRATION=OFF", "-DSVE_BUILD_BACKEND_FFMPEG=OFF",
-        "-DSVE_BUILD_EXAMPLES=OFF",
-        "&&", "cmake", "--build", "build-python-debug", "-j", "8"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}",
-        "env": { "VCPKG_ROOT": "/mnt/wdblue/vcpkg" },
-        "shell": { "executable": "/bin/bash", "args": ["-c"] }
-      },
-      "problemMatcher": ["$gcc"]
-    },
-    {
-      "label": "stop services",
-      "detail": "Stops whatever this repository started -- the bench, and anything else holding one of its ports. Kills by listening port, never by process name: pkill matches whole command lines and would kill the shell running it.",
-      "type": "shell",
-      "command": "./integration/scripts/stop-services.sh",
-      "options": { "cwd": "${workspaceFolder}" },
-      "problemMatcher": [],
-      "presentation": { "reveal": "silent", "panel": "shared", "close": true }
-    },
-    {
-      "label": "capabilities (§23)",
-      "type": "shell",
-      "command": "./build/sve-capabilities",
-      "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
     }
   ]

@@ -1,11 +1,11 @@
-// Outer bitrate controller for §15. Pure arithmetic -- no codec.
+// Outer bitrate controller. Pure arithmetic -- no codec.
 
 #include "bitrate_budget.h"
 
 #include <algorithm>
 #include <cmath>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -19,7 +19,7 @@ constexpr double kMaxLevel = kMaxBackgroundExtra + kMaxRoiSoften;
 constexpr double kMinSeconds = 0.5;
 /// How far back the average looks. A lifetime average never recovers from a hot start.
 constexpr double kAvgWindowSec = 2.0;
-/// Peak window -- aligned with §16's 1 s rolling check.
+/// Peak window -- the 1 s rolling peak.
 constexpr double kPeakWindowSec = 1.0;
 constexpr double kAvgStepSec = 0.25;
 constexpr double kPeakStepSec = 0.10;
@@ -36,7 +36,7 @@ constexpr double kQpPerDoubling = 6.0;
 /// correction applied there buys less than the same correction applied to the whole frame.
 /// Half is deliberately an underestimate: a gain that is too low converges slowly, a gain
 /// that is too high oscillates, and only one of those is a product defect. Measured on a
-/// 36 s crowd scene at 2 Mbps -- see docs/STATUS.md, срез Z13.
+/// 36 s crowd scene at 2 Mbps.
 constexpr double kActuatorShare = 0.5;
 /// The most one correction may move the level, in quantiser steps. Bounded authority is
 /// what separates a controller from a switch: without it a large miss commands the whole
@@ -73,7 +73,7 @@ BitrateBudget::BitrateBudget(const RateControlPolicy& policy)
     m_avg_overshoot = policy.max_average_overshoot > 0.0f
         ? policy.max_average_overshoot
         : kDefaultAverageOvershoot;
-    // v3 acceptance: 1 s rolling peak ≤ 120% of target → default overshoot 0.2.
+    // 1 s rolling peak ≤ 120% of target → default overshoot 0.2.
     m_peak_overshoot = policy.max_peak_overshoot > 0.0f
         ? policy.max_peak_overshoot
         : kDefaultPeakOvershoot;
@@ -113,8 +113,8 @@ void BitrateBudget::move_level(double quantiser_steps, double bound)
     m_level = std::clamp(m_level + bounded, 0.0, kMaxLevel);
 
     // Background first, ROI only once the background has nothing left to give. That order
-    // is the object-first promise of §11 and it is why the two knobs are one line and not
-    // two loops.
+    // is the object-first promise and it is why the two knobs are one line and not two
+    // loops.
     m_background_extra = static_cast<int32_t>(std::lround(std::min(
         m_level, static_cast<double>(kMaxBackgroundExtra))));
     m_roi_soften = static_cast<int32_t>(std::lround(std::max(
@@ -166,9 +166,9 @@ void BitrateBudget::observe(int64_t packet_bytes, double duration_sec)
         // the bits are already in the file, and carrying the remainder turns a transient
         // into a permanent penalty. Measured on a 36 s clip at a 300 kbps target: two
         // opening seconds of burst left a debt the loop was still repaying at the end, so
-        // it sat at its ceiling for the whole encode and delivered 48% of the target --
-        // §15 asks for the overshoot back within recovery_window_ms, not for the rest of
-        // the stream to pay for it.
+        // it sat at its ceiling for the whole encode and delivered 48% of the target. The
+        // overshoot is to be given back within recovery_window_ms, not paid for by the rest
+        // of the stream.
         m_debt_bits = std::min(m_debt_bits,
             target * m_recovery_sec * (1.0 - kMinEffectiveTargetFraction));
     }
@@ -212,15 +212,14 @@ void BitrateBudget::recompute()
     }
 
     // Outside it, the correction is proportional to how far outside -- and it aims at the
-    // target itself, not at the edge of the band. Aiming at the edge is what left the old
-    // ladder sitting at 109% of target while §16 asks for 105%: an edge it has reached is
-    // an edge it stops correcting from.
+    // target itself, not at the edge of the band: an edge the loop has reached is an edge
+    // it stops correcting from.
     //
     // An outstanding debt lowers the aim, so that the overshoot is given back over
-    // `recovery_window_ms` rather than merely stopped. Continuous, and floored: the version
-    // before 2026-09-02 turned the debt into a separate escalation rule, which a bursty
-    // stream re-armed every GOP -- the ladder then sat at its ceiling with the stream
-    // underneath producing nothing.
+    // `recovery_window_ms` rather than merely stopped. Continuous, and floored: a debt
+    // turned into a separate escalation rule would be re-armed every GOP by a bursty
+    // stream, and the loop would sit at its ceiling with the stream underneath producing
+    // nothing.
     double aim = target;
     if (m_debt_bits > 0.0 && m_recovery_sec > 0.0) {
         aim = std::max(target * kMinEffectiveTargetFraction,
@@ -228,7 +227,7 @@ void BitrateBudget::recompute()
     }
     move_level(correction_for(avg_bps, aim), kMaxStepPerTick);
 
-    // §50: the loop has spent its whole range and the stream is still over the band. Held
+    // The loop has spent its whole range and the stream is still over the band. Held
     // for a while before it is reported, and never taken back: what the caller needs to
     // know is that it happened during this encode, not whether it is happening right now.
     // Time spent with nothing left to give, added up rather than required to be
@@ -272,4 +271,4 @@ void BitrateBudget::soften_detections(std::vector<Detection>& detections) const
     }
 }
 
-} // namespace sve
+} // namespace ta_roienc

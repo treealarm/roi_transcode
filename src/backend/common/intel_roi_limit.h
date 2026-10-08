@@ -15,8 +15,8 @@
 //   * VA-API: libavcodec queries VAConfigAttribEncROI and trims the list itself, so nothing
 //     crashes -- the regions past the limit are simply dropped, silently, somewhere our
 //     regions_dropped counter cannot see them. Declaring the real number here moves that
-//     truncation back to our side, where it is counted and reported (TZ v3.4 §50 forbids a
-//     silent fallback, and a region quietly discarded by a dependency is one).
+//     truncation back to our side, where it is counted and reported: a region quietly
+//     discarded by a dependency is a silent fallback.
 //   * oneVPL: libmfx-gen forwards every region as given. iHD overruns its array and the
 //     process dies inside vaEndPicture on __stack_chk_fail -- no bad frame, no error
 //     status, in a thread belonging to the runtime rather than to us.
@@ -26,11 +26,11 @@
 // Four and eight are also the VDEnc AVC and HEVC region counts in the driver, so the
 // boundary is the driver's own and not a property of that clip.
 
-#include "sve/types.h"
+#include "ta_roienc/types.h"
 
 #include <cstdint>
 
-namespace sve {
+namespace ta_roienc {
 
 /// Regions the iHD driver accepts for `codec`. Requests above it are truncated
 /// strongest-first by the caller and counted.
@@ -39,4 +39,4 @@ constexpr uint32_t intel_max_roi_regions(Codec codec)
     return codec == Codec::H264 ? 4 : 8;
 }
 
-} // namespace sve
+} // namespace ta_roienc

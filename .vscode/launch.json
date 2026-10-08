@@ -1,11 +1,4 @@
 {
-  // Debugging and running, for the three things this repository is: a C++ library, a CLI
-  // that drives it, and a Python binding over it.
-  //
-  // The bench is a debug session rather than a background task on purpose. A task keeps
-  // running after the stop button, and a server nobody remembers starting is a port
-  // conflict the next day; as a session, stop kills it. "Stop services" cleans up whatever
-  // survived anyway, and every bench configuration runs it on exit.
   "version": "0.2.0",
   "inputs": [
     {
@@ -14,65 +7,14 @@
       "description": "Which unit test to debug",
       "default": "encoder_test",
       "options": [
-        "encoder_test", "frame_test", "push_encoder_test", "backend_conformance_test",
+        "encoder_test", "decoder_test", "frame_test", "backend_conformance_test",
         "ten_bit_test", "public_api_test", "sei_payload_test", "cbor_test",
         "object_normalizer_test", "object_geometry_test", "geometry_test",
-        "importance_test", "temporal_roi_test", "bitrate_budget_test", "v3_policy_test"
+        "importance_test", "temporal_roi_test", "bitrate_budget_test", "region_policy_test"
       ]
-    },
-    {
-      "id": "clipPath",
-      "type": "promptString",
-      "description": "Input clip",
-      "default": "testdata/synth.mp4"
     }
   ],
   "configurations": [
-    {
-      "name": "Bench: serve and open browser",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/integration/bench/serve.py",
-      "cwd": "${workspaceFolder}",
-      "env": {
-        "BUILD": "${workspaceFolder}/build/integration",
-        // Unbuffered, or the startup line sits in a pipe buffer and the pattern below has
-        // nothing to match until the server is stopped.
-        "PYTHONUNBUFFERED": "1"
-      },
-      // internalConsole, not integratedTerminal: serverReadyAction watches what comes
-      // through the debug adapter, and the terminal bypasses it. With the terminal the
-      // browser never opens and nothing says why.
-      "console": "internalConsole",
-      "justMyCode": true,
-      // The bench prints its URL on startup; this waits for that line and opens it, so
-      // the frontend appears without anyone copying a port number.
-      "serverReadyAction": {
-        "pattern": "bench on (https?://\\S+)",
-        "uriFormat": "%s",
-        "action": "openExternally"
-      },
-      "postDebugTask": "stop services"
-    },
-    {
-      "name": "C++: roi-transcode (gdb)",
-      "type": "cppdbg",
-      "request": "launch",
-      "program": "${workspaceFolder}/build/integration/roi-transcode",
-      "args": [
-        "--in", "${input:clipPath}",
-        "--roi", "${workspaceFolder}/testdata/roi.json",
-        "--out", "${workspaceFolder}/build/debug-out.mp4",
-        "--encoder", "x264direct", "--codec", "h264", "--crf", "28", "--gop", "15"
-      ],
-      "cwd": "${workspaceFolder}",
-      "MIMode": "gdb",
-      "setupCommands": [
-        { "description": "readable containers", "text": "-enable-pretty-printing",
-          "ignoreFailures": true }
-      ],
-      "preLaunchTask": "build (library + integration)"
-    },
     {
       "name": "C++: unit test (gdb)",
       "type": "cppdbg",
@@ -85,61 +27,7 @@
         { "description": "readable containers", "text": "-enable-pretty-printing",
           "ignoreFailures": true }
       ],
-      "preLaunchTask": "build (library + integration)"
-    },
-    {
-      "name": "C++: sve-capabilities (gdb)",
-      "type": "cppdbg",
-      "request": "launch",
-      "program": "${workspaceFolder}/build/sve-capabilities",
-      "args": ["--json"],
-      "cwd": "${workspaceFolder}",
-      "MIMode": "gdb",
-      "preLaunchTask": "build (library + integration)"
-    },
-    {
-      "name": "Python: pytest (bindings)",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "pytest",
-      "args": ["tests/", "-q"],
-      "cwd": "${workspaceFolder}/python",
-      "console": "integratedTerminal",
-      "justMyCode": false,
-      "preLaunchTask": "build python extension (Debug)"
-    },
-    {
-      "name": "Python: ROI example",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/python/examples/encode_with_roi.py",
-      "cwd": "${workspaceFolder}/python",
-      "env": { "PYTHONPATH": "${workspaceFolder}/python" },
-      "console": "integratedTerminal",
-      "preLaunchTask": "build python extension (Debug)"
-    },
-    {
-      "name": "Native: pytest under gdb (C++ breakpoints)",
-      // gdb on the interpreter, so breakpoints inside the bindings and the C++ core bind.
-      // The Python-level debugger cannot do that -- it stops at the call into the
-      // extension -- and stepping from Python into SubmitFrame is exactly where a binding
-      // bug hides.
-      "type": "cppdbg",
-      "request": "launch",
-      "program": "/usr/bin/python3",
-      "args": ["-m", "pytest", "tests/", "-q", "-x"],
-      "cwd": "${workspaceFolder}/python",
-      "environment": [
-        { "name": "PYTHONPATH", "value": "${workspaceFolder}/python" }
-      ],
-      "MIMode": "gdb",
-      "setupCommands": [
-        { "description": "readable containers", "text": "-enable-pretty-printing",
-          "ignoreFailures": true },
-        { "description": "do not stop on the SIGs CPython uses normally",
-          "text": "handle SIGPIPE nostop noprint pass", "ignoreFailures": true }
-      ],
-      "preLaunchTask": "build python extension (Debug)"
+      "preLaunchTask": "build"
     }
   ]
 }

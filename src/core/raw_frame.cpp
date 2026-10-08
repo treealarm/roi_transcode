@@ -1,4 +1,4 @@
-#include "sve/raw_frame.h"
+#include "ta_roienc/raw_frame.h"
 
 #include "owned_plane_buffer.h"
 
@@ -7,7 +7,7 @@
 #include <format>
 #include <memory>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -99,4 +99,4 @@ Status WrapRawFrame(const RawFrameView& view, Frame* output)
     return Status::Ok();
 }
 
-} // namespace sve
+} // namespace ta_roienc

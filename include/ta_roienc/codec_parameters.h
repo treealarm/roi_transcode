@@ -1,0 +1,28 @@
+#pragma once
+
+// What a decoder needs before the first packet.
+//
+// Asked for separately from the packet stream, because the two have different lifetimes: a
+// muxer needs this once to declare its stream, while packets arrive for as long as the
+// encode runs. It exists so that the file path never has to be handed an AVCodecContext --
+// handing one over is the FFmpeg leak the public headers exist to avoid.
+
+#include "ta_roienc/packet.h"
+#include "ta_roienc/types.h"
+
+#include <cstdint>
+
+namespace ta_roienc {
+
+struct CodecParameters {
+    Codec codec = Codec::H265;
+    /// Backend-specific codec configuration -- SPS/PPS/VPS for the codecs here. Empty until
+    /// the encoder has opened, and stable afterwards unless a reconfigure replaces it.
+    PacketBuffer extradata;
+    /// Units of every timestamp on the packets that follow.
+    Rational time_base{1, 90000};
+    int32_t width = 0;
+    int32_t height = 0;
+};
+
+} // namespace ta_roienc

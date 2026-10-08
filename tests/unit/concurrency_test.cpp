@@ -1,9 +1,8 @@
 // What holds when this library is used from several threads at once.
 //
-// There is no worker thread here and no mutex: §Р6 keeps the facade thin and §Р7 makes the
-// backends stateless immortal singletons, so concurrency in this library is entirely the
-// caller's. That is a claim, and until 2026-09-01 it was only a claim -- nothing anywhere
-// ran two encoders at the same time. This file is what turns it into something checked.
+// There is no worker thread here and no mutex: the facade is thin and the backends are
+// stateless immortal singletons, so concurrency in this library is entirely the caller's.
+// This file is what turns that claim into something checked.
 //
 // Three properties, and they are the ones a caller actually relies on:
 //
@@ -16,18 +15,18 @@
 //   3. Capabilities answer the same thing to everyone.
 //
 // What this file deliberately does NOT test: one encoder driven from two threads. That is
-// not supported -- SmartVideoEncoder holds plain, unguarded state -- and a test that did it
+// not supported -- VideoEncoder holds plain, unguarded state -- and a test that did it
 // would be testing undefined behaviour, which passes and proves nothing. It is written down
 // in the header instead.
 //
 // A green run is weaker evidence than it looks: a data race can stay invisible for a
-// thousand runs. Under ThreadSanitizer it is not -- integration/scripts/tsan-check.sh
-// builds exactly this test with -fsanitize=thread and runs it, which is where the teeth are.
+// thousand runs. Build this test with -fsanitize=thread and run it under ThreadSanitizer
+// for teeth.
 
-#include "sve/backend_registry.h"
-#include "sve/encoder.h"
-#include "sve/encoder_backend.h"
-#include "sve/raw_frame.h"
+#include "ta_roienc/backend_registry.h"
+#include "ta_roienc/encoder.h"
+#include "ta_roienc/encoder_backend.h"
+#include "ta_roienc/raw_frame.h"
 
 #include <atomic>
 #include <cstdio>
@@ -37,7 +36,7 @@
 #include <thread>
 #include <vector>
 
-using namespace sve;
+using namespace ta_roienc;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \
@@ -152,7 +151,7 @@ struct Digest {
 Digest encode_once()
 {
     Digest digest;
-    const std::unique_ptr<SmartVideoEncoder> enc = CreateVideoEncoder(config_for());
+    const std::unique_ptr<VideoEncoder> enc = CreateVideoEncoder(config_for());
 
     const auto drain = [&] {
         for (;;) {
@@ -234,8 +233,8 @@ void the_shared_registry_survives_being_reached_first_by_everyone()
     }
     CHECK(!seen.front().empty());
     for (const std::vector<Backend>& kinds : seen) {
-        // Same set and same order: registration order is what §23 reports and what
-        // allow_unlisted walks, so a registry filled twice would be visible here.
+        // Same set and same order: registration order is what allow_unlisted walks, so a
+        // registry filled twice would be visible here.
         CHECK(kinds == seen.front());
     }
 }

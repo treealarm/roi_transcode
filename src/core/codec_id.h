@@ -7,13 +7,13 @@
 // the file path resolving Codec::SameAsSource -- and a fourth copy is how the day comes
 // when one of them learns about AV1 and the others do not.
 
-#include "sve/types.h"
+#include "ta_roienc/types.h"
 
 extern "C" {
 #include <libavcodec/codec_id.h>
 }
 
-namespace sve {
+namespace ta_roienc {
 
 /// Anything that is not HEVC becomes H.264. That is the SameAsSource rule (types.h) and it
 /// is also right for an encoder context, where the id can only be one of the two.
@@ -29,4 +29,4 @@ constexpr AVCodecID av_id_from_codec(Codec codec)
     return codec == Codec::H264 ? AV_CODEC_ID_H264 : AV_CODEC_ID_HEVC;
 }
 
-} // namespace sve
+} // namespace ta_roienc

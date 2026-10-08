@@ -12,7 +12,7 @@ extern "C" {
 #include <libavutil/opt.h>
 }
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -68,4 +68,4 @@ const IEncoderBackend& vaapi_backend()
     return instance;
 }
 
-} // namespace sve
+} // namespace ta_roienc

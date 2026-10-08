@@ -1,38 +1,38 @@
 #pragma once
 
-// Keeping a region alive across a detector miss -- TZ v2.0 §13.
+// Keeping a region alive across a detector miss.
 //
-// The case the specification describes: an object is found on one sample, missed on the
-// next, found again on the one after. Without something here the region blinks out and the
-// encoder spends those frames treating the object as background.
+// An object is found on one sample, missed on the next, found again on the one after.
+// Without something here the region blinks out and the encoder spends those frames treating
+// the object as background.
 //
-// What this replaces is Quality::hold_sec, a symmetric window around every sample. That
-// window is blind in three ways at once, and all three are measurable on a real archive:
+// A symmetric hold window around every sample is blind in three ways at once, and all three
+// are measurable on a real archive:
 //
 //   * It cannot tell a gap from an ending. The last box of an object that has walked out of
 //     frame is extended exactly as eagerly as one in the middle of a track.
-//   * One window cannot serve two sample rates. Measured here, a camera's own ONVIF boxes
-//     arrive every 0.2s and the detector's every 1.0s; at hold_sec 0.5 the first gets five
-//     overlapping copies of every object -- spending a region budget of 32 on six objects --
-//     while the second still leaves a one-second hole whenever the detector blinks.
+//   * One window cannot serve two sample rates. A camera's own ONVIF boxes arrive every
+//     0.2s and the detector's every 1.0s; at a 0.5s hold the first gets five overlapping
+//     copies of every object -- spending a region budget of 32 on six objects -- while the
+//     second still leaves a one-second hole whenever the detector blinks.
 //   * It holds the object at the position it was last seen, so a moving one drifts out of
 //     its own rectangle.
 //
 // A track answers all three, and in an archive it answers them exactly. Both ends of a gap
 // are already known, so the position between them is interpolated rather than predicted --
 // no motion model, no guessing, and the result is where the object actually was. Prediction
-// (§13 use_track_prediction) applies only past the last sample (or before the first), within
+// (use_track_prediction) applies only past the last sample (or before the first), within
 // max_missing_frames patience -- that is the live-shaped case an archive still hits at the
 // ends of a track.
 
-#include "sve/policy.h"
-#include "sve/types.h"
+#include "ta_roienc/policy.h"
+#include "ta_roienc/types.h"
 
 #include <cstdint>
 #include <span>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 class TemporalRoi {
 public:
@@ -68,4 +68,4 @@ private:
     double m_fallback_hold_sec;
 };
 
-} // namespace sve
+} // namespace ta_roienc

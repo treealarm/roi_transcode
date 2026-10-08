@@ -1,12 +1,12 @@
-// libx264 through its own API -- TZ v4.1 §5.4.
+// libx264 through its own API.
 //
-// The first backend here that does not go through libavcodec. What that buys is not speed
-// and not independence for its own sake; it is the one thing this library exists to do.
+// A backend that does not go through libavcodec. What that buys is not speed and not
+// independence for its own sake; it is the one thing this library exists to do.
 //
-// Today's software path hands regions to libavcodec as AV_FRAME_DATA_REGIONS_OF_INTEREST,
-// whose qoffset is documented as a *fraction of the quantiser range*, interpolated
-// "in some codec-dependent way". So a qp_delta of -10 leaves here as -10/51 of a range and
-// libavcodec decides what that means. libx264's own control is quant_offsets: one float per
+// Through libavcodec, regions travel as AV_FRAME_DATA_REGIONS_OF_INTEREST, whose qoffset
+// is documented as a *fraction of the quantiser range*, interpolated "in some
+// codec-dependent way". So a qp_delta of -10 leaves as -10/51 of a range and libavcodec
+// decides what that means. libx264's own control is quant_offsets: one float per
 // macroblock, "added on top of the decisions made by x264", in QP units. Our qp_delta is
 // already exactly that, so the direct path carries the number the policy computed instead
 // of a fraction standing in for it.
@@ -26,15 +26,12 @@
 // And the condition without which none of it does anything: "Adaptive quantization must be
 // enabled to use this feature." aq_mode is set here for that reason and no other.
 
-// The public interface and nothing else. This used to include backend_common.h, which
-// exists for the libavcodec backends and pulls libavcodec in behind it -- invisible while
-// everything was one target, and the first thing the §5.5 split refused to compile. All
-// this backend ever needed from it was BackendSession, which sve/encoder_backend.h
-// declares.
+// The public interface and nothing else: backend_common.h exists for the libavcodec
+// backends and pulls libavcodec in behind it. All this backend needs is BackendSession,
+// which ta_roienc/encoder_backend.h declares.
 #include "backend/common/rate_control.h"
-#include "sve/backend_plugin.h"
-#include "sve/backend_registry.h"
-#include "sve/encoder_backend.h"
+#include "ta_roienc/backend_registry.h"
+#include "ta_roienc/encoder_backend.h"
 #include "preset.h"
 
 #include <algorithm>
@@ -50,7 +47,7 @@ extern "C" {
 #include <x264.h>
 }
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -104,9 +101,9 @@ constexpr int mb_count(int pixels)
 
 /// Regions to one float per macroblock, in QP units.
 ///
-/// Strongest first, and the first region covering a macroblock wins: §11 resolves an
-/// overlap by index, and the normalizer has already ordered them. Anything no region covers
-/// keeps x264's own decision, which is what an offset of zero means.
+/// Strongest first, and the first region covering a macroblock wins: overlap is resolved by
+/// index, and the normalizer has already ordered them. Anything no region covers keeps
+/// x264's own decision, which is what an offset of zero means.
 ///
 /// Allocated with malloc because x264 frees it through the callback below, and a pointer
 /// that crossed from new[] to free() is undefined however well it happens to work.
@@ -177,10 +174,10 @@ public:
         // SEI goes in through x264_picture_t::extra_sei, which is a direct channel rather
         // than the udu_sei option the libavcodec path has to ask for.
         c.sei = true;
-        // ABR with VBV, which is what §16's rolling criterion actually needs and what the
-        // outer BitrateBudget loop of §15 cannot give: that loop can only raise the
-        // background quantiser, so it cannot hold a one-second window and cannot control
-        // the opening seconds at all (measured, see срез Q in docs/STATUS.md).
+        // ABR with VBV, which is what holding a rolling one-second bound needs and what the
+        // outer BitrateBudget loop cannot give: that loop can only raise the background
+        // quantiser, so it cannot hold a one-second window and cannot control the opening
+        // seconds at all.
         //
         // The offsets keep working underneath it, which is the reason this is possible here
         // and not on Intel: x264's quant_offsets are documented as "added on top of the
@@ -245,7 +242,7 @@ public:
         if (config.rate_control.target_bitrate > 0) {
             // ABR for the average, VBV for the peak. Without the VBV pair x264 hits the
             // average over the whole clip and is free to spend a burst anywhere inside it,
-            // which is exactly the rolling window §16 measures.
+            // which is exactly the rolling window that is measured.
             const VbvPlan vbv = vbv_plan_for(config.rate_control.target_bitrate);
             p.rc.i_rc_method = X264_RC_ABR;
             p.rc.i_bitrate = vbv.bitrate_kbps;
@@ -320,14 +317,13 @@ public:
         }
 
         if (!control.sei_unregistered.empty()) {
-            // §19: UUID || payload, as user-data-unregistered.
+            // UUID || payload, as user-data-unregistered.
             //
-            // Handed over, exactly like quant_offsets and for exactly the same reason. The
-            // first version of this borrowed the caller's span for the length of the call,
-            // on the assumption that x264 copies the payload into the bitstream during
-            // encode. It does not: with lookahead the SEI is written when the frame is
-            // finally coded, which is several calls later, and the crash lands in
-            // x264_sei_write during the drain -- far from the submit that caused it.
+            // Handed over, exactly like quant_offsets and for exactly the same reason. x264
+            // does not copy the payload into the bitstream during encode: with lookahead the
+            // SEI is written when the frame is finally coded, which is several calls later,
+            // and a borrowed span crashes in x264_sei_write during the drain -- far from the
+            // submit that caused it.
             //
             // The header's contract is exact: sei_free frees "each payload AND
             // x264_sei_payload_t", so both allocations are made with malloc and both are
@@ -368,10 +364,9 @@ public:
             out.codec = Codec::H264;
             // The unit s.pts is counted in, and the muxer has nothing else to go on:
             // EncodedPacket::time_base defaults to 1/1, so leaving it unset does not fail
-            // loudly -- it silently declares one tick per second. That is what both direct
-            // backends did until 2026-08-31, and a 25 fps clip muxed out as 300 seconds
-            // instead of 12. The libavcodec path has always set this (backend_common.cpp);
-            // packet_sink.h states the contract, that a packet carries its own time base.
+            // loudly -- it silently declares one tick per second, and a 25 fps clip muxes out
+            // as 300 seconds instead of 12. packet_sink.h states the contract, that a packet
+            // carries its own time base.
             out.time_base = Rational{static_cast<int32_t>(s.param.i_timebase_num),
                 static_cast<int32_t>(s.param.i_timebase_den)};
             return out;
@@ -404,7 +399,8 @@ public:
         return Status::Ok();
     }
 
-    /// §8.11, answered from x264's own headers rather than from a codec context.
+    /// The codec parameters, answered from x264's own headers rather than from a codec
+    /// context.
     ///
     /// x264_encoder_headers gives SPS and PPS as NALs; with b_annexb they arrive with start
     /// codes, which is what a caller feeding a decoder directly wants and what the muxer
@@ -442,7 +438,7 @@ public:
 
     /// Read back from the encoder rather than from the request, because x264 does not
     /// always take what it was handed: it forces adaptive quantisation on whenever
-    /// quant_offsets are in play, and a preset can move the lookahead. §38 pins what ran.
+    /// quant_offsets are in play, and a preset can move the lookahead.
     EffectiveSettings GetEffectiveSettings(const BackendSession& session) const override
     {
         const X264Session& s = static_cast<const X264Session&>(session);
@@ -456,7 +452,7 @@ public:
         out.lookahead_frames = p.rc.i_lookahead;
         out.spatial_aq = p.rc.i_aq_mode != X264_AQ_NONE;
         // mb-tree is x264's temporal adaptive quantisation: it spends bits where later
-        // frames will refer back, which is what §15.1 means by temporal_aq.
+        // frames will refer back, which is what temporal_aq reports.
         out.temporal_aq = p.rc.b_mb_tree != 0;
         return out;
     }
@@ -503,47 +499,12 @@ const IEncoderBackend& x264_direct_backend()
     return instance;
 }
 
-namespace {
-
-const IEncoderBackend* acquire_x264_backend() noexcept
-{
-    return &x264_direct_backend();
-}
-
-/// The one description of this component, in the sense §26.4 asks for: the static
-/// registration below registers it, and the dynamic build's sve_backend_plugin_v1()
-/// returns this same object.
-constexpr SveBackendPluginDescriptorV1 kDescriptor{
-    .abi_version = kBackendPluginAbiVersion,
-    .descriptor_size = sizeof(SveBackendPluginDescriptorV1),
-    .backend_id = static_cast<int32_t>(Backend::X264Direct),
-    .acquire = &acquire_x264_backend,
-};
-
-} // namespace
-
-/// §26.4's static registration for this component. Explicit, so the core never names it
-/// and a build without libx264 simply does not call this.
+/// Explicit registration, so the core never names this component and a build without it
+/// simply does not call this.
 Status RegisterX264Backend(BackendRegistry& registry) noexcept
 {
-    return registry.Register(kDescriptor);
+    return registry.Register(x264_direct_backend());
 }
 
-#ifdef SVE_BACKEND_AS_PLUGIN
-/// §26.4's dynamic delivery: one exported symbol, and it returns the very descriptor the
-/// static registration above hands the registry. Compiled only into the module build,
-/// because §26.4 fixes the symbol's name -- two static components carrying it would put two
-/// definitions of one name on a deployment's link line.
-///
-/// extern "C" for the linkage, not for the types: what comes back is still the C++
-/// descriptor, and noexcept is on the declaration because an exception leaving here would
-/// unwind through a frame in the core that cannot see this module's types.
-extern "C" SVE_BACKEND_EXPORT
-const SveBackendPluginDescriptorV1* sve_backend_plugin_v1() noexcept
-{
-    return &kDescriptor;
-}
-#endif
 
-
-} // namespace sve
+} // namespace ta_roienc

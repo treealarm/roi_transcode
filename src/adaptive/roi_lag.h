@@ -1,17 +1,17 @@
 #pragma once
 
-// ROI lag helpers -- TZ v3 §14.
+// ROI lag helpers.
 //
-// Acceptance talks about IoU between the applied ROI and the target box, and about how many
-// frames / milliseconds the applied region trails the target. Pure geometry: no codec.
+// Measures IoU between the applied ROI and the target box, and how many frames /
+// milliseconds the applied region trails the target. Pure geometry: no codec.
 
-#include "sve/types.h"
-#include "sve/report.h"
+#include "ta_roienc/types.h"
+#include "ta_roienc/report.h"
 
 #include <cstdint>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 /// Intersection-over-union of two axis-aligned boxes in normalized coordinates. Empty or
 /// non-overlapping boxes yield 0.
@@ -34,7 +34,7 @@ RoiLagSample measure_roi_lag(const Box& applied, const Box& target, int32_t lag_
 /// P95 / P99 of a sorted-or-unsorted list of values. Empty → 0.
 double percentile(std::vector<double> values, double p);
 
-/// Whether a set of lag samples meets v3 §14 acceptance:
+/// Whether a set of lag samples meets the ROI-lag bounds:
 /// IoU ≥ 0.50 on every sample that claims a match; P95 lag ≤ 3 frames and ≤ 100 ms;
 /// P99 ≤ 6 frames and ≤ 200 ms.
 bool roi_lag_acceptance(const std::vector<RoiLagSample>& samples);
@@ -42,7 +42,7 @@ bool roi_lag_acceptance(const std::vector<RoiLagSample>& samples);
 /// Normalized center distance in frame-diagonal units.
 float center_distance_diag(const Box& a, const Box& b);
 
-/// Fills §14 lag observability fields in Report from runtime samples.
+/// Fills the ROI-lag fields in Report from runtime samples.
 void fill_lag_report(const std::vector<RoiLagSample>& samples, Report& report);
 
-} // namespace sve
+} // namespace ta_roienc

@@ -1,4 +1,4 @@
-#include "sve/frame.h"
+#include "ta_roienc/frame.h"
 
 #include "backend/common/av_frame_buffer.h"
 
@@ -7,14 +7,14 @@
 // Turning an AVFrame into a Frame, and nothing else.
 //
 // Split out of av_frame_adapter.cpp, and the split is about what a link pulls in rather
-// than about tidiness. SubmitAvFrame names SmartVideoEncoder, which names the backend
+// than about tidiness. SubmitAvFrame names VideoEncoder, which names the backend
 // registry, which needs RegisterDeploymentBackends -- so an object file holding both the
 // adapter and the submit helper drags the whole encoder into any program that only wanted
 // to turn a decoded frame into a Frame. The standalone decoder is exactly that program,
 // and an analytics worker that encodes nothing should not be linking encoder backends to
 // read pixels. Static archives pull whole objects, so the fix is a second object.
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -54,4 +54,4 @@ Frame AvFrameAdapter::Adopt(AVFrame* frame)
     return Frame(own_av_frame(frame));
 }
 
-} // namespace sve
+} // namespace ta_roienc

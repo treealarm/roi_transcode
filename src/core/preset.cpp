@@ -1,14 +1,14 @@
 // Preset names, and the per-backend vocabularies they map onto.
 //
 // The mapping is a table rather than a formula because the lists are not comparable: QSV's
-// "veryfast" is not libx264's "veryfast", and NVENC's p1..p7 are not a scale of the same
-// thing at all. What is comparable is the caller's intent, which is what Preset names.
+// "veryfast" is not libx264's "veryfast". What is comparable is the caller's intent, which
+// is what Preset names.
 
 #include "preset.h"
 
 #include <cstring>
 
-namespace sve {
+namespace ta_roienc {
 
 const char* preset_name(Preset p)
 {
@@ -76,18 +76,4 @@ const char* qsv_preset(Preset p)
     return "medium";
 }
 
-const char* nvenc_preset(Preset p)
-{
-    // p1 is fastest, p7 slowest. The older named presets are deprecated in NVENC and map
-    // onto these anyway.
-    switch (p) {
-    case Preset::Fastest:  return "p1";
-    case Preset::Fast:     return "p3";
-    case Preset::Balanced: return "p4";
-    case Preset::Slow:     return "p6";
-    case Preset::Slowest:  return "p7";
-    }
-    return "p4";
-}
-
-} // namespace sve
+} // namespace ta_roienc

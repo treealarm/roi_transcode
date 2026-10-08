@@ -1,38 +1,35 @@
 #pragma once
 
-// Outer bitrate controller for §15 -- a layer *above* the encoder, not a pass-through into
-// its own rate control.
+// Outer bitrate controller -- a layer *above* the encoder, not a pass-through into its own
+// rate control.
 //
 // Under CQP/CRF the per-region QP deltas stay honest only while the global quantiser is
 // fixed. A target bitrate forces a second loop: watch the average bits out, and when the
 // stream runs hot crush the background first, then soften low-importance ROI. High-
 // importance regions (faces, plates) are left alone -- that is the object-first part.
 //
-// **Proportional, since 2026-09-02.** The correction is sized from the miss: rate against
-// quantiser is a doubling every six steps in both H.264 and H.265, so being 2.4x over the
-// target asks for about eight steps and being 10% over asks for less than one. What it
-// replaced was a ladder of fixed rungs, which is a relay: it could only be walking up or
-// walking down, and where it stopped was decided by the edge of the tolerance band rather
-// than by the target. Two consequences were measured rather than argued -- see
-// docs/STATUS.md, срез Z13 -- a steady state at 109% of target where §16 allows 105%, and
-// fifty rungs of travel that took fifteen seconds to give back.
+// **Proportional.** The correction is sized from the miss: rate against quantiser is a
+// doubling every six steps in both H.264 and H.265, so being 2.4x over the target asks for
+// about eight steps and being 10% over asks for less than one. A ladder of fixed rungs
+// would be a relay: it could only be walking up or walking down, and where it stopped
+// would be decided by the edge of the tolerance band rather than by the target.
 //
 // Peak overshoot (short window) and a recovery debt (give-back within recovery_window_ms)
 // feed the same correction: the peak aims at the 1 s ceiling, and the debt lowers the aim
 // point so an overshoot is returned rather than merely stopped. This is still not
-// encoder-side VBR/VBV, and §16 remains out of reach where the actuator has no authority --
-// a frame whose expensive part is inside a protected region cannot be made cheaper by
-// crushing what is left.
+// encoder-side VBR/VBV, and the target remains out of reach where the actuator has no
+// authority -- a frame whose expensive part is inside a protected region cannot be made
+// cheaper by crushing what is left.
 
-#include "sve/policy.h"
-#include "sve/types.h"
+#include "ta_roienc/policy.h"
+#include "ta_roienc/types.h"
 
 #include "object_normalizer.h"
 
 #include <cstdint>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 class BitrateBudget {
 public:
@@ -55,8 +52,8 @@ public:
     double debt_bits() const { return m_debt_bits; }
 
     /// The loop has held its whole range for kUnreachableSec and the average is still above
-    /// the band -- there is no correction left to make. §50: a degradation that is applied
-    /// has to be reported, and missing a target the caller asked for is one.
+    /// the band -- there is no correction left to make. Missing a target the caller asked
+    /// for is a degradation, and a degradation that is applied has to be reported.
     bool target_unreachable() const { return m_unreachable; }
 
     /// Copy of `base` with background_qp_delta raised by the current extra.
@@ -111,4 +108,4 @@ private:
     int32_t m_roi_soften = 0;
 };
 
-} // namespace sve
+} // namespace ta_roienc

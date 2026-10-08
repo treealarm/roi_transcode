@@ -1,12 +1,12 @@
-#include "sve/sve.h"
+#include "ta_roienc/ta_roienc.h"
 
 #include "av_raii.h"
 #include "backend/common/av_pixel_format.h"
 #include "codec_id.h"
 #include "file_mux_sink.h"
 #include "temporal_roi.h"
-#include "sve/encoder.h"
-#include "sve/frame.h"
+#include "ta_roienc/encoder.h"
+#include "ta_roienc/frame.h"
 
 extern "C" {
 #include <libavutil/pixdesc.h>
@@ -18,21 +18,20 @@ extern "C" {
 #include <string>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
 /// What to tell the encoder its input is.
 ///
-/// Left unset until 2026-09-03, so it stayed at the default and a ten-bit source was encoded
-/// as if it were eight: measured on a Main10 clip through hevc_qsv, which reports main10 and
-/// still produced an 8-bit Main file with every frame counted as converted. §15.3 makes the
-/// ten-bit profile mandatory for exactly those backends.
+/// Without it a ten-bit source would be encoded as if it were eight: a Main10 clip through
+/// hevc_qsv, which reports main10, still produced an 8-bit Main file with every frame
+/// counted as converted.
 ///
 /// The decoder's own format when the library has a name for it. Otherwise the depth is what
-/// matters: ten bits become P010, §17's ten-bit input format, because what the encoder needs
-/// here is the depth and the profile that follows from it -- the pixels arrive as an AVFrame
-/// and the backend converts the layout if it must, counting it as §21 requires.
+/// matters: ten bits become P010, because what the encoder needs here is the depth and the
+/// profile that follows from it -- the pixels arrive as an AVFrame and the backend converts
+/// the layout if it must, counting the conversion.
 PixelFormat input_format_of(const AVCodecContext& dec)
 {
     const PixelFormat named = from_av_pix_fmt(dec.pix_fmt);
@@ -147,9 +146,9 @@ Report transcode_file(const std::string& input_path,
     cfg.input.pixel_format = input_format_of(*dec.p);
     cfg.input.frame_rate = Rational{fps.num, fps.den};
     // One tick per frame, said rather than left to a default. InputVideoFormat's own
-    // default is §8.3's 1/90000, which is right for a pushed source carrying its own clock
-    // and wrong here: a file has no clock but its frame rate, and encoding it against
-    // 90 kHz moves every PTS and with it the rate control's answers.
+    // default is 1/90000, which is right for a pushed source carrying its own clock and
+    // wrong here: a file has no clock but its frame rate, and encoding it against 90 kHz
+    // moves every PTS and with it the rate control's answers.
     cfg.input.time_base = Rational{fps.den, fps.num};
     cfg.settings = settings;
     // Resolved here rather than inside the encoder: only this entry point has a source to
@@ -159,17 +158,17 @@ Report transcode_file(const std::string& input_path,
     // Left to propagate: EncoderError is a std::runtime_error, and this entry point
     // already answers a whole file with one exception. Re-wrapping it in fail() would
     // throw away the StatusCode a caller can branch on.
-    // §19.3 names the file and leaves the naming to the application, which is this
-    // function: the library writes records, not files. Opened only when a sidecar was
-    // asked for, and a sidecar that cannot be opened is a failure rather than a silently
-    // missing file -- the caller asked for metadata and would otherwise get an encode that
-    // looks complete without it.
+    //
+    // The library writes sidecar records, not files; naming the file is the application's,
+    // which is this function. Opened only when a sidecar was asked for, and a sidecar that
+    // cannot be opened is a failure rather than a silently missing file -- the caller asked
+    // for metadata and would otherwise get an encode that looks complete without it.
     std::ofstream sidecar;
     std::string sidecar_path;
     if (cfg.settings.metadata.sidecar != SidecarFormat::None) {
         const std::filesystem::path base = std::filesystem::path(output_path);
         const std::filesystem::path path =
-            base.parent_path() / (base.stem().string() + ".svemeta.ndjson");
+            base.parent_path() / (base.stem().string() + ".roimeta.ndjson");
         sidecar.open(path);
         if (!sidecar) {
             fail("cannot open sidecar " + path.string());
@@ -180,10 +179,10 @@ Report transcode_file(const std::string& input_path,
         sidecar_path = path.string();
     }
 
-    const std::unique_ptr<SmartVideoEncoder> made = CreateVideoEncoder(cfg);
-    SmartVideoEncoder& enc = *made;
+    const std::unique_ptr<VideoEncoder> made = CreateVideoEncoder(cfg);
+    VideoEncoder& enc = *made;
 
-    // §13. Built once from the whole timeline: grouping boxes into tracks per frame would be
+    // Built once from the whole timeline: grouping boxes into tracks per frame would be
     // the same work repeated for every frame of the clip.
     const TemporalRoi temporal(boxes, settings.temporal, settings.quality.hold_sec);
     roiav::Frame dec_frame;
@@ -317,9 +316,9 @@ Report transcode_file(const std::string& input_path,
         fail(flushed.message());
     }
     drain();
-    // §8.13's end of an encode, and what carries §19.4's report on sidecar records whose
-    // packet never arrived. Session::finish does the same, in the same order: the warning
-    // has to reach the caller before the sink says the stream is complete.
+    // The end of an encode, and what carries the report on sidecar records whose packet
+    // never arrived. Session::finish does the same, in the same order: the warning has to
+    // reach the caller before the sink says the stream is complete.
     if (const Status stopped = enc.Stop(); !stopped.ok()) {
         fail(stopped.message());
     }
@@ -345,4 +344,4 @@ Report transcode_file(const std::string& input_path,
     return report;
 }
 
-} // namespace sve
+} // namespace ta_roienc

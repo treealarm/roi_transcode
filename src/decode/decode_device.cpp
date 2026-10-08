@@ -10,7 +10,7 @@ extern "C" {
 #include <libavutil/hwcontext.h>
 }
 
-namespace sve {
+namespace ta_roienc {
 
 struct DecodeDevice::Impl {
     DecodeBackend kind = DecodeBackend::Cpu;
@@ -164,4 +164,4 @@ Result<DecodeDevice> DecodeDevice::Open(const DecodeSelection& selection)
         reasons.empty() ? "no decode device opened" : "no decode device opened: " + reasons);
 }
 
-} // namespace sve
+} // namespace ta_roienc

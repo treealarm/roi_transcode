@@ -5,14 +5,14 @@
 // corner outside the outline is not protected. The AABB of the same outline stays available
 // for anything that only draws boxes.
 
-#include "sve/object.h"
+#include "ta_roienc/object.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -35,7 +35,7 @@ BoundingBox extent_of(const Polygon& poly)
 BoundingBox extent_of(const Mask& mask)
 {
     // consistent() is the whole check: it says the span really holds the rows the
-    // dimensions claim, which is what the old pointer form could not express.
+    // dimensions claim, which a bare pointer could not express.
     if (!mask.consistent()) {
         return {};
     }
@@ -178,4 +178,4 @@ void dilate_mask(uint8_t* mask, int32_t width, int32_t height, int32_t radius)
     }
 }
 
-} // namespace sve
+} // namespace ta_roienc

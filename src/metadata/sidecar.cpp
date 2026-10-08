@@ -1,22 +1,22 @@
-// The NDJSON sidecar record -- TZ v4.2 §19.3.
+// The NDJSON sidecar record.
 //
-// By hand, and for the same reason src/metadata/cbor.cpp is: the core links nothing, which
-// is what §26.4 turns into an empty Requires.private, and this is one fixed schema rather
-// than arbitrary JSON. A parser would be the larger half of a dependency we do not need.
+// By hand, and for the same reason src/metadata/cbor.cpp is: the core links nothing, and
+// this is one fixed schema rather than arbitrary JSON. A parser would be the larger half of
+// a dependency we do not need.
 //
-// Numbers are written the way §19.2 writes them into CBOR -- geometry and confidence as
-// scaled integers rather than floats. The reason there was that two encoders may pick
-// different float widths and produce different payloads for the same data; here it is
-// plainer still, since a float printed by one C++ library and read by another Python is
-// exactly where a "why does the last digit differ" bug comes from.
+// Numbers are written the way the SEI payload writes them into CBOR -- geometry and
+// confidence as scaled integers rather than floats. Two encoders may pick different float
+// widths and produce different payloads for the same data, and a float printed by one
+// library and read by another is exactly where a "why does the last digit differ" bug
+// comes from.
 
-#include "sve/metadata.h"
+#include "ta_roienc/metadata.h"
 
 #include <array>
 #include <cstdio>
 #include <string>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -51,8 +51,8 @@ void append_escaped(std::string& out, const std::string& text)
 }
 
 /// Normalized geometry as an integer per ten-thousandth of the frame, and confidence per
-/// ten-thousandth of one. The same scale §19.2 uses, so a reader of one channel reads the
-/// other without a second convention to learn.
+/// ten-thousandth of one. The same scale the SEI payload uses, so a reader of one channel
+/// reads the other without a second convention to learn.
 int64_t scaled(float value)
 {
     return static_cast<int64_t>(value * 10000.0f + (value < 0 ? -0.5f : 0.5f));
@@ -110,4 +110,4 @@ std::string encode_sidecar_ndjson(const SeiFrame& frame, uint64_t frame_index,
     return out;
 }
 
-} // namespace sve
+} // namespace ta_roienc

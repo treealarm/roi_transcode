@@ -1,14 +1,13 @@
-// The encoder's lifecycle and its submit/receive contract -- TZ v3.4 §8.1 and §8.13.
+// The encoder's lifecycle and its submit/receive contract.
 //
 // What is worth testing here is the state machine, not the picture: that a method called
 // at the wrong moment answers rather than misbehaves, that backpressure and end-of-stream
-// are codes rather than special cases, and that Stop can be called twice. The pixels
-// themselves are covered by the integration suite, which has real clips to compare.
+// are codes rather than special cases, and that Stop can be called twice.
 //
 // Everything runs on the software backend, so this test needs no GPU.
 
-#include "sve/encoder.h"
-#include "sve/frame.h"
+#include "ta_roienc/encoder.h"
+#include "ta_roienc/frame.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -18,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-using namespace sve;
+using namespace ta_roienc;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \
@@ -75,13 +74,13 @@ Frame make_frame(const std::shared_ptr<Pixels>& pixels, int64_t pts)
     return frame;
 }
 
-std::unique_ptr<SmartVideoEncoder> open_encoder(const EncoderConfig& cfg)
+std::unique_ptr<VideoEncoder> open_encoder(const EncoderConfig& cfg)
 {
     return CreateVideoEncoder(cfg);
 }
 
-/// The code a factory refuses with, or Ok when it did not refuse. §8.12 made creation
-/// throw, so asserting on a refusal means catching one.
+/// The code a factory refuses with, or Ok when it did not refuse. Creation throws, so
+/// asserting on a refusal means catching one.
 StatusCode create_refusal(const EncoderConfig& cfg)
 {
     try {
@@ -100,7 +99,7 @@ void a_new_encoder_is_configured_and_knows_its_backend()
     CHECK(stats.frames_submitted == 0);
     CHECK(!stats.backend_name.empty());
 
-    // §8.11: a muxer can declare its stream before a single frame is submitted.
+    // A muxer can declare its stream before a single frame is submitted.
     CodecParameters params;
     CHECK(enc->GetCodecParameters(&params).ok());
     CHECK(params.width == kWidth);
@@ -179,8 +178,8 @@ void submitting_after_flush_is_refused_rather_than_ignored()
     CHECK(enc->SubmitFrame(TimedFrame{frame, meta}).ok());
     CHECK(enc->Flush().ok());
 
-    // §8.13: Draining, EndOfStream, Stopped and Failed all refuse a frame. Accepting one
-    // and dropping it is the failure mode this replaces.
+    // Draining, EndOfStream, Stopped and Failed all refuse a frame rather than accepting
+    // and dropping it.
     CHECK(enc->SubmitFrame(TimedFrame{frame, meta}).code() == StatusCode::InvalidArgument);
     CHECK(enc->Stop().ok());
     CHECK(enc->SubmitFrame(TimedFrame{frame, meta}).code() == StatusCode::InvalidArgument);
@@ -199,8 +198,7 @@ void an_empty_frame_and_a_null_packet_are_arguments_not_crashes()
 {
     auto enc = open_encoder(config_for());
     FrameMetadata meta;
-    // An empty Frame is what a default-constructed TimedFrame carries, and it is the
-    // shape a null AVFrame pointer used to take before §8.5 made the frame a handle.
+    // An empty Frame is what a default-constructed TimedFrame carries.
     CHECK(enc->SubmitFrame(TimedFrame{}).code() == StatusCode::InvalidArgument);
     CHECK(enc->ReceivePacket(nullptr).code() == StatusCode::InvalidArgument);
     // And the interop adapter still refuses the pointer form.
@@ -244,9 +242,9 @@ void reconfigure_takes_what_8_2_allows_and_refuses_the_rest()
 
 void cpu_h265_refuses_a_target_bitrate_out_loud()
 {
-    // STATUS.md Р5. The guard is a standing contract, so it is asserted rather than left to
-    // whoever next reads the log: at Create it downgrades and records why, and a caller who
-    // asks again through Reconfigure is told instead of quietly ignored.
+    // The CPU H.265 target-bitrate guard is a standing contract, so it is asserted rather
+    // than left to whoever next reads the log: at Create it downgrades and records why, and
+    // a caller who asks again through Reconfigure is told instead of quietly ignored.
     EncoderConfig cfg = config_for(Backend::X265, Codec::H265);
     cfg.settings.rate_control.target_bitrate = 800000;
     auto enc = open_encoder(cfg);
@@ -274,40 +272,27 @@ void the_selection_orders_the_backends_and_can_exclude_them()
     CHECK(chain[1].get().kind() == Backend::IntelOneVpl);
 
     // Software is shut out of the automatic path by leaving it off the list, and by
-    // nothing else. §8.4 dropped the separate allow_software_fallback switch: two ways to
-    // say the same thing is one way to have them disagree.
+    // nothing else: two ways to say the same thing is one way to have them disagree.
     BackendSelection hardware_only;
-    hardware_only.preferred = {Backend::IntelOneVpl, Backend::Vaapi, Backend::NvidiaNvenc};
+    hardware_only.preferred = {Backend::IntelOneVpl, Backend::Vaapi};
     for (const BackendRef& ref : resolve_backends(Backend::Auto, hardware_only, Codec::H264)) {
         CHECK(ref.get().kind() != Backend::X264);
         CHECK(ref.get().kind() != Backend::X265);
     }
 
     // And a backend absent from the list is not reached unless unlisted ones are allowed.
-    // Asked with x264, which this build certainly has: nvenc used to serve here and stopped
-    // being usable for it the moment its capability started reporting the build rather than
-    // the hardware -- a list of one unbuildable backend now resolves to nothing at all,
-    // which is right, and would have made this assert the wrong thing.
     BackendSelection only_x264;
     only_x264.preferred = {Backend::X264};
     CHECK(resolve_backends(Backend::Auto, only_x264, Codec::H264).size() == 1);
     only_x264.allow_unlisted = true;
     CHECK(resolve_backends(Backend::Auto, only_x264, Codec::H264).size() > 1);
-
-    // A backend the build cannot provide leaves the chain empty rather than in it.
-    BackendSelection only_nvenc;
-    only_nvenc.preferred = {Backend::NvidiaNvenc};
-    std::vector<std::string> skipped;
-    CHECK(resolve_backends(Backend::Auto, only_nvenc, Codec::H264, &skipped).empty());
-    CHECK(!skipped.empty());
 }
 
 void a_backend_that_cannot_encode_the_codec_is_left_out_with_its_reason()
 {
-    // §5.4 made libx264 and libx265 two backends, so a preference list can now name one
-    // that has nothing to offer this particular encode. Under Auto it is skipped rather
-    // than opened and found wanting -- and skipping it silently is what §50 forbids, so
-    // the reason comes back with the chain.
+    // libx264 and libx265 are two backends, so a preference list can name one that has
+    // nothing to offer this particular encode. Under Auto it is skipped rather than opened
+    // and found wanting -- and not silently, so the reason comes back with the chain.
     BackendSelection both;
     both.preferred = {Backend::X264, Backend::X265};
 
@@ -334,8 +319,8 @@ void a_backend_that_cannot_encode_the_codec_is_left_out_with_its_reason()
 
 void an_unusable_preference_order_is_refused_before_anything_opens()
 {
-    // §8.4: Auto with no order is InvalidArgument. The library used to ship a default,
-    // which amounted to guessing at hardware it cannot see.
+    // Auto with no order is InvalidArgument: a default order would be guessing at hardware
+    // the library cannot see.
     EncoderConfig empty = config_for(Backend::Auto);
     empty.settings.backend_selection.preferred.clear();
     CHECK(create_refusal(empty) == StatusCode::InvalidArgument);
@@ -350,20 +335,18 @@ void an_unusable_preference_order_is_refused_before_anything_opens()
     CHECK(create_refusal(twice) == StatusCode::InvalidArgument);
 
     // A well-formed order that no backend in this build can serve fails at open, which is
-    // a different answer: the request was valid, the machine could not meet it.
-    EncoderConfig hardware_only = config_for(Backend::Auto);
-    hardware_only.settings.backend_selection.preferred = {Backend::NvidiaNvenc};
-    CHECK(create_refusal(hardware_only) != StatusCode::Ok);
+    // a different answer: the request was valid, the machine could not meet it. libx265
+    // does not produce H.264, so a list naming only it has nothing to open.
+    EncoderConfig unservable = config_for(Backend::Auto);
+    unservable.settings.backend_selection.preferred = {Backend::X265Direct};
+    CHECK(create_refusal(unservable) != StatusCode::Ok);
 }
 
 void the_preference_order_is_read_where_the_backend_is_named()
 {
-    // §8.4's order and the Backend it qualifies are one decision, and they live in one
-    // struct for that reason. They used to live in two: Settings::backend_selection beside
-    // Settings::encoder, and a second copy on EncoderConfig which was the one the encoder
-    // actually read. transcode_file and Session bridged the two by hand, so a caller who
-    // built an EncoderConfig himself and filled the field next to the Backend was told his
-    // order was empty. Nothing here copies anything.
+    // The order and the Backend it qualifies are one decision, and they live in one struct
+    // for that reason: a caller who builds an EncoderConfig and fills the field next to the
+    // Backend gets that order. Nothing here copies anything.
     EncoderConfig cfg = config_for(Backend::Auto);
     cfg.settings.backend_selection.preferred = {Backend::X264};
 
@@ -383,7 +366,7 @@ void diagnostics_go_where_the_caller_says()
     auto enc = open_encoder(cfg);
     CHECK(enc->GetStatistics().cpu_h265_target_guard);
 
-    // §50: the degradation reached the caller's sink, not somebody's terminal.
+    // The degradation reached the caller's sink, not somebody's terminal.
     bool guarded = false;
     for (const auto& [level, text] : lines) {
         if (level == LogLevel::Warning && text.find("cpu h265 target-bitrate") != std::string::npos) {
@@ -434,17 +417,16 @@ void strict_refuses_a_frame_whose_regions_do_not_fit()
     CHECK(enc->GetStatistics().fallbacks_applied == 0);
 }
 
-/// §19.3: one record per emitted packet, in emission order, and §19.3 again: the sidecar
-/// works when the bitstream metadata does not.
+/// One sidecar record per emitted packet, in emission order, and the sidecar works when the
+/// bitstream metadata does not.
 void the_sidecar_follows_the_packets_not_the_submissions()
 {
     auto pixels = std::make_shared<Pixels>();
     std::vector<std::string> records;
 
     EncoderConfig cfg = config_for();
-    // SEI off on purpose. §19.3 opens with "если SEI недоступен или отключён", so the
-    // sidecar has to stand on its own -- reachable only through the SEI path would defeat
-    // the case it exists for.
+    // SEI off on purpose: the sidecar has to stand on its own -- reachable only through the
+    // SEI path would defeat the case it exists for.
     cfg.settings.metadata.bitstream_sei = false;
     cfg.settings.metadata.sidecar = SidecarFormat::NDJSON;
     cfg.settings.metadata.sidecar_sink = [&records](std::string_view line) {
@@ -496,9 +478,9 @@ void the_sidecar_follows_the_packets_not_the_submissions()
     }
 }
 
-/// §8.9: a caller who already has a per-block quantiser grid hands it over as it is, and
-/// it takes precedence over a mask and over boxes. Untested until 2026-09-04, which meant
-/// the whole branch that turns a grid into rectangles never ran here.
+/// A caller who already has a per-block quantiser grid hands it over as it is, and it takes
+/// precedence over a mask and over boxes. This is the branch that turns a grid into
+/// rectangles.
 void a_qp_map_is_taken_as_given_rather_than_recomputed()
 {
     auto pixels = std::make_shared<Pixels>();
@@ -531,9 +513,8 @@ void a_qp_map_is_taken_as_given_rather_than_recomputed()
     CHECK(enc->GetStatistics().frames_submitted == 1);
 }
 
-/// §8.9's second form. A mask carries no kinds to weigh, so it is sampled onto the block
-/// grid rather than fed to the box pipeline -- and a caller who passes one used to get no
-/// regions at all, quietly, which is the defect this path was written for.
+/// A mask carries no kinds to weigh, so it is sampled onto the block grid rather than fed to
+/// the box pipeline -- and a caller who passes one gets regions, not quietly none.
 void a_mask_is_sampled_onto_the_grid_rather_than_ignored()
 {
     auto pixels = std::make_shared<Pixels>();
@@ -585,14 +566,13 @@ void an_inconsistent_mask_is_ignored_rather_than_half_read()
     CHECK(enc->GetStatistics().frames_submitted == 1);
 }
 
-/// The other side of §19.4, and the one that is easy to get backwards: an encode the caller
-/// abandoned is not a broken sidecar.
+/// The other side of the sidecar check, and the one that is easy to get backwards: an
+/// encode the caller abandoned is not a broken sidecar.
 ///
-/// §8.13 makes Stop safe from any state, so it is also how a cancelled job cleans up. The
-/// frames still inside libx264's lookahead at that moment were never given a chance to come
-/// out -- complaining that records and packets do not correspond would report a data
-/// integrity fault about a decision the caller made on purpose. This test asserted the
-/// opposite until 2026-09-05.
+/// Stop is safe from any state, so it is also how a cancelled job cleans up. The frames
+/// still inside libx264's lookahead at that moment were never given a chance to come out --
+/// complaining that records and packets do not correspond would report a data integrity
+/// fault about a decision the caller made on purpose.
 void a_cancelled_encode_does_not_report_a_sidecar_fault()
 {
     auto pixels = std::make_shared<Pixels>();
@@ -631,8 +611,8 @@ void a_cancelled_encode_does_not_report_a_sidecar_fault()
     CHECK(!warned);
 }
 
-/// §21's report is what a caller reads at the end of a job, and it had never been called
-/// by any test -- so every field of it was a copy nobody had checked against its source.
+/// The report is what a caller reads at the end of a job, so every field of it is checked
+/// against its source.
 void the_report_says_what_the_statistics_say()
 {
     auto pixels = std::make_shared<Pixels>();
@@ -672,9 +652,8 @@ void the_report_says_what_the_statistics_say()
     CHECK(report.bytes > 0);
 }
 
-/// §8.1's borrowing overload: pixels the caller holds, handed over without a copy and
-/// without an ownership handle. Untested until 2026-09-04, so the zero-copy entry point --
-/// the one a service embedding this library uses -- had never been called here at all.
+/// The borrowing overload: pixels the caller holds, handed over without a copy and without
+/// an ownership handle -- the zero-copy entry point a service embedding this library uses.
 void pixels_the_caller_holds_go_in_through_the_borrowing_overload()
 {
     /// The caller's own buffer, over the same planes make_frame wraps. Not the fake from
@@ -720,8 +699,8 @@ void pixels_the_caller_holds_go_in_through_the_borrowing_overload()
     CHECK(enc->GetStatistics().frames_uploaded == 0);
 }
 
-/// §24's bounded queue: a caller who never drains is answered, not grown into. Without
-/// this the packet queue is whatever the encode produced, and the bound is a comment.
+/// The bounded queue: a caller who never drains is answered, not grown into. Without this
+/// the packet queue is whatever the encode produced, and the bound is a comment.
 void the_bounded_queue_answers_again_rather_than_growing()
 {
     auto pixels = std::make_shared<Pixels>();
@@ -754,8 +733,8 @@ void the_bounded_queue_answers_again_rather_than_growing()
     CHECK(enc->SubmitFrame(TimedFrame{make_frame(pixels, kFarTooMany), meta}).ok());
 }
 
-/// The two accessors §21 gives a caller for what actually opened, including the refusal
-/// when there is nowhere to write the answer.
+/// The two accessors a caller has for what actually opened, including the refusal when
+/// there is nowhere to write the answer.
 void the_opened_encoder_can_be_asked_what_it_is()
 {
     EncoderConfig cfg = config_for();
@@ -771,15 +750,13 @@ void the_opened_encoder_can_be_asked_what_it_is()
     CHECK(params.codec == Codec::H264);
 
     // The libavcodec x264 backend does not read its own settings back, so an empty answer
-    // is the honest one -- what is asserted is that asking is safe before anything else
-    // relies on it (§38's calibration does).
+    // is the honest one -- what is asserted is that asking is safe.
     const EffectiveSettings effective = enc->GetEffectiveSettings();
     (void)effective;
 }
 
-/// §8.4 and §50: a backend left out of the chain because it cannot serve the codec is
-/// named in the log, not merely counted. Until now the count was asserted and the line
-/// nobody had checked.
+/// A backend left out of the chain because it cannot serve the codec is named in the log,
+/// not merely counted.
 void a_backend_left_out_of_the_chain_is_named_in_the_log()
 {
     std::vector<std::pair<LogLevel, std::string>> lines;
@@ -804,7 +781,7 @@ void a_backend_left_out_of_the_chain_is_named_in_the_log()
     CHECK(said);
 }
 
-/// A format without a sink is refused, not quietly dropped (§50).
+/// A format without a sink is refused, not quietly dropped.
 void a_sidecar_without_a_sink_is_refused()
 {
     EncoderConfig cfg = config_for();

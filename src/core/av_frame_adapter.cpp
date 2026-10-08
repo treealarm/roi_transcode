@@ -1,15 +1,15 @@
-#include "sve/frame.h"
+#include "ta_roienc/frame.h"
 
-// The encoder-facing half of §8.5's interop: submitting an AVFrame, and reading back the
-// device the encoder holds. Both name SmartVideoEncoder.
+// The encoder-facing half of the AVFrame interop: submitting an AVFrame, and reading back
+// the device the encoder holds. Both name VideoEncoder.
 //
 // AvFrameAdapter::Ref and ::Adopt are next door in av_frame_ref.cpp, deliberately: they
 // name no encoder, and keeping them in a separate object is what lets the standalone
 // decoder turn an AVFrame into a Frame without linking an encoder it never calls.
 
-namespace sve {
+namespace ta_roienc {
 
-Status SubmitAvFrame(SmartVideoEncoder& encoder, const AVFrame* frame,
+Status SubmitAvFrame(VideoEncoder& encoder, const AVFrame* frame,
     const FrameMetadata& metadata)
 {
     if (frame == nullptr) {
@@ -22,7 +22,7 @@ Status SubmitAvFrame(SmartVideoEncoder& encoder, const AVFrame* frame,
     return encoder.SubmitFrame(TimedFrame{std::move(held), metadata});
 }
 
-AVBufferRef* EncoderHardwareDevice(const SmartVideoEncoder& encoder)
+AVBufferRef* EncoderHardwareDevice(const VideoEncoder& encoder)
 {
     const NativeHandle handle = encoder.HardwareDevice();
     if (handle.kind != NativeHandleKind::FfmpegHardwareDevice) {
@@ -31,4 +31,4 @@ AVBufferRef* EncoderHardwareDevice(const SmartVideoEncoder& encoder)
     return static_cast<AVBufferRef*>(handle.value);
 }
 
-} // namespace sve
+} // namespace ta_roienc

@@ -6,13 +6,13 @@
 // structure.
 
 #include "av_raii.h"
-#include "sve/encoder_backend.h"
+#include "ta_roienc/encoder_backend.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
 }
 
-namespace sve {
+namespace ta_roienc {
 
 class LibavSession final : public BackendSession {
 public:
@@ -50,4 +50,4 @@ public:
 /// here, and the cast is safe because a backend only ever receives sessions it opened.
 LibavSession& libav(BackendSession& session);
 
-} // namespace sve
+} // namespace ta_roienc

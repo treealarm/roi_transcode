@@ -10,7 +10,7 @@
           "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
           "type": "FILEPATH"
         },
-        "$comment-compile-commands": "The compile database, for the editor. Without it IntelliSense guesses the language standard and the include paths, and guesses them wrong: it reported std::span as missing from a tree that compiles, because it had defaulted to C++17 and knew nothing of vcpkg's FFmpeg. Every preset inherits this, so the database exists wherever anyone builds.",
+        "$comment-compile-commands": "The compile database, for the editor. Without it IntelliSense guesses the language standard and the include paths, and guesses them wrong: it reported std::span as missing from a tree that compiles, because it had defaulted to C++17 and knew nothing of vcpkg's FFmpeg.",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     },
@@ -21,46 +21,31 @@
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "SVE_BUILD_INTEGRATION": "ON",
-        "$comment-reference-backends": "SVE_BUILD_BACKEND_FFMPEG is OFF by default so that a default build is the dependency graph §5.5 draws. The development loop and check.sh need the libavcodec backends -- QSV, VA-API and the reference x264/x265 backend-compare.sh measures against -- so the preset turns them on.",
-        "SVE_BUILD_BACKEND_FFMPEG": "ON",
-        "$comment-onevpl": "§5.2's native backend. Off by default because it needs the oneVPL SDK, on here because this machine has it and acceptance should exercise it.",
-        "SVE_BUILD_BACKEND_ONEVPL": "ON",
-        "$comment": "Manifest mode off deliberately: this preset reuses the tree already installed in VCPKG_ROOT, which is what makes a reconfigure take a second instead of rebuilding gRPC. The manifest presets are what a fresh checkout and the acceptance criteria use.",
+        "$comment-backends": "Every backend this machine can build, so that the unit tests cover all of them: the libavcodec ones (QSV, VA-API, x264/x265) that consumers link, and the native oneVPL one, which needs the oneVPL SDK.",
+        "TA_ROIENC_BUILD_BACKEND_FFMPEG": "ON",
+        "TA_ROIENC_BUILD_BACKEND_ONEVPL": "ON",
+        "$comment": "Manifest mode off deliberately: this preset reuses the tree already installed in VCPKG_ROOT, which is what makes a reconfigure take a second. The manifest presets are what a fresh checkout uses.",
         "VCPKG_MANIFEST_MODE": "OFF"
       }
     },
     {
       "name": "linux-default",
       "inherits": "vcpkg-base",
-      "displayName": "Linux Debug (library + CLI)",
+      "displayName": "Linux Debug",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "SVE_BUILD_INTEGRATION": "ON",
-        "VCPKG_MANIFEST_FEATURES": "intel;tools"
+        "VCPKG_MANIFEST_FEATURES": "intel"
       }
     },
     {
       "name": "linux-release",
       "inherits": "vcpkg-base",
-      "displayName": "Linux Release (library + CLI)",
+      "displayName": "Linux Release",
       "binaryDir": "${sourceDir}/build-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "SVE_BUILD_INTEGRATION": "ON",
-        "VCPKG_MANIFEST_FEATURES": "intel;tools"
-      }
-    },
-    {
-      "name": "linux-cli-only",
-      "inherits": "vcpkg-base",
-      "displayName": "Linux Release, no gRPC (library + CLI)",
-      "binaryDir": "${sourceDir}/build-cli",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "SVE_BUILD_INTEGRATION": "OFF",
-        "VCPKG_MANIFEST_FEATURES": "intel;tools"
+        "VCPKG_MANIFEST_FEATURES": "intel"
       }
     },
     {
@@ -69,9 +54,7 @@
       "displayName": "Linux Release, software encoders only (no Intel hardware)",
       "binaryDir": "${sourceDir}/build-software",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "SVE_BUILD_INTEGRATION": "OFF",
-        "VCPKG_MANIFEST_FEATURES": "tools"
+        "CMAKE_BUILD_TYPE": "Release"
       }
     },
     {
@@ -84,9 +67,7 @@
         "strategy": "external"
       },
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "SVE_BUILD_INTEGRATION": "ON",
-        "VCPKG_MANIFEST_FEATURES": "tools"
+        "CMAKE_BUILD_TYPE": "Debug"
       }
     }
   ]

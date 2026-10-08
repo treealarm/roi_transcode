@@ -1,10 +1,8 @@
-// AT-002, AT-003, AT-006 and AT-007 -- what every backend has to do -- TZ v4.1 §48.
+// What every backend has to do: encode, decode, frame count, timestamps and end of stream.
 //
-// The specification says "каждый certified backend" and then lists encode, decode, frame
-// count, PTS and EOS. Until now those were asserted once, against whichever backend the
-// test happened to open, which is a different claim: it says the library works, not that a
-// backend does. This runs the same standard input through every backend in the build and
-// checks the same answers.
+// Asserted once against whichever backend a test happens to open, those say the library
+// works, not that a backend does. This runs the same standard input through every backend
+// in the build and checks the same answers.
 //
 // The expected output is properties, not bytes. Two encoders never produce the same
 // bitstream, and pinning one would only record which encoder was installed the day it was
@@ -14,15 +12,14 @@
 // however good its pictures look.
 //
 // Decoding matters and is not decoration. A backend emitting well-formed-looking packets
-// full of nonsense passes a packet count and fails here, which is the whole reason §48
-// spells "decode" beside "encode".
+// full of nonsense passes a packet count and fails here.
 //
 // A backend whose device is absent is a SKIP with the reason it gave -- never a silent
-// pass. §50 forbids "catch, continue, PASS", and an unauditable skip is that in a hat.
+// pass: "catch, continue, PASS" with an unauditable skip is a silent fallback in a hat.
 
-#include "sve/encoder.h"
-#include "sve/frame.h"
-#include "sve/metadata.h"
+#include "ta_roienc/encoder.h"
+#include "ta_roienc/frame.h"
+#include "ta_roienc/metadata.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -36,7 +33,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 }
 
-using namespace sve;
+using namespace ta_roienc;
 
 namespace {
 
@@ -51,12 +48,11 @@ void check(bool ok, const std::string& what)
 }
 
 // Enough frames for lookahead and B-frames to reorder something, few enough that the whole
-// matrix runs in seconds. §48 does not fix a count for AT-002/003; what it fixes is that
-// the count coming out equals the count going in.
+// matrix runs in seconds. What matters is that the count coming out equals the count going
+// in.
 constexpr int kFrames = 60;
-// 640x480 rather than something tiny, for the reason AT-009 found the hard way: Quick Sync
-// refuses 128x96 outright, and a backend that skips because of the test's own frame size
-// has not been tested.
+// 640x480 rather than something tiny: Quick Sync refuses 128x96 outright, and a backend that
+// skips because of the test's own frame size has not been tested.
 constexpr int32_t kWidth = 640;
 constexpr int32_t kHeight = 480;
 constexpr int kTimeBase = 25;
@@ -187,15 +183,13 @@ int decode_count(Codec codec, const CodecParameters& params,
     return pictures;
 }
 
-/// Our object metadata, read back out of the bitstream the backend produced -- §19.2 and
-/// the synchronisation §19.4 asks for.
+/// Our object metadata, read back out of the bitstream the backend produced.
 ///
-/// This exists because the conformance run used to submit the same single box on every
-/// frame, which made every SEI payload the same length, which is exactly the case that
-/// hides a decoder or encoder mishandling a payload whose size changes. x265 4.1 sizes its
+/// The frames carry a varying number of objects, because the same single box on every
+/// frame makes every SEI payload the same length, which is exactly the case that hides a
+/// decoder or encoder mishandling a payload whose size changes. x265 4.1 sizes its
 /// per-frame user-SEI buffer from the first payload a pooled frame ever sees and never
-/// resizes it, so a constant payload was the one input that could not catch it. The frames
-/// below now carry a varying number of objects, and this counts what survived.
+/// resizes it, so a constant payload is the one input that cannot catch it.
 int count_our_sei(const std::vector<std::vector<uint8_t>>& payloads, Codec codec, int* bad)
 {
     const std::span<const uint8_t, 16> uuid = sei_uuid();
@@ -259,10 +253,11 @@ int count_our_sei(const std::vector<std::vector<uint8_t>>& payloads, Codec codec
     return found;
 }
 
-/// AT-002 / AT-003 / AT-006 for one backend and one codec, or the reason it could not run.
+/// Encode, decode, count and timestamps for one backend and one codec, or the reason it
+/// could not run.
 void conformance(Backend backend, Codec codec, const char* label)
 {
-    std::unique_ptr<SmartVideoEncoder> enc;
+    std::unique_ptr<VideoEncoder> enc;
     try {
         enc = CreateVideoEncoder(config_for(backend, codec));
     } catch (const EncoderError& e) {
@@ -292,8 +287,8 @@ void conformance(Backend backend, Codec codec, const char* label)
             const std::span<const uint8_t> bytes = packet.payload.bytes();
             payloads.emplace_back(bytes.begin(), bytes.end());
             out_pts.push_back(packet.pts);
-            // Decode order, which is what §21 requires of a backend: DTS never goes
-            // backwards even where PTS does, and PTS does as soon as B-frames exist.
+            // Decode order: DTS never goes backwards even where PTS does, and PTS does as
+            // soon as B-frames exist.
             if (packet.dts != kNoTimestamp) {
                 if (packet.dts < last_dts) {
                     dts_monotonic = false;
@@ -341,8 +336,8 @@ void conformance(Backend backend, Codec codec, const char* label)
 
     check(enc->Flush().ok(), std::string(label) + ": Flush");
     const StatusCode ended = collect();
-    // AT-002/003: end of stream, said once and said explicitly. A drain that just stops
-    // producing packets is indistinguishable from one that failed.
+    // End of stream, said once and said explicitly. A drain that just stops producing
+    // packets is indistinguishable from one that failed.
     check(ended == StatusCode::EndOfStream, std::string(label) + ": drain reaches EndOfStream");
 
     EncodedPacket after;
@@ -353,7 +348,7 @@ void conformance(Backend backend, Codec codec, const char* label)
     check(stats.frames_submitted == kFrames,
         std::string(label) + ": every frame was accepted");
 
-    // AT-006, metadata mapping at 100%: every timestamp submitted comes back exactly once.
+    // Metadata mapping at 100%: every timestamp submitted comes back exactly once.
     // Compared as a set, because with B-frames the order is the encoder's business and
     // insisting on it would be asserting a coding decision rather than a contract.
     check(out_pts.size() == static_cast<std::size_t>(kFrames),
@@ -368,7 +363,7 @@ void conformance(Backend backend, Codec codec, const char* label)
     check(pts_complete, std::string(label) + ": every submitted PTS came back exactly once");
     check(dts_monotonic, std::string(label) + ": DTS never goes backwards");
 
-    // AT-002/003: the picture decodes, and the count matches.
+    // The picture decodes, and the count matches.
     CodecParameters params;
     check(enc->GetCodecParameters(&params).ok(), std::string(label) + ": GetCodecParameters");
     check(params.width == kWidth && params.height == kHeight,
@@ -378,10 +373,10 @@ void conformance(Backend backend, Codec codec, const char* label)
         std::string(label) + ": decodes to " + std::to_string(kFrames) + " pictures (got "
             + std::to_string(decoded) + ")");
 
-    // §19.2 and §19.4: the metadata a caller submitted has to come back out of the
-    // bitstream, once per frame, and parse. A backend that carries no SEI at all -- the
-    // Р5 guard turns it off for CPU H.265 -- says so here rather than being asserted
-    // against, because "off" and "broken" must not print the same line.
+    // The metadata a caller submitted has to come back out of the bitstream, once per
+    // frame, and parse. A backend that carries no SEI at all -- the guard turns it off for
+    // CPU H.265 -- says so here rather than being asserted against, because "off" and
+    // "broken" must not print the same line.
     int undecodable = 0;
     const int sei_found = count_our_sei(payloads, codec, &undecodable);
     if (sei_found > 0) {
@@ -400,12 +395,12 @@ void conformance(Backend backend, Codec codec, const char* label)
         backend_name(stats.encoder_used));
 }
 
-/// AT-007: asking for something a backend cannot do is answered, never absorbed.
+/// Asking for something a backend cannot do is answered, never absorbed.
 ///
 /// Strict is the half that can be asserted without knowing which hardware is present:
-/// §22 says Permissive may degrade provided it says so, and Strict must refuse. What must
-/// never happen on either is silence, so the log is watched as well as the status.
-void at_007_capability_fallback(Backend backend, Codec codec, const char* label)
+/// Permissive may degrade provided it says so, and Strict must refuse. What must never
+/// happen on either is silence, so the log is watched as well as the status.
+void capability_fallback_is_answered(Backend backend, Codec codec, const char* label)
 {
     std::vector<std::string> lines;
     EncoderConfig cfg = config_for(backend, codec);
@@ -418,17 +413,16 @@ void at_007_capability_fallback(Backend backend, Codec codec, const char* label)
     try {
         const auto enc = CreateVideoEncoder(cfg);
         // It opened, so nothing was refused. Then nothing may have been quietly dropped
-        // either: a degradation without a word in the log is what §50 calls a silent
-        // fallback and what AT-007 marks FAIL.
+        // either: a degradation without a word in the log is a silent fallback.
         const EncoderStatistics stats = enc->GetStatistics();
         if (stats.fallbacks_applied > 0) {
             check(!lines.empty(),
                 std::string(label) + ": a fallback was applied and said so");
         }
-        // The case this test missed the first time. An encoder that opened while unable to
-        // honour what was asked has to have counted a fallback; otherwise the request was
-        // neither met nor refused, which is precisely AT-007's FAIL. A backend keyed guard
-        // let X265Direct through here, silently, and this line is what would have said so.
+        // An encoder that opened while unable to honour what was asked has to have counted
+        // a fallback; otherwise the request was neither met nor refused. A guard keyed on
+        // the backend rather than its capability would let X265Direct through here,
+        // silently, and this line is what says so.
         if (!enc->GetCapabilities().native_bitrate) {
             check(stats.fallbacks_applied > 0,
                 std::string(label) + ": a bitrate target it cannot honour was answered");
@@ -451,21 +445,15 @@ struct Candidate {
     const char* name;
 };
 
-/// §17 lists NV12 among the P0 input formats, so every backend has to give an answer to
-/// one: encode it, or refuse it with Unsupported. What none of them may do is take it and
-/// then read a plane it does not have.
-///
-/// The native oneVPL backend did exactly that until 2026-09-03 -- its check at SubmitFrame
-/// admitted NV12 and its copy read three planes, so the third came back as an empty view
-/// and the code dereferenced its null pointer. Nothing in the suite had ever submitted NV12:
-/// every test here builds YUV420P, which is why reading the two lines together found it and
-/// a green suite did not.
+/// NV12 is an input format, so every backend has to give an answer to one: encode it, or
+/// refuse it with Unsupported. What none of them may do is take it and then read a plane
+/// it does not have -- every other test here builds YUV420P.
 void nv12_input_is_answered_and_never_crashes(Backend backend, const char* label)
 {
     EncoderConfig cfg = config_for(backend, Codec::H264);
     cfg.input.pixel_format = PixelFormat::NV12;
 
-    std::unique_ptr<SmartVideoEncoder> enc;
+    std::unique_ptr<VideoEncoder> enc;
     try {
         enc = CreateVideoEncoder(cfg);
     } catch (const std::exception& e) {
@@ -514,25 +502,24 @@ int main()
         {Backend::IntelOneVpl, "onevpl"},
         {Backend::IntelOneVplDirect, "onevpldirect"},
         {Backend::Vaapi, "vaapi"},
-        {Backend::NvidiaNvenc, "nvenc"},
     };
 
-    std::printf("AT-002 (H.264: encode, decode, frame count, PTS, EOS):\n");
+    std::printf("H.264: encode, decode, frame count, PTS, EOS:\n");
     for (const Candidate& c : candidates) {
         conformance(c.backend, Codec::H264, c.name);
     }
 
-    std::printf("AT-003 (H.265: the same):\n");
+    std::printf("H.265: the same:\n");
     for (const Candidate& c : candidates) {
         conformance(c.backend, Codec::H265, c.name);
     }
 
-    std::printf("AT-007 (capability fallback is answered, never absorbed):\n");
+    std::printf("capability fallback is answered, never absorbed:\n");
     for (const Candidate& c : candidates) {
-        at_007_capability_fallback(c.backend, Codec::H265, c.name);
+        capability_fallback_is_answered(c.backend, Codec::H265, c.name);
     }
 
-    std::printf("§17 (NV12 in: answered, never mishandled):\n");
+    std::printf("NV12 in: answered, never mishandled:\n");
     for (const Candidate& c : candidates) {
         nv12_input_is_answered_and_never_crashes(c.backend, c.name);
     }

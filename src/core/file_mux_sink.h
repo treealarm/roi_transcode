@@ -1,8 +1,7 @@
 #pragma once
 
-// The PacketSink that writes a container -- TZ v4.1 §52's example application, not the
-// library. Split out of packet_sink.h so that the interface every backend and the encoder
-// itself include stays free of libavformat (§5.5).
+// The PacketSink that writes a container. Split out of packet_sink.h so that the interface
+// every backend and the encoder itself include stays free of libavformat.
 
 #include "av_raii.h"
 #include "packet_sink.h"
@@ -10,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 // Muxes into a container chosen by the output file extension.
 class FileMuxSink : public PacketSink {
@@ -29,8 +28,7 @@ public:
     /// Only the application that opened the input knows it, exactly as with the audio
     /// parameters above. A phone or a dashcam stores the picture in sensor orientation and
     /// puts the rotation in this side data; the decoder hands us the stored pixels, so
-    /// dropping the matrix turns a transcode into a rotated copy of the original. Found on
-    /// real footage (rotation=-180) on 2026-09-03 -- no synthetic fixture has one.
+    /// dropping the matrix turns a transcode into a rotated copy of the original.
     void declare_display_matrix(const uint8_t* data, std::size_t size);
     bool has_audio() const { return m_audio_par != nullptr; }
     // `pkt` is in `src_time_base` and is consumed.
@@ -63,4 +61,4 @@ private:
     int64_t m_last_dts = AV_NOPTS_VALUE;
 };
 
-} // namespace sve
+} // namespace ta_roienc

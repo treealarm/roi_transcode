@@ -8,7 +8,7 @@
 #include <cstdlib>
 #include <vector>
 
-using namespace sve;
+using namespace ta_roienc;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \
@@ -21,14 +21,14 @@ using namespace sve;
 
 namespace {
 
-/// AT-004 -- ROI normalization edge cases, TZ v4.1 §48.
+/// ROI normalization edge cases.
 ///
-/// "Ожидаемый результат deterministic", and the point of writing it down is that every one
-/// of these inputs is a thing a real detector produces. A box that runs off the left edge
-/// because the object is half out of frame, a zero-area box from a tracker that lost its
-/// target, two boxes on the same car. What must never happen is a rectangle the encoder
-/// cannot use: negative coordinates, an edge past the frame, or left >= right.
-void at_004_normalization_edge_cases()
+/// The result must be deterministic, and every one of these inputs is a thing a real
+/// detector produces. A box that runs off the left edge because the object is half out of
+/// frame, a zero-area box from a tracker that lost its target, two boxes on the same car.
+/// What must never happen is a rectangle the encoder cannot use: negative coordinates, an
+/// edge past the frame, or left >= right.
+void normalization_edge_cases()
 {
     RoiMapBuilder builder;
     Quality q;
@@ -91,7 +91,7 @@ void at_004_normalization_edge_cases()
         CHECK(usable(r, 640, 480));
     }
 
-    // Overlap. Both survive, and the stronger one comes first: §11 resolves an overlap by
+    // Overlap. Both survive, and the stronger one comes first: overlap is resolved by
     // index, so the order is the resolution and getting it backwards would protect the
     // less important object.
     Detection strong;
@@ -111,8 +111,8 @@ void at_004_normalization_edge_cases()
     }
     CHECK(pair[0].qp_delta <= pair[1].qp_delta);
 
-    // Deterministic, which §48 asks for in as many words: the same input twice is the same
-    // output twice, down to the rectangle order.
+    // Deterministic: the same input twice is the same output twice, down to the rectangle
+    // order.
     const auto again = builder.build(640, 480, {strong, weak}, q);
     CHECK(again.size() == pair.size());
     for (std::size_t i = 0; i < again.size(); ++i) {
@@ -124,14 +124,13 @@ void at_004_normalization_edge_cases()
     }
 }
 
-/// §12 and §15: when the budget cannot pay for everything, it pays for the important thing.
+/// When the budget cannot pay for everything, it pays for the important thing.
 ///
-/// On the shaped path this was backwards until 2026-09-04. That builder sorts ascending --
-/// it paints onto a block map and the map keeps the last write, so the important object has
-/// to be painted last -- and it decided affordability in the same walk, which served the
-/// least important object in the frame first. The rectangle builder beside it has no
-/// painting order to satisfy and has always spent the budget descending, so the two
-/// disagreed about §12 depending on whether the backend had a block map.
+/// The shaped builder sorts ascending -- it paints onto a block map and the map keeps the
+/// last write, so the important object has to be painted last -- and deciding affordability
+/// in the same walk would serve the least important object in the frame first. The
+/// rectangle builder beside it has no painting order to satisfy, so the two must agree
+/// whether or not the backend has a block map.
 void the_budget_pays_for_the_important_object_first()
 {
     constexpr int kW = 1000;
@@ -189,15 +188,15 @@ void the_budget_pays_for_the_important_object_first()
     CHECK(delta_at(kW - 8, 8) == 6);
 }
 
-/// AT-004 lists the coordinates a caller can get wrong -- negative, past the edge, zero
-/// area, tiny, overlapping -- and stops at the ones that are numbers. These are not.
+/// The edge cases above are coordinates a caller can get wrong -- negative, past the edge,
+/// zero area, tiny, overlapping -- and they are numbers. These are not.
 ///
 /// The public API takes floats from whoever fills a Box, and nothing upstream promises they
-/// are finite. Before 2026-09-05 a NaN travelled from there into std::lround (undefined for
-/// a NaN), into a stable_sort comparator (where it breaks the strict weak ordering the
-/// standard requires) and into the polygon rasteriser. Dropped at the boundary now, the way
-/// a degenerate box is: the frame still encodes and one region is missing, rather than the
-/// process being gone.
+/// are finite. A NaN would travel into std::lround (undefined for a NaN), into a
+/// stable_sort comparator (where it breaks the strict weak ordering the standard requires)
+/// and into the polygon rasteriser. It is dropped at the boundary, the way a degenerate box
+/// is: the frame still encodes and one region is missing, rather than the process being
+/// gone.
 void a_box_carrying_a_number_arithmetic_cannot_use_is_dropped()
 {
     RoiMapBuilder builder;
@@ -235,8 +234,8 @@ void a_box_carrying_a_number_arithmetic_cannot_use_is_dropped()
     const auto dets = builder.detections_from(boxes, quality, 1000, 1000);
     CHECK(dets.size() == 1);
     // The survivor is the usable box: it covers the 0.4..0.6 square it was given. The
-    // bounds are not asserted exactly because the margin of §2.3 widens a detection, and
-    // by how much is that rule's business, not this test's.
+    // bounds are not asserted exactly because the margin widens a detection, and by how
+    // much is that rule's business, not this test's.
     CHECK(dets[0].x1 <= 400 && dets[0].x2 >= 600);
     CHECK(dets[0].y1 <= 400 && dets[0].y2 >= 600);
 
@@ -253,7 +252,7 @@ void a_box_carrying_a_number_arithmetic_cannot_use_is_dropped()
 
 int main()
 {
-    at_004_normalization_edge_cases();
+    normalization_edge_cases();
     the_budget_pays_for_the_important_object_first();
     a_box_carrying_a_number_arithmetic_cannot_use_is_dropped();
 
@@ -287,8 +286,8 @@ int main()
 
     Quality quality;
     quality.hold_sec = 0.25;
-    // Keep the historical pad-as-halo semantics for this fixture; v3 FixedPixels+min
-    // side would shift the AABB and is covered by v3_policy_test.
+    // Keep the pad-as-halo semantics for this fixture; FixedPixels plus min side would
+    // shift the AABB and is covered by region_policy_test.
     quality.margin_mode = MarginMode::FractionOfFrame;
     quality.min_roi_side = 0;
     quality.kinds["plate"] = KindQuality{-10, 0.02};
@@ -354,14 +353,14 @@ int main()
 
     // A naive resize drops the background (it is last). truncate_roi_rects keeps it and
     // spends the remaining slots on earlier objects.
-    std::vector<sve::Rect> many;
+    std::vector<ta_roienc::Rect> many;
     for (int32_t i = 0; i < 10; ++i) {
         many.push_back({.top = 0, .bottom = 10, .left = i * 10, .right = i * 10 + 8,
             .qp_delta = -5});
     }
     many.push_back({.top = 0, .bottom = 100, .left = 0, .right = 100, .qp_delta = 14});
     int32_t lost = 0;
-    sve::truncate_roi_rects(many, 4, 100, 100, &lost);
+    ta_roienc::truncate_roi_rects(many, 4, 100, 100, &lost);
     CHECK(many.size() == 4);
     CHECK(lost == 7); // 10 objects -> 3 kept + background; 7 objects dropped
     CHECK(many.back().qp_delta == 14);

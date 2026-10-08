@@ -1,16 +1,16 @@
 #pragma once
 
-// EMA on box geometry across frames -- TZ v3 §13 spatial_smoothing / temporal_smoothing.
+// EMA on box geometry across frames (spatial_smoothing / temporal_smoothing).
 // Stops a detector's jitter from painting a flickering ROI even when QP is already slewed.
 
-#include "sve/policy.h"
-#include "sve/types.h"
+#include "ta_roienc/policy.h"
+#include "ta_roienc/types.h"
 
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 class BoxSmoother {
 public:
@@ -19,7 +19,7 @@ public:
     /// there is no identity to smooth across frames.
     void apply(std::vector<Box>& boxes, float temporal, float spatial);
 
-    /// Nothing when §13 is switched off: smoothing is one of the behaviours
+    /// Nothing when temporal ROI is switched off: smoothing is one of the behaviours
     /// TemporalROIConfig::enabled governs, and half of a switched-off feature is a fourth
     /// behaviour nobody asked for.
     void apply(std::vector<Box>& boxes, const TemporalROIConfig& cfg)
@@ -43,4 +43,4 @@ private:
     std::unordered_map<uint64_t, State> m_state;
 };
 
-} // namespace sve
+} // namespace ta_roienc

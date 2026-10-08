@@ -5,13 +5,13 @@
 // that is the granularity every encoder backend actually accepts.
 
 #include "importance_map.h"
-#include "sve/geometry.h"
+#include "ta_roienc/geometry.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -122,4 +122,4 @@ void QpDeltaMapBuilder::paint(int width, int height, int block,
     }
 }
 
-} // namespace sve
+} // namespace ta_roienc

@@ -1,6 +1,6 @@
 #pragma once
 
-// Limit how fast a region's QP may move between frames -- TZ v3 §13 max_qp_delta_per_frame.
+// Limit how fast a region's QP may move between frames (max_qp_delta_per_frame).
 // Without this a track that flips priority (or a detector that blinks) paints a visible
 // flicker; the ceiling turns that step into a ramp.
 
@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <unordered_map>
 
-namespace sve {
+namespace ta_roienc {
 
 class QpSlewLimiter {
 public:
@@ -23,4 +23,4 @@ private:
     std::unordered_map<uint64_t, int32_t> m_last_qp;
 };
 
-} // namespace sve
+} // namespace ta_roienc

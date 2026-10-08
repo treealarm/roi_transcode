@@ -2,10 +2,10 @@
 //
 // The public API turns enums into text in a dozen places: backend_name, status_code_name,
 // pixel_format_name, preset_name, codec_profile_name, log_level_name, encoder_state_name,
-// object_priority_name, memory_type_name, quality_policy_name, fallback_policy_name. Each is
-// a switch with a fallback string at the end, and a fallback is exactly what an enumerator
-// added later falls into: the build stays green, the report says "?", and whoever reads it
-// learns nothing.
+// object_priority_name, memory_type_name, fallback_policy_name. Each is a switch with a
+// fallback string at the end, and a fallback is exactly what an enumerator added later
+// falls into: the build stays green, the report says "?", and whoever reads it learns
+// nothing.
 //
 // So this asks three things of every enumerator, from the shared table in enum_table.h:
 //
@@ -14,22 +14,18 @@
 //   * and no two enumerators of one enum share it -- a copied case label is the other way
 //     these functions go wrong, and it produces a report that is worse than "?" because it
 //     looks right.
-//
-// The coverage this brings is a side effect worth naming: §41 asks for 80% line coverage of
-// the core modules, and before this test the name mappers were the largest uncovered block
-// in them -- preset.cpp at 7.69%, memory_type.cpp and policy.cpp at zero.
 
 #include "enum_table.h"
 
-#include "sve/backend_selection.h"
-#include "sve/encoder.h"
-#include "sve/frame_buffer.h"
-#include "sve/logging.h"
-#include "sve/memory.h"
-#include "sve/object_priority.h"
-#include "sve/policy.h"
-#include "sve/status.h"
-#include "sve/types.h"
+#include "ta_roienc/backend_selection.h"
+#include "ta_roienc/encoder.h"
+#include "ta_roienc/frame_buffer.h"
+#include "ta_roienc/logging.h"
+#include "ta_roienc/memory.h"
+#include "ta_roienc/object_priority.h"
+#include "ta_roienc/policy.h"
+#include "ta_roienc/status.h"
+#include "ta_roienc/types.h"
 
 #include <cstdio>
 #include <map>
@@ -54,7 +50,7 @@ template <class E, class Fn>
 void every_enumerator_is_named(const char* enum_name, Fn name_of, const char* fallback)
 {
     std::map<std::string, int> seen;
-    sve_enum_table::for_each<E>([&](E value, const char* spelling) {
+    ta_roienc_enum_table::for_each<E>([&](E value, const char* spelling) {
         const std::string name = name_of(value);
         const std::string where = std::string(enum_name) + "::" + spelling;
         check(!name.empty(), where + " has an empty name");
@@ -71,7 +67,7 @@ void every_enumerator_is_named(const char* enum_name, Fn name_of, const char* fa
 
 int main()
 {
-    using namespace sve;
+    using namespace ta_roienc;
 
     every_enumerator_is_named<Backend>("Backend", backend_name, "?");
     every_enumerator_is_named<StatusCode>("StatusCode", status_code_name, "?");
@@ -96,13 +92,9 @@ int main()
              CodecProfile::H265Main10}) {
         check(std::string(codec_profile_name(p)) != "?", "CodecProfile has an unnamed value");
     }
-    for (const MemoryType m : {MemoryType::CPU, MemoryType::AVFRAME, MemoryType::CUDA,
-             MemoryType::VAAPI, MemoryType::ONEVPL, MemoryType::ROCKCHIP_MPP}) {
+    for (const MemoryType m : {MemoryType::CPU, MemoryType::AVFRAME, MemoryType::VAAPI,
+             MemoryType::ONEVPL}) {
         check(std::string(memory_type_name(m)) != "?", "MemoryType has an unnamed value");
-    }
-    for (const QualityPolicy q : {QualityPolicy::OBJECT_FIRST, QualityPolicy::BALANCED,
-             QualityPolicy::BITRATE_FIRST}) {
-        check(std::string(quality_policy_name(q)) != "?", "QualityPolicy has an unnamed value");
     }
     for (const FallbackPolicy f : {FallbackPolicy::Strict, FallbackPolicy::Permissive}) {
         check(std::string(fallback_policy_name(f)) != "?",
@@ -123,9 +115,9 @@ int main()
     }
 
     // Backends parse into a choice rather than a value: "auto" and "cpu" name an order
-    // rather than one backend (§8.4), so what round-trips is the kind, and the two spellings
-    // that name a list are checked for what they are instead.
-    sve_enum_table::for_each<Backend>([](Backend value, const char* spelling) {
+    // rather than one backend, so what round-trips is the kind, and the two spellings that
+    // name a list are checked for what they are instead.
+    ta_roienc_enum_table::for_each<Backend>([](Backend value, const char* spelling) {
         const char* name = backend_name(value);
         const BackendChoice choice = backend_choice_from_name(name);
         check(choice.kind == value,
@@ -133,7 +125,7 @@ int main()
                 + backend_name(choice.kind));
     });
     check(backend_choice_from_name("cpu").selection.preferred.size() > 1,
-        "\"cpu\" should name more than one backend -- §8.4 split it in two in 4.1");
+        "\"cpu\" should name more than one backend");
 
     if (failures > 0) {
         std::fprintf(stderr, "names_test: %d failure(s)\n", failures);

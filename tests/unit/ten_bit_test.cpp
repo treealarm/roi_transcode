@@ -1,15 +1,15 @@
-// AT-009: ten-bit P010 / HEVC Main10 -- TZ v3.4 §15.3, §32 and §48.
+// Ten-bit P010 / HEVC Main10.
 //
-// The acceptance test says: for each backend with the main10 capability, encode 300 frames
-// of P010 as Main10 and check the frame count, monotonic PTS and end-of-stream; where the
-// capability is absent, a documented SKIP with capability evidence.
+// For each backend with the main10 capability, encode 300 frames of P010 as Main10 and
+// check the frame count, monotonic PTS and end-of-stream; where the capability is absent,
+// a SKIP with the capability evidence.
 //
 // So the capability is asked of the encoder rather than assumed, and the skip prints what
-// it was told. §50 forbids "catch, continue, PASS", and a skip nobody can audit is the
-// same thing wearing a different hat.
+// it was told: "catch, continue, PASS" with a skip nobody can audit would be a silent pass
+// wearing a different hat.
 
-#include "sve/encoder.h"
-#include "sve/frame.h"
+#include "ta_roienc/encoder.h"
+#include "ta_roienc/frame.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-using namespace sve;
+using namespace ta_roienc;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \
@@ -30,7 +30,7 @@ using namespace sve;
 
 namespace {
 
-// §32 asks for 300 frames. Small ones: this is a functional test, not a benchmark.
+// 300 frames, small ones: this is a functional test, not a benchmark.
 constexpr int kFrames = 300;
 // Not the smallest frame that would do: Quick Sync refuses 128x96 with "current resolution
 // is unsupported", and a test that silently skips because its own frame was too small is a
@@ -53,7 +53,7 @@ EncoderConfig config_for(Backend backend)
     cfg.input.time_base = Rational{1, 25};
     cfg.input.pixel_format = PixelFormat::P010;
     cfg.settings.encoder = backend;
-    cfg.settings.codec = Codec::H265;   // §15.3's ten-bit profile is HEVC
+    cfg.settings.codec = Codec::H265;   // the ten-bit profile here is HEVC's
     cfg.settings.crf = 30;
     cfg.settings.metadata.bitstream_sei = false;
     cfg.log = [](LogLevel, std::string_view) {};
@@ -92,17 +92,17 @@ StatusCode create_refusal(const EncoderConfig& cfg)
     }
 }
 
-/// Runs AT-009 against one backend, or reports why it could not.
-void at_009(Backend backend, const char* label)
+/// Runs the ten-bit encode against one backend, or reports why it could not.
+void ten_bit_encodes(Backend backend, const char* label)
 {
     EncoderConfig cfg = config_for(backend);
 
-    std::unique_ptr<SmartVideoEncoder> enc;
+    std::unique_ptr<VideoEncoder> enc;
     try {
         enc = CreateVideoEncoder(cfg);
     } catch (const EncoderError& e) {
         // Either the device is absent or its encoder has no ten-bit path. Both are a SKIP,
-        // and the message the backend gave is the evidence AT-009 asks for.
+        // and the message the backend gave is the evidence.
         std::printf("  skip  %s: %s\n", label, e.what());
         return;
     }
@@ -166,7 +166,7 @@ void at_009(Backend backend, const char* label)
 
 void eight_bit_input_cannot_ask_for_main10()
 {
-    // §8.2: a pixel format and a profile that cannot go together are refused at Create.
+    // A pixel format and a profile that cannot go together are refused at Create.
     EncoderConfig cfg = config_for(Backend::X265);
     cfg.input.pixel_format = PixelFormat::YUV420P;
     cfg.settings.profile = CodecProfile::H265Main10;
@@ -182,9 +182,9 @@ void ten_bit_input_cannot_ask_for_an_eight_bit_profile()
 
 void ten_bit_h264_is_refused_rather_than_invented()
 {
-    // H.264 has a ten-bit profile, but nothing in this specification asks for one, and
-    // claiming it would be inventing a contract nobody wrote. Asked of the H.264 backend,
-    // so the refusal is about the bit depth and not about the backend's codec.
+    // H.264 has a ten-bit profile, but nothing here supports it, and claiming it would be
+    // inventing a contract nobody wrote. Asked of the H.264 backend, so the refusal is
+    // about the bit depth and not about the backend's codec.
     EncoderConfig cfg = config_for(Backend::X264);
     cfg.settings.codec = Codec::H264;
     CHECK(create_refusal(cfg) == StatusCode::InvalidArgument);
@@ -198,9 +198,9 @@ int main()
     ten_bit_input_cannot_ask_for_an_eight_bit_profile();
     ten_bit_h264_is_refused_rather_than_invented();
 
-    std::printf("AT-009 (10-bit P010/Main10, 300 frames):\n");
-    at_009(Backend::X265, "x265/libx265");
-    at_009(Backend::IntelOneVpl, "qsv/hevc_qsv");
+    std::printf("10-bit P010/Main10, 300 frames:\n");
+    ten_bit_encodes(Backend::X265, "x265/libx265");
+    ten_bit_encodes(Backend::IntelOneVpl, "qsv/hevc_qsv");
 
     std::printf("ok\n");
     return 0;

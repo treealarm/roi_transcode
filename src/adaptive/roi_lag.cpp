@@ -4,15 +4,12 @@
 #include <cmath>
 #include <limits>
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
-// TZ §49's ROI-lag acceptance thresholds, which are the specification's numbers and not
-// ours. §14 gives the method, §49 is named there as the single normative source of the
-// values -- so they are transcribed here once, with that provenance, rather than sitting as
-// four bare literals inside a return statement where nobody can tell a threshold from a
-// tuning constant.
+// The ROI-lag acceptance thresholds, named once rather than sitting as four bare literals
+// inside a return statement where nobody can tell a threshold from a tuning constant.
 constexpr double kP95 = 0.95;
 constexpr double kP99 = 0.99;
 constexpr double kMaxP95LagFrames = 3.0;
@@ -136,4 +133,4 @@ void fill_lag_report(const std::vector<RoiLagSample>& samples, Report& report)
     report.roi_lag_acceptance = roi_lag_acceptance(samples);
 }
 
-} // namespace sve
+} // namespace ta_roienc

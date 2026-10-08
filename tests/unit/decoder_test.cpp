@@ -1,5 +1,5 @@
-// The decoder's side of §8: what a caller promises about its buffers, and what that costs
-// when it is not asked.
+// The decoder's side: what a caller promises about its buffers, and what that costs when it
+// is not asked.
 //
 // One property is worth a test of its own. An Annex-B access unit ends where the next one
 // begins and nowhere else, so a parser in front of the decoder cannot emit a picture until
@@ -14,11 +14,11 @@
 // Annex-B with the parameter sets in band -- which is the case that would install a parser
 // -- and it needs nothing checked in.
 
-#include "sve/decoder.h"
-#include "sve/frame.h"
-#include "sve/packet.h"
-#include "sve/push_encoder.h"
-#include "sve/raw_frame.h"
+#include "ta_roienc/decoder.h"
+#include "ta_roienc/encoder.h"
+#include "ta_roienc/frame.h"
+#include "ta_roienc/packet.h"
+#include "ta_roienc/raw_frame.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -26,7 +26,7 @@
 #include <string>
 #include <vector>
 
-using namespace sve;
+using namespace ta_roienc;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \
@@ -64,14 +64,19 @@ std::vector<std::vector<uint8_t>> annex_b_stream()
     cfg.log = [](LogLevel, std::string_view) {};
 
     std::vector<std::vector<uint8_t>> units;
-    auto encoder = CreatePushVideoEncoder(cfg);
-    CHECK(encoder->Subscribe([&units](EncoderEvent event) {
-                     if (event.type == EncoderEventType::Packet) {
-                         const std::span<const uint8_t> bytes = event.packet->payload.bytes();
-                         units.emplace_back(bytes.begin(), bytes.end());
-                     }
-                 })
-              .ok());
+    auto encoder = CreateVideoEncoder(cfg);
+    const auto drain = [&units, &encoder] {
+        for (;;) {
+            EncodedPacket packet;
+            const Status s = encoder->ReceivePacket(&packet);
+            if (s.code() == StatusCode::Again || s.code() == StatusCode::EndOfStream) {
+                return;
+            }
+            CHECK(s.ok());
+            const std::span<const uint8_t> bytes = packet.payload.bytes();
+            units.emplace_back(bytes.begin(), bytes.end());
+        }
+    };
 
     auto pixels = std::make_shared<Pixels>();
     for (int64_t i = 0; i < kFrames; ++i) {
@@ -100,9 +105,11 @@ std::vector<std::vector<uint8_t>> annex_b_stream()
         TimedFrame timed;
         CHECK(WrapRawFrame(view, &timed.frame).ok());
         timed.metadata.timestamp = view.timestamp;
-        CHECK(encoder->Process(timed).ok());
+        CHECK(encoder->SubmitFrame(timed).ok());
+        drain();
     }
     CHECK(encoder->Flush().ok());
+    drain();
     CHECK(static_cast<int64_t>(units.size()) == kFrames);
     return units;
 }
@@ -116,7 +123,7 @@ void a_whole_access_unit_decodes_to_a_picture_without_the_next_one()
     // would otherwise be handed to a parser.
     CHECK(decoder.Open(InputCodec::H264, {}).ok());
     CHECK(decoder.decoder_name() == "h264");
-    // Nothing was asked for, so nothing hardware may be reported -- §50 in miniature.
+    // Nothing was asked for, so nothing hardware may be reported.
     CHECK(decoder.hardware_name().empty());
 
     int64_t from_first = 0;

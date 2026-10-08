@@ -1,18 +1,16 @@
-// What the pipeline does when a backend fails -- TZ v4.2 §7, §8.4 and §50.
+// What the pipeline does when a backend fails.
 //
 // Everything else in tests/unit drives the pipeline through a backend that works, because
 // the backends here do work: libx264 opens on any machine. That leaves the other half of
 // roi_encoder.cpp -- the branch taken when Configure declines, when a probe opens and
 // encodes nothing, when GetCodecParameters has no answer, when SubmitFrame or Flush
-// refuses -- never executed by any test. Those branches are the ones that run on the
-// customer's machine, where the hardware is missing or busy and ours is neither.
+// refuses. Those branches are the ones that run where the hardware is missing or busy.
 //
-// A fake backend rather than a real one under induced load: §7 is an interface, and an
-// interface's failure modes are the return values it declares. Making libx264 fail on
-// demand would mean a switch inside shipping code, which is the thing this file exists to
-// avoid -- RoiEncoder takes the registry it opens from, so the fake arrives the same way
-// any component does, through a descriptor §26.4 already defines. The fake itself is in
-// tests/unit/fake_backend.h, shared with encoder_faults_test.
+// A fake backend rather than a real one under induced load: an interface's failure modes
+// are the return values it declares. Making libx264 fail on demand would mean a switch
+// inside shipping code, which is the thing this file exists to avoid -- RoiEncoder takes
+// the registry it opens from, so the fake arrives the same way any component does. The
+// fake itself is in tests/unit/fake_backend.h, shared with encoder_faults_test.
 
 #include "roi_encoder.h"
 
@@ -26,7 +24,7 @@
 #include <string>
 #include <vector>
 
-using namespace sve;
+using namespace ta_roienc;
 
 #define CHECK(cond)                                                            \
     do {                                                                       \
@@ -119,19 +117,6 @@ void a_working_backend_opens_and_delivers()
     CHECK(encoder.backends_declined() == 0);
 }
 
-void a_policy_the_library_does_not_implement_is_refused_by_name()
-{
-    FakeBackend backend;
-    const BackendRegistry registry = registry_with(backend);
-    RoiEncoder encoder(registry);
-    BackendConfig config = config_for(backend);
-    config.policy = QualityPolicy::BITRATE_FIRST;
-
-    const std::string why = refusal_of(encoder, config);
-    CHECK(why.find("BITRATE_FIRST") != std::string::npos);
-    CHECK(why.find("not implemented") != std::string::npos);
-}
-
 void a_backend_that_cannot_serve_the_codec_leaves_its_reason()
 {
     FakeBackend backend;
@@ -142,8 +127,8 @@ void a_backend_that_cannot_serve_the_codec_leaves_its_reason()
     config.codec = Codec::H264;
 
     const std::string why = refusal_of(encoder, config);
-    // §50: skipped is not the same as tried and declined, and the count must not blur
-    // them -- no device was touched here.
+    // Skipped is not the same as tried and declined, and the count must not blur them -- no
+    // device was touched here.
     CHECK(encoder.backends_declined() == 0);
     CHECK(encoder.backends_skipped().size() == 1);
     CHECK(encoder.backends_skipped()[0].find("H.264") != std::string::npos);
@@ -397,10 +382,6 @@ void each_backend_identifier_gets_its_own_label()
         {Backend::IntelOneVpl, Codec::H265, "hevc_qsv (Intel VPL mfxExtEncoderROI)"},
         {Backend::Vaapi, Codec::H264, "h264_vaapi (Intel iHD VAEncROI)"},
         {Backend::Vaapi, Codec::H265, "hevc_vaapi (Intel iHD VAEncROI)"},
-        {Backend::NvidiaNvenc, Codec::H264,
-            "h264_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)"},
-        {Backend::NvidiaNvenc, Codec::H265,
-            "hevc_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)"},
         {Backend::X264, Codec::H264, "libx264 (CPU, via libavcodec)"},
         {Backend::X264Direct, Codec::H264,
             "libx264 (CPU, direct API, per-macroblock quant_offsets)"},
@@ -426,7 +407,6 @@ void each_backend_identifier_gets_its_own_label()
 int main()
 {
     a_working_backend_opens_and_delivers();
-    a_policy_the_library_does_not_implement_is_refused_by_name();
     a_backend_that_cannot_serve_the_codec_leaves_its_reason();
     a_backend_that_declines_is_counted_and_quoted();
     a_probe_that_encodes_nothing_declines_the_backend();

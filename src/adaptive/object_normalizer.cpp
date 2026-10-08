@@ -1,8 +1,8 @@
 #include "object_normalizer.h"
 
 #include "importance.h"
-#include "sve/geometry.h"
-#include "sve/object_priority.h"
+#include "ta_roienc/geometry.h"
+#include "ta_roienc/object_priority.h"
 
 #include <algorithm>
 #include <cmath>
@@ -12,7 +12,7 @@
 #include <span>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
 /// The region budget used when neither the caller nor the backend names one.
 ///
@@ -25,19 +25,14 @@ constexpr int32_t kDefaultRegionBudget = 256;
 
 namespace {
 
-/// How much of the frame §12's budget allows to be protected, in pixels.
+/// How much of the frame the area budget allows to be protected, in pixels.
 ///
 /// Written once because it is read twice -- the AABB builder and the block-map builder --
 /// and a meaningful number computed in two places is where one copy changes and the other
 /// does not.
 ///
-/// **A fraction of zero means nothing may be protected, and that is a change made
-/// 2026-09-04.** It used to mean the opposite: the budget was computed as `fraction > 0 ?
-/// fraction * area : 0` and then only enforced `if (budget > 0)`, so zero switched the cap
-/// off entirely and every region was protected. Measured before the change: output at 0.0
-/// was byte-identical to output at 1.0. A value that reads as its own opposite is worse
-/// than a missing feature, and no sentinel is needed here -- "no cap" is already spelled
-/// 1.0, because no region can exceed the frame it lies in.
+/// **A fraction of zero means nothing may be protected.** No sentinel is needed for "no
+/// cap": that is already spelled 1.0, because no region can exceed the frame it lies in.
 double protected_area_budget(const Quality& quality, double frame_area)
 {
     return std::max(0.0f, quality.max_protected_fraction) * frame_area;
@@ -74,8 +69,8 @@ int32_t halo_px(const Quality& quality, int32_t frame_extent, double kind_pad)
     return static_cast<int32_t>(std::lround(quality.pad * frame_extent));
 }
 
-/// Expand by fixed-pixel margin when that mode is on, then to at least min_roi_side (§11.2–11.3).
-/// FractionOfFrame keeps the historical behaviour: the AABB is the body, pad is only the halo.
+/// Expand by fixed-pixel margin when that mode is on, then to at least min_roi_side.
+/// FractionOfFrame keeps the AABB as the body, and pad is only the halo.
 /// KindQuality.pad / Quality.pad still feed Detection::pad_* for the soft rim — they never
 /// double as the body margin, so an explicit pad_norm does not inflate the box twice.
 void apply_geometry_policy(Detection& d, int32_t width, int32_t height, const Quality& quality)
@@ -120,10 +115,10 @@ void apply_geometry_policy(Detection& d, int32_t width, int32_t height, const Qu
 /// converted to int. An infinity is the same story through the multiplication by the frame
 /// size.
 ///
-/// So a box that carries one is dropped here, at the boundary, in the same way §2.3's
-/// degenerate boxes are: the frame still encodes, and one region is missing rather than
-/// the process. Checked once per box on the way in rather than at each of the three
-/// places, because the three are far apart and the next one added would not know to look.
+/// So a box that carries one is dropped here, at the boundary, in the same way degenerate
+/// boxes are: the frame still encodes, and one region is missing rather than the process.
+/// Checked once per box on the way in rather than at each of the three places, because the
+/// three are far apart and the next one added would not know to look.
 bool box_is_finite(const Box& b)
 {
     const auto finite = [](float v) { return std::isfinite(v); };
@@ -179,9 +174,9 @@ Detection to_detection(
         } else {
             d.priority = priority_from_importance(d.importance);
         }
-        // The ladder is the contract (TZ §11.1); continuous importance stays the way a
-        // step is chosen, not a second way to answer. A caller with a number of its own
-        // says so through desired_qp_delta.
+        // The ladder is the contract; continuous importance stays the way a step is chosen,
+        // not a second way to answer. A caller with a number of its own says so through
+        // desired_qp_delta.
         d.qp_delta = b.has_desired_qp_delta ? b.desired_qp_delta : qp_delta_for(d.priority);
         if (b.has_priority || b.has_desired_qp_delta) {
             // Ordering against other regions still needs a comparable importance.
@@ -273,18 +268,15 @@ std::optional<Rect> body_rect(const Detection& d, int width, int height)
     return r;
 }
 
-/// Which detections §15's area budget can pay for -- TZ v4.2 §12 and §15.
+/// Which detections the area budget can pay for.
 ///
-/// One policy, called by both builders. It was written twice, and the two drifted: the
-/// shaped builder spent the budget in the ascending order it needed for painting, so the
-/// least important object in the frame was served first (fixed 2026-09-04). Extracting the
-/// number alone left the walk that decides *who* gets it in two places, which is the layer
-/// they actually disagreed at.
+/// One policy, called by both builders, so that the walk that decides *who* gets the
+/// budget exists in one place.
 ///
 /// `detections` is walked in the order given and the caller owes it descending importance:
-/// §15 spends on the critical objects first, and a plate has to be able to outbid the wall
-/// behind it. Areas are summed rather than united, so a face inside a person spends its own
-/// area again -- that errs towards spending less, which is the safe direction.
+/// the budget is spent on the critical objects first, and a plate has to be able to outbid
+/// the wall behind it. Areas are summed rather than united, so a face inside a person spends
+/// its own area again -- that errs towards spending less, which is the safe direction.
 std::unordered_set<const Detection*> affordable_detections(
     std::span<const Detection* const> by_importance_desc, const Quality& quality,
     int width, int height)
@@ -352,16 +344,12 @@ std::vector<Rect> build_shaped(int width, int height,
 
     // Two walks, and they go in opposite directions on purpose.
     //
-    // §15 spends the budget on the critical objects first, so affordability is decided
+    // The budget is spent on the critical objects first, so affordability is decided
     // walking importance *downwards* -- a plate must be able to outbid a wall behind it.
     // Painting goes the other way, upwards, because the map keeps the last write and the
     // important object has to be written last. Deciding and painting in one pass means one
-    // of the two orders is wrong, and until 2026-09-04 it was the first: this builder spent
-    // the budget in the ascending order it needs for painting, so the least important
-    // object in the frame was served first and a plate could be refused for a wall that had
-    // already taken the room. RoiMapBuilder::build, which has no painting order to satisfy,
-    // has always spent it descending -- so the two builders disagreed about §12 depending
-    // on whether the backend had a block map.
+    // of the two orders is wrong: a plate could be refused for a wall that had already
+    // taken the room.
     //
     // `ordered` is ascending, so reading it backwards is the descending order the budget
     // wants -- one sort serves both walks, and equal importances are interchangeable for
@@ -374,15 +362,11 @@ std::vector<Rect> build_shaped(int width, int height,
         if (!body_rect(*dp, width, height)) {
             continue;
         }
-        // What did not fit is painted at zero rather than left unpainted, and the
-        // difference is the whole of §12's rule: the map starts filled with the background
-        // penalty, so an object nobody paints is not neutral, it is *degraded*. A region
-        // nobody could afford to sharpen is still not background. Its halo does go -- a
-        // halo exists to soften a step that is no longer there.
-        //
-        // Until 2026-09-04 this builder skipped them, so the shaped path degraded what the
-        // rectangle path left alone. RoiMapBuilder::build has always emitted the unaffordable
-        // object with a delta of zero; now both do.
+        // What did not fit is painted at zero rather than left unpainted: the map starts
+        // filled with the background penalty, so an object nobody paints is not neutral, it
+        // is *degraded*. A region nobody could afford to sharpen is still not background.
+        // Its halo does go -- a halo exists to soften a step that is no longer there.
+        // RoiMapBuilder::build emits the unaffordable object with a delta of zero too.
         const bool paid = within_budget.contains(dp);
         afforded.push_back(Afforded{dp, paid ? dp->qp_delta : 0, paid ? dp->pad_qp_delta : 0});
     }
@@ -415,8 +399,8 @@ std::vector<Rect> build_shaped(int width, int height,
     }
     for (const Afforded& a : afforded) {
         // A body of zero is painted, not skipped. The map starts filled with the background
-        // penalty, so skipping an object leaves it degraded rather than neutral -- which is
-        // the opposite of what §12 says happens to a region the budget could not pay for.
+        // penalty, so skipping an object leaves it degraded rather than neutral -- the
+        // opposite of what should happen to a region the budget could not pay for.
         const Detection* dp = a.dp;
         if (dp->polygon.size() >= 3) {
             std::memset(scratch.data(), 0, scratch.size());
@@ -479,13 +463,13 @@ std::vector<Rect> RoiMapBuilder::build(int width, int height,
         return out;
     }
 
-    // §12: on overlap the more important region wins -- a plate inside a vehicle keeps the
+    // On overlap the more important region wins -- a plate inside a vehicle keeps the
     // plate's quality, a face inside a person keeps the face's.
     //
     // That is what this ordering *is*. The encoders resolve an overlap by taking the first
     // region that covers a block (Intel VPL and libavcodec's QSV wrapper both do), so
-    // sorting by importance descending makes their rule and §12's the same rule. No
-    // overlap test appears anywhere, and none is needed: it falls out of the order.
+    // sorting by importance descending makes their rule and ours the same rule. No overlap
+    // test appears anywhere, and none is needed: it falls out of the order.
     std::vector<const Detection*> ordered;
     ordered.reserve(detections.size());
     for (const auto& d : detections) {
@@ -494,10 +478,10 @@ std::vector<Rect> RoiMapBuilder::build(int width, int height,
     std::stable_sort(ordered.begin(), ordered.end(),
         [](const Detection* a, const Detection* b) { return a->importance > b->importance; });
 
-    // §15's budget, denominated in area rather than in bits, and decided by the one
-    // function both builders call. Under a constant quantizer there is no bitrate to hand
-    // around, but protection is still paid for: every block held at a lower QP is paid for
-    // by the background it is taken from, and a frame with no background left cannot pay.
+    // The area budget, decided by the one function both builders call. Under a constant
+    // quantizer there is no bitrate to hand around, but protection is still paid for: every
+    // block held at a lower QP is paid for by the background it is taken from, and a frame
+    // with no background left cannot pay.
     //
     // Areas are summed, not united, so nesting counts twice: a face inside a person spends
     // its own area again. That errs towards spending less, which is the safe direction --
@@ -620,4 +604,4 @@ void truncate_roi_rects(std::vector<Rect>& rects, int32_t budget, int32_t width,
     }
 }
 
-} // namespace sve
+} // namespace ta_roienc

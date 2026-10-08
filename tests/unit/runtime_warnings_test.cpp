@@ -1,10 +1,10 @@
-// §50's rule, in the four places that implement it -- "no silent degradation".
+// No silent degradation, in the four places that implement it.
 //
 // Each guard answers the same question for one degradation: the caller asked for something
 // this encoder cannot do, so either say so and refuse (FallbackPolicy::Strict), or do the
-// lesser thing and say that too (Permissive). What §50 forbids is the third option, which is
-// to do the lesser thing quietly, and the only way to tell that apart from the second is to
-// look at whether anything was logged.
+// lesser thing and say that too (Permissive). What must not happen is the third option,
+// which is to do the lesser thing quietly, and the only way to tell that apart from the
+// second is to look at whether anything was logged.
 //
 // Two properties per guard, and the second is the one that a change would break silently:
 //
@@ -12,9 +12,6 @@
 //   * Permissive returns Ok, logs once, and does not log again -- these are called per
 //     frame, so a guard that forgot its `warned` flag would bury the encode in its own
 //     warnings at thirty lines a second.
-//
-// Written 2026-09-03, when the coverage measurement §41 asks for showed the Strict half of
-// every one of them had never run.
 
 #include "codec_id.h"
 #include "encoder_runtime_warnings.h"
@@ -23,7 +20,7 @@
 #include <string>
 #include <vector>
 
-using namespace sve;
+using namespace ta_roienc;
 
 namespace {
 
@@ -62,7 +59,7 @@ void strict_refuses_and_permissive_reports_once()
 {
     const EncoderCapabilities caps = without_sei();
 
-    // §19.2: bitstream metadata asked of an encoder that cannot carry it.
+    // Bitstream metadata asked of an encoder that cannot carry it.
     {
         Recorder strict_log;
         bool warned = false;
@@ -84,7 +81,7 @@ void strict_refuses_and_permissive_reports_once()
             "and does not warn again -- this runs per frame");
     }
 
-    // §22: regions cut down to what the backend accepts.
+    // Regions cut down to what the backend accepts.
     {
         Recorder strict_log;
         bool warned = false;
@@ -105,7 +102,7 @@ void strict_refuses_and_permissive_reports_once()
         check(permissive_log.lines.size() == 1, "and warns only once");
     }
 
-    // §22 again: a per-block map handed to a backend that takes rectangles.
+    // A per-block map handed to a backend that takes rectangles.
     {
         Recorder strict_log;
         bool warned = false;

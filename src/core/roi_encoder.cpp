@@ -7,7 +7,7 @@
 #include <cstring>
 #include <format>
 
-namespace sve {
+namespace ta_roienc {
 
 
 using roiav::fail;
@@ -22,9 +22,6 @@ const char* RoiEncoder::label() const
     case Backend::Vaapi:
         return h264 ? "h264_vaapi (Intel iHD VAEncROI)"
                     : "hevc_vaapi (Intel iHD VAEncROI)";
-    case Backend::NvidiaNvenc:
-        return h264 ? "h264_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)"
-                    : "hevc_nvenc (NVIDIA; stock FFmpeg ignores ROI side data)";
     case Backend::X264:
         return "libx264 (CPU, via libavcodec)";
     case Backend::X264Direct:
@@ -49,9 +46,8 @@ namespace {
 // caller guessing which backends lie.
 //
 // Written entirely against the interface: a grey frame from the backend's own factory,
-// submitted and drained the way any caller would. It used to build an AVFrame by hand,
-// which meant the one piece of code whose job is to find out whether a backend works could
-// only ever have worked for libavcodec backends.
+// submitted and drained the way any caller would, so that it works for backends that are
+// not libavcodec backends.
 bool probe_one_frame(const IEncoderBackend& backend, BackendSession& session)
 {
     auto made = backend.CreateFrame(session, MemoryType::CPU);
@@ -124,16 +120,6 @@ Result<FrameBufferPtr> RoiEncoder::create_frame(MemoryType memory)
 
 void RoiEncoder::open_deferred(const BackendConfig& config)
 {
-    if (config.policy != QualityPolicy::OBJECT_FIRST) {
-        // Refused rather than approximated. BALANCED and BITRATE_FIRST both need the
-        // bitrate budget of §15, and running OBJECT_FIRST while reporting otherwise would
-        // make every measurement taken against it wrong.
-        fail(std::format("quality policy {} is not implemented",
-            quality_policy_name(config.policy)));
-    }
-    // Same rule for settings that exist only as declarations. A caller who asks for a
-    // bitrate target and gets neither has been misled.
-
     std::string errors;
     const std::vector<BackendRef> chain = resolve_backends(config.kind,
         config.backend_selection, config.codec, &m_backends_skipped, *m_registry);
@@ -183,10 +169,9 @@ void RoiEncoder::open_deferred(const BackendConfig& config)
 
     m_codec = config.codec;
     // Kept because capabilities() has to ask the same question the session was opened
-    // with. Since 2026-09-01 one of the answers depends on it: the native oneVPL backend
-    // has a per-block QP map under CQP and hardware VBR under a target, and not both.
-    // Asking without the target would tell the adaptive layer it may drop the rectangle
-    // budget on a session that is going to want rectangles.
+    // with: the native oneVPL backend has a per-block QP map under CQP and hardware VBR
+    // under a target, and not both. Asking without the target would tell the adaptive
+    // layer it may drop the rectangle budget on a session that is going to want rectangles.
     m_target_bitrate = config.rate_control.target_bitrate;
 
     // Asked of the backend rather than read off its session: this is what replaced
@@ -275,4 +260,4 @@ void RoiEncoder::flush()
 }
 
 
-} // namespace sve
+} // namespace ta_roienc

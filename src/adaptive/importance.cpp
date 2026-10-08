@@ -1,13 +1,13 @@
-// The importance model of TZ v2.0 §11.
+// The importance model.
 
 #include "importance.h"
 
-#include "sve/object_priority.h"
+#include "ta_roienc/object_priority.h"
 
 #include <algorithm>
 #include <cmath>
 
-namespace sve {
+namespace ta_roienc {
 
 ObjectPriority priority_from_importance(float importance)
 {
@@ -29,15 +29,14 @@ ObjectPriority priority_from_importance(float importance)
 
 float default_semantic_priority(const std::string& kind, float unknown)
 {
-    // §11's own table, on the taxonomy ta_vms actually uses
+    // The semantic table, on the taxonomy ta_vms actually uses
     // (VmsAnalyticsSingleton/DetectionKinds.cs). Two notes on the mapping:
     //
-    //   * §11 says "pedestrian" where our detector says "person" -- the same thing.
-    //   * §11 has no animal. 0.60 puts it level with a vehicle: something real and worth
-    //     keeping, not something the scene is about. Said here rather than left implicit,
-    //     because it is our number and not the specification's.
+    //   * "pedestrian" is what our detector calls "person" -- the same thing.
+    //   * An animal at 0.60 is level with a vehicle: something real and worth keeping,
+    //     not something the scene is about.
     //
-    // "road" and "background" are in §11's table but nothing reports them: they describe
+    // "road" and "background" are in the table but nothing reports them: they describe
     // what is left over, which is what background_qp_delta already handles.
     if (kind == "license_plate" || kind == "plate") return 1.00f;
     if (kind == "face")          return 0.95f;
@@ -105,9 +104,9 @@ float importance_of(const Object& object, const ImportancePolicy& policy,
 
     // A class we recognise is worth what its class is worth, full stop.
     //
-    // §11 multiplies confidence into everything, and that inverts its own table: small
-    // objects are detected less confidently, and small objects are the ones with the
-    // highest priority, so a body outranks the face on it. The reasoning is in
+    // Multiplying confidence into everything inverts the semantic table: small objects are
+    // detected less confidently, and small objects are the ones with the highest priority,
+    // so a body outranks the face on it. The reasoning is in
     // ImportancePolicy::weigh_confidence_on_known_classes; the short version is that
     // detections arrive already filtered by min_confidence, so "is it really there" has
     // been answered, and "what is it worth" is a different question with a different answer.
@@ -120,9 +119,8 @@ float importance_of(const Object& object, const ImportancePolicy& policy,
         ? 1.0f
         : (object.confidence > 0.0f ? object.confidence : policy.assumed_confidence);
 
-    // The last two factors of §11. TemporalStability rises with how long the track has
-    // persisted (proto's reading of the name). MotionWeight is optional and stays 1.0
-    // until the policy turns it on -- §11 marks it that way.
+    // The last two factors. TemporalStability rises with how long the track has persisted.
+    // MotionWeight is optional and stays 1.0 until the policy turns it on.
     const float temporal_stability = temporal_stability_of(track, policy);
     const float motion_weight = motion_weight_of(track, policy);
 
@@ -155,4 +153,4 @@ int32_t qp_from_importance(float importance, const ImportancePolicy& policy)
     return std::clamp(static_cast<int32_t>(std::lround(qp)), kMinQpDelta, kMaxQpDelta);
 }
 
-} // namespace sve
+} // namespace ta_roienc

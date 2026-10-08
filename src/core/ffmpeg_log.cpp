@@ -1,7 +1,7 @@
-// Routing FFmpeg's diagnostics into a LogSink -- TZ v4.2 §29. See sve/ffmpeg_log.h for why
-// this is process-wide and why that is the application's decision rather than an encoder's.
+// Routing FFmpeg's diagnostics into a LogSink. See ta_roienc/ffmpeg_log.h for why this is
+// process-wide and why that is the application's decision rather than an encoder's.
 
-#include "sve/ffmpeg_log.h"
+#include "ta_roienc/ffmpeg_log.h"
 
 #include <cstdarg>
 #include <mutex>
@@ -12,7 +12,7 @@ extern "C" {
 #include <libavutil/log.h>
 }
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -145,4 +145,4 @@ void SetFFmpegLogSink(LogSink sink)
     av_log_set_callback(wanted ? &forward : &av_log_default_callback);
 }
 
-} // namespace sve
+} // namespace ta_roienc

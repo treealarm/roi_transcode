@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-namespace sve::cbor {
+namespace ta_roienc::cbor {
 
 namespace {
 
@@ -277,4 +277,4 @@ bool Reader::skip_at(int depth)
     }
 }
 
-} // namespace sve::cbor
+} // namespace ta_roienc::cbor

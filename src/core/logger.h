@@ -1,19 +1,19 @@
 #pragma once
 
-// The library's own end of the logging contract -- TZ v3.4 §29.
+// The library's own end of the logging contract.
 //
 // One place that knows what to do when the application named no sink, so that the answer
 // is the same everywhere and no caller writes to stderr directly. Held by value and
 // cheap to copy: it is a std::function and a bool.
 
-#include "sve/logging.h"
+#include "ta_roienc/logging.h"
 
 #include <cstdio>
 #include <string>
 #include <string_view>
 #include <utility>
 
-namespace sve {
+namespace ta_roienc {
 
 class Logger {
 public:
@@ -26,11 +26,8 @@ public:
             m_sink(level, message);
             return;
         }
-        // No sink: stderr, one line, no level prefix on warnings.
-        //
-        // The lack of a prefix is not an oversight. These exact lines are what
-        // integration/scripts/check.sh reads to prove a guard fired, and they are what a
-        // person running the CLI sees. Trace and Debug are dropped rather than printed,
+        // No sink: stderr, one line, no level prefix on warnings -- what a person running a
+        // command-line tool should see. Trace and Debug are dropped rather than printed,
         // because the built-in sink has no way to be turned down.
         if (level == LogLevel::Trace || level == LogLevel::Debug) {
             return;
@@ -47,4 +44,4 @@ private:
     LogSink m_sink;
 };
 
-} // namespace sve
+} // namespace ta_roienc

@@ -1,6 +1,6 @@
 #pragma once
 
-// The buffer behind WrapRawFrame (§8.10) -- the caller's planes plus the handle that keeps
+// The buffer behind WrapRawFrame -- the caller's planes plus the handle that keeps
 // them alive.
 //
 // PlaneBuffer in the public header describes the same pixels and deliberately owns nothing:
@@ -17,15 +17,15 @@
 // as_avframe hands libavcodec a frame that borrows these pixels, and it can only do that
 // without copying if it can also hand over the owner. See backend/common/backend_common.cpp.
 
-#include "sve/frame_buffer.h"
-#include "sve/raw_frame.h"
+#include "ta_roienc/frame_buffer.h"
+#include "ta_roienc/raw_frame.h"
 
 #include <array>
 #include <cstddef>
 #include <memory>
 #include <span>
 
-namespace sve {
+namespace ta_roienc {
 
 class OwnedPlaneBuffer final : public IFrameBuffer {
 public:
@@ -71,4 +71,4 @@ private:
     std::shared_ptr<const void> m_owner;
 };
 
-} // namespace sve
+} // namespace ta_roienc

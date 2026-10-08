@@ -1,7 +1,7 @@
 #include "frame_input.h"
 
 #include <cstring>
-namespace sve {
+namespace ta_roienc {
 
 
 using roiav::check;
@@ -9,14 +9,14 @@ using roiav::fail;
 
 namespace {
 
-AVCodecID codec_id_of(sve::InputCodec c)
+AVCodecID codec_id_of(ta_roienc::InputCodec c)
 {
     switch (c) {
-    case sve::InputCodec::H264:
+    case ta_roienc::InputCodec::H264:
         return AV_CODEC_ID_H264;
-    case sve::InputCodec::H265:
+    case ta_roienc::InputCodec::H265:
         return AV_CODEC_ID_HEVC;
-    case sve::InputCodec::Jpeg:
+    case ta_roienc::InputCodec::Jpeg:
         return AV_CODEC_ID_MJPEG;
     default:
         return AV_CODEC_ID_NONE;
@@ -124,11 +124,11 @@ bool FrameDecoder::open_context(const AVCodec* dec, const uint8_t* extradata,
     return true;
 }
 
-void FrameDecoder::open(sve::InputCodec codec, const uint8_t* extradata, int extradata_size,
+void FrameDecoder::open(ta_roienc::InputCodec codec, const uint8_t* extradata, int extradata_size,
     AVBufferRef* hw_device, Framing framing)
 {
     m_codec = codec;
-    if (codec == sve::InputCodec::Raw) {
+    if (codec == ta_roienc::InputCodec::Raw) {
         return;
     }
 
@@ -160,7 +160,7 @@ void FrameDecoder::open(sve::InputCodec codec, const uint8_t* extradata, int ext
     // choose, because a parser is not merely unnecessary there but actively wrong -- see
     // is_length_prefixed. libavcodec reads the configuration record out of extradata and
     // splits the access units itself, so the packets go straight through.
-    if ((codec == sve::InputCodec::H264 || codec == sve::InputCodec::H265)
+    if ((codec == ta_roienc::InputCodec::H264 || codec == ta_roienc::InputCodec::H265)
         && framing == Framing::Arbitrary
         && !is_length_prefixed(extradata, extradata_size)) {
         m_parser = av_parser_init(id);
@@ -183,7 +183,7 @@ void FrameDecoder::receive(const FrameCb& cb)
 void FrameDecoder::push(
     const uint8_t* data, size_t size, int64_t pts, const FrameCb& cb)
 {
-    if (m_codec == sve::InputCodec::Raw) {
+    if (m_codec == ta_roienc::InputCodec::Raw) {
         fail("FrameDecoder::push called on a raw session");
     }
     if (!data || size == 0) {
@@ -232,11 +232,11 @@ void FrameDecoder::push(
 
 void FrameDecoder::flush(const FrameCb& cb)
 {
-    if (m_codec == sve::InputCodec::Raw || !m_dec.p) {
+    if (m_codec == ta_roienc::InputCodec::Raw || !m_dec.p) {
         return;
     }
     check(avcodec_send_packet(m_dec.p, nullptr), "flush decoder");
     receive(cb);
 }
 
-} // namespace sve
+} // namespace ta_roienc

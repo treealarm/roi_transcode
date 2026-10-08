@@ -1,16 +1,15 @@
-// libx264 and libx265 -- two backends, not one -- TZ v4.1 §5.4.
+// libx264 and libx265 through libavcodec -- two backends, not one.
 //
-// They were one class until 4.1, picking a library from the codec. That was convenient and
-// wrong in the same way: libx264 and libx265 are separate libraries with separate APIs and
-// separate capabilities, and a caller who lists "the CPU" in a preference order has not
-// actually said which of the two they mean. Now they say it, and a mismatch between the
-// backend they named and the codec they asked for is answered rather than absorbed.
+// libx264 and libx265 are separate libraries with separate APIs and separate capabilities,
+// and a caller who lists "the CPU" in a preference order has not actually said which of the
+// two they mean. So they are two backends, and a mismatch between the backend named and the
+// codec asked for is answered rather than absorbed.
 //
-// What the two still share is everything below the API: both reach the encoder through the
-// same libavcodec pair, both take offsets as a per-macroblock quantOffsets map -- which is
-// what makes the region count unlimited, unlike the Intel path -- and both ignore those
-// offsets outright when aq-mode is 0, which is why it is set here and not left to the
-// preset. So the implementation stays one class with the codec fixed at construction.
+// What the two share is everything below the API: both reach the encoder through the same
+// libavcodec pair, both take offsets as a per-macroblock quantOffsets map -- which is what
+// makes the region count unlimited, unlike the Intel path -- and both ignore those offsets
+// outright when aq-mode is 0, which is why it is set here and not left to the preset. So
+// the implementation is one class with the codec fixed at construction.
 
 #include "backend/common/backend_common.h"
 #include "preset.h"
@@ -24,7 +23,7 @@ extern "C" {
 #include <libavutil/opt.h>
 }
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -43,7 +42,7 @@ public:
         EncoderCapabilities c;
         if (codec != m_codec) {
             // Not a degraded answer but an empty one: this backend cannot produce that
-            // codec at all, and selection reads exactly this to skip it (§8.4).
+            // codec at all, and selection reads exactly this to skip it.
             return c;
         }
         c.h264 = m_codec == Codec::H264;
@@ -69,8 +68,8 @@ public:
         c.native_bitrate = m_codec == Codec::H264;
         c.max_roi_regions = 0;  // no limit worth naming
 
-        // §15.3's profile is HEVC, so ten bits are only claimed for H.265 even where the
-        // H.264 encoder would take them.
+        // The ten-bit profile here is HEVC's, so ten bits are only claimed for H.265 even
+        // where the H.264 encoder would take them.
         if (m_codec == Codec::H265) {
             const auto ten = backend_common::query_ten_bit(m_name);
             c.main10 = ten.main10;
@@ -99,11 +98,11 @@ public:
         }
         av_opt_set(out.enc.p->priv_data, "preset", libx26x_preset(p.preset), 0);
         av_opt_set(out.enc.p->priv_data, "aq-mode", "1", 0);
-        // Accept AV_FRAME_DATA_SEI_UNREGISTERED as user-data-unregistered SEI (§19).
+        // Accept AV_FRAME_DATA_SEI_UNREGISTERED as user-data-unregistered SEI.
         av_opt_set_int(out.enc.p->priv_data, "udu_sei", 1, 0);
 
         if (p.rate_control.target_bitrate > 0 && m_codec == Codec::H264) {
-            // Native bitrate mode (TZ v3 §15–16) for H.264. Do not also set CRF.
+            // Native bitrate mode for H.264. Do not also set CRF.
             const int64_t target = static_cast<int64_t>(p.rate_control.target_bitrate);
             const float peak_frac = p.rate_control.max_peak_overshoot > 0.0f
                 ? p.rate_control.max_peak_overshoot
@@ -116,7 +115,7 @@ public:
             out.enc.p->bit_rate = target;
             out.enc.p->rc_max_rate = maxrate;
             out.enc.p->rc_buffer_size = static_cast<int>(buf);
-            // Filler makes undershoot meet the HRD rate so baseline≈adaptive (§16).
+            // Filler makes undershoot meet the HRD rate so baseline≈adaptive.
             av_opt_set(out.enc.p->priv_data, "x264-params",
                 "nal-hrd=cbr:filler=1", 0);
         } else {
@@ -145,4 +144,4 @@ const IEncoderBackend& x265_backend()
     return instance;
 }
 
-} // namespace sve
+} // namespace ta_roienc

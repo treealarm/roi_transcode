@@ -1,4 +1,4 @@
-// Intel oneVPL / Quick Sync -- TZ v2.0 §5.
+// Intel oneVPL / Quick Sync through libavcodec.
 //
 // ROI reaches the hardware as mfxExtEncoderROI, which libavcodec fills from the frame's
 // AVRegionOfInterest side data. Everything unusual here was found by measurement on Alder
@@ -15,7 +15,7 @@ extern "C" {
 #include <libavutil/opt.h>
 }
 
-namespace sve {
+namespace ta_roienc {
 
 namespace {
 
@@ -110,4 +110,4 @@ const IEncoderBackend& onevpl_backend()
     return instance;
 }
 
-} // namespace sve
+} // namespace ta_roienc

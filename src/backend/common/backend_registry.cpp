@@ -1,4 +1,4 @@
-// Which backends to try, and in what order -- TZ v4.1 §8.4.
+// Which backends to try, and in what order.
 //
 // One rule, not two. A named Backend is the short way to say "only this one", and it is
 // expressed as a selection of one rather than as a separate code path -- otherwise the
@@ -8,57 +8,31 @@
 // would hide the very thing they were checking. That is why a named kind ignores
 // allow_unlisted -- the caller has already been explicit.
 //
-// Two things changed in 4.1. There is no allow_software_fallback switch: the software
-// encoders are ordinary entries, and leaving them out of the list is how a caller says
-// "hardware or nothing". And selection now knows the codec, because X264 and X265 are
-// separate backends -- one that cannot produce what was asked for is skipped here, with
-// its reason recorded, rather than opened and found wanting.
+// There is no allow_software_fallback switch: the software encoders are ordinary entries,
+// and leaving them out of the list is how a caller says "hardware or nothing". Selection
+// knows the codec, because X264 and X265 are separate backends -- one that cannot produce
+// what was asked for is skipped here, with its reason recorded, rather than opened and
+// found wanting.
 
-#include "sve/backend_registry.h"
-#include "sve/backend_selection.h"
-#include "sve/encoder_backend.h"
+#include "ta_roienc/backend_registry.h"
+#include "ta_roienc/backend_selection.h"
+#include "ta_roienc/encoder_backend.h"
 
 #include <algorithm>
 #include <format>
 #include <string>
 #include <vector>
 
-namespace sve {
+namespace ta_roienc {
 
-Status BackendRegistry::Register(const SveBackendPluginDescriptorV1& descriptor) noexcept
+Status BackendRegistry::Register(const IEncoderBackend& backend) noexcept
 {
-    // Checked in this order on purpose: the version says whether the rest of the object
-    // means what this build thinks it means, so nothing below it is read until it agrees.
-    if (descriptor.abi_version != kBackendPluginAbiVersion) {
-        return Status::InvalidArgument(std::format(
-            "backend plugin abi version {} does not match this build's {}",
-            descriptor.abi_version, kBackendPluginAbiVersion));
-    }
-    if (descriptor.descriptor_size != sizeof(SveBackendPluginDescriptorV1)) {
-        return Status::InvalidArgument(std::format(
-            "backend plugin descriptor is {} bytes, this build's is {}",
-            descriptor.descriptor_size, sizeof(SveBackendPluginDescriptorV1)));
-    }
-    if (descriptor.acquire == nullptr) {
-        return Status::InvalidArgument("backend plugin descriptor has no acquire function");
-    }
-    const IEncoderBackend* acquired = descriptor.acquire();
-    if (acquired == nullptr) {
-        return Status::InvalidArgument("backend plugin acquired no backend");
-    }
-    const Backend kind = acquired->kind();
-    if (static_cast<int32_t>(kind) != descriptor.backend_id) {
-        return Status::InvalidArgument(std::format(
-            "backend plugin declares identifier {} and acquired {}",
-            descriptor.backend_id, backend_name(kind)));
-    }
-    const IEncoderBackend& backend = *acquired;
+    const Backend kind = backend.kind();
 
     for (const IEncoderBackend* seen : m_backends) {
         if (seen->kind() == kind) {
-            // §26.4: a duplicate identifier is refused, never silently overridden. The
-            // same backend registered twice is a deployment that linked a component and
-            // loaded its plugin, and picking a winner there would be picking at random.
+            // Refused, never silently overridden: two implementations answering to one
+            // name differ somewhere, and picking a winner would be picking at random.
             return Status::InvalidArgument(
                 std::format("backend {} is already registered", backend_name(kind)));
         }
@@ -90,8 +64,8 @@ std::vector<Backend> BackendRegistry::kinds() const
 BackendRegistry& default_backend_registry()
 {
     // Filled once, on first use, from whatever the build generated. Not a global
-    // constructor: those are what §26.4 forbids relying on, and the ordering between one
-    // in the core and one in a component is exactly the thing nobody can pin down.
+    // constructor: the ordering between one in the core and one in a component is exactly
+    // the thing nobody can pin down.
     static BackendRegistry registry = [] {
         BackendRegistry fresh;
         (void)RegisterDeploymentBackends(fresh);
@@ -138,8 +112,8 @@ std::vector<BackendRef> resolve_backends(Backend requested, const BackendSelecti
         if (one == nullptr) {
             return out;
         }
-        // Named outright and unable to serve the codec: §8.4 wants Unsupported, so the
-        // chain comes back empty and the reason travels with it.
+        // Named outright and unable to serve the codec: Unsupported, so the chain comes
+        // back empty and the reason travels with it.
         if (!backend_supports(requested, codec, registry)) {
             note_skip(requested);
             return out;
@@ -181,4 +155,4 @@ std::vector<BackendRef> resolve_backends(Backend requested, const BackendSelecti
     return out;
 }
 
-} // namespace sve
+} // namespace ta_roienc
