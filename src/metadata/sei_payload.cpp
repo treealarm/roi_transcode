@@ -23,18 +23,16 @@ constexpr uint64_t kMaxDecodedObjects = 4096;
 constexpr uint8_t kUuid[16] = {
     's', 'v', 'e', '-', 'r', 'o', 'i', 'm', 'e', 't', 'a', 0, 0, 0, 1};
 
-/// Bumped only by an incompatible change. §19.2 requires a parser to refuse a version it
-/// does not know rather than read what it can of it, so this is checked before anything
-/// else in the payload.
+/// Bumped only by an incompatible change. A parser refuses a version it does not know rather
+/// than read what it can of it, so this is checked before anything else in the payload.
 constexpr uint64_t kVersion = 1;
 
-/// §19.2: a frame's whole SEI payload stays under 16 KiB. Above it, objects are dropped
-/// from the least important upward, and the fact is reported to the caller.
+/// A frame's whole SEI payload stays under 16 KiB. Above it, objects are dropped from the
+/// least important upward, and the fact is reported to the caller.
 constexpr std::size_t kMaxPayloadBytes = 16 * 1024;
 
 /// CRC-32C (Castagnoli), polynomial 0x1EDC6F41 in the reflected form 0x82F63B78 that a
-/// table-free implementation uses. §19.2 names this one specifically, and it is not the
-/// CRC-32 of zip and PNG that this payload used to carry.
+/// table-free implementation uses -- not the CRC-32 of zip and PNG.
 uint32_t crc32c(std::span<const uint8_t> data)
 {
     uint32_t c = 0xFFFFFFFFu;
@@ -64,11 +62,11 @@ int64_t scaled(float value, float scale)
 
 /// One object, as a fixed-order CBOR array.
 ///
-/// An array rather than a map: the keys would be the larger half of the payload, and §19.2
-/// caps what a frame may spend. The order is the schema, and `version` is what allows it to
+/// An array rather than a map: the keys would be the larger half of the payload, and a
+/// frame's payload is capped. The order is the schema, and `version` is what allows it to
 /// change.
 ///
-/// No mask data, by §19.2 -- only whether the object had one.
+/// No mask data -- only whether the object had one.
 void put_object(std::vector<uint8_t>& out, const SeiObject& o)
 {
     cbor::put_array(out, 9);
@@ -160,7 +158,7 @@ std::vector<uint8_t> encode_sei_payload(const SeiFrame& frame, uint32_t max_obje
 
     std::vector<uint8_t> body = encode_body(frame, objs);
 
-    // §19.2's byte cap, which the object count alone cannot enforce: a class name is up to
+    // The byte cap, which the object count alone cannot enforce: a class name is up to
     // 32 bytes, so a frame within its object budget can still be over its byte budget.
     // Drop from the least important upward until it fits.
     if (body.size() + 4 > kMaxPayloadBytes && !objs.empty()) {
@@ -172,8 +170,8 @@ std::vector<uint8_t> encode_sei_payload(const SeiFrame& frame, uint32_t max_obje
     }
 
     const uint32_t sum = crc32c(body);
-    // The checksum is not part of the CBOR item: §19.2 puts it after all previous fields
-    // of the payload, and a reader takes it from the tail before parsing anything.
+    // The checksum is not part of the CBOR item: it follows all previous fields of the
+    // payload, and a reader takes it from the tail before parsing anything.
     body.push_back(static_cast<uint8_t>(sum));
     body.push_back(static_cast<uint8_t>(sum >> 8));
     body.push_back(static_cast<uint8_t>(sum >> 16));
@@ -217,7 +215,7 @@ bool decode_sei_payload(std::span<const uint8_t> bytes, SeiFrame& out_frame)
     }
     uint64_t version = 0;
     if (!r.uint(version) || version != kVersion) {
-        // §19.2: an unknown version is refused rather than read as far as it goes.
+        // An unknown version is refused rather than read as far as it goes.
         return false;
     }
     if (!r.uint(out_frame.frame_id) || !r.integer(out_frame.pts)) {

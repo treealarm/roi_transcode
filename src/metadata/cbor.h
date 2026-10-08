@@ -1,7 +1,6 @@
 #pragma once
 
-// The slice of CBOR (RFC 8949) this library's metadata needs -- TZ v3.4 §19.2, which makes
-// CBOR the one normative payload format for P0.
+// The slice of CBOR (RFC 8949) this library's metadata needs: the SEI payload format.
 //
 // Written here rather than pulled in. vcpkg has three CBOR ports and none of them is used,
 // because the library's dependency set is FFmpeg and nothing else -- that is what lets
@@ -63,12 +62,12 @@ public:
     /// this reads are a caller's -- decode_sei_payload takes them off a bitstream -- and a
     /// container that contains a container is one stack frame per byte: 0x81 repeated is a
     /// one-byte-per-level array of arrays, so a payload of a hundred kilobytes would ask
-    /// for a hundred thousand frames and take the process with it. §43.2 asks for no
-    /// unexpected crash, and a crash reachable from a file is one.
+    /// for a hundred thousand frames and take the process with it -- a crash reachable from
+    /// a file.
     bool skip();
 
     /// The deepest container this format can legitimately produce, plus room to spare.
-    /// §19.2's payload is an array holding an array of objects, each of which is a flat
+    /// The SEI payload is an array holding an array of objects, each of which is a flat
     /// array of scalars: three levels. Anything past this is not a payload of ours.
     static constexpr int kMaxNestingDepth = 32;
 

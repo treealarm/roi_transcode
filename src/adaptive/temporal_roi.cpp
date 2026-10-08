@@ -77,7 +77,7 @@ Box blend(const Box& a, const Box& b, double w)
     return out;
 }
 
-/// Extrapolate past `last` using the velocity of the last segment. TZ v3 use_track_prediction.
+/// Extrapolate past `last` using the velocity of the last segment (use_track_prediction).
 Box predict_from(const std::vector<Box>& samples, double t_sec)
 {
     Box out = samples.back();
@@ -158,14 +158,16 @@ std::vector<Box> TemporalRoi::at(double t_sec) const
         const auto& s = track.samples;
         // How long this track may go unseen before it is considered gone, in its own units.
         // max_missing_frames is a count of the producer's frames, and the producer's frame
-        // rate is the interval measured above -- so one setting fits every source.
-        // Patience measured in the producer's frames, capped in seconds -- see max_hold_sec.
+        // rate is the interval measured above -- so one setting fits every source. It is
+        // capped in seconds by max_hold_sec.
+        //
         // The cap applies only to what is inferred from the interval. A caller that set
         // hold_sec said how long a box of theirs applies, and that is a decision rather than a
         // guess to be second-guessed -- the same rule a configured kind gets in the quality
         // table.
-        // §13's own switch. Zero reach means a sample covers only its own instant: nothing
-        // is held forwards or backwards, and the gap test below refuses every gap.
+        //
+        // Zero reach when temporal ROI is switched off: a sample covers only its own instant,
+        // nothing is held forwards or backwards, and the gap test below refuses every gap.
         double reach = m_config.enabled ? m_fallback_hold_sec : 0.0;
         if (m_config.enabled && track.interval > 0.0) {
             reach = track.interval * static_cast<double>(m_config.max_missing_frames);

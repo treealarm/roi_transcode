@@ -1,16 +1,11 @@
-// The events §29 requires, and the sink they are required to reach.
+// The log events the library emits, and the sink they are required to reach.
 //
-// §29 lists five levels and seven mandatory events. Until 2026-09-02 the list lived only in
-// the specification: three of the events were emitted, one was emitted only as a Status the
-// log never saw, and two did not exist. Nothing anywhere held the library to the list, so
-// nothing noticed.
+// Each test names the event it covers, so that an event removed from the code shows up here
+// as a failure rather than as a line nobody missed.
 //
-// This file is that hold. Each test names the event from §29 it covers, so that an event
-// removed from the code shows up here as a failure rather than as a line nobody missed.
-//
-// It also covers the FFmpeg routing of sve/ffmpeg_log.h, which is the other half of §29:
-// diagnostics that go to stderr behind the application's back are not observable through
-// the sink it named, and a log with a hole in it is what §50 is arguing against.
+// It also covers the FFmpeg routing of sve/ffmpeg_log.h: diagnostics that go to stderr
+// behind the application's back are not observable through the sink it named, and a log
+// with a hole in it is what this whole contract is arguing against.
 
 #include "encoder_runtime_warnings.h"
 #include "sve/encoder.h"
@@ -102,9 +97,9 @@ EncoderConfig config_with(LogSink sink)
     return cfg;
 }
 
-// --- §29's five levels ------------------------------------------------------
+// --- the five levels ---------------------------------------------------------
 
-/// The list is normative and it is five long. Trace was missing until 2026-09-02.
+/// The list is five long.
 void every_level_the_spec_names_exists_and_has_a_name()
 {
     check(std::string(log_level_name(LogLevel::Trace)) == "trace", "TRACE has a name");
@@ -114,7 +109,7 @@ void every_level_the_spec_names_exists_and_has_a_name()
     check(std::string(log_level_name(LogLevel::Error)) == "error", "ERROR has a name");
 }
 
-// --- §29's mandatory events -------------------------------------------------
+// --- the events ------------------------------------------------------------
 
 /// "backend selected" and "capability report", both at open.
 ///
@@ -129,8 +124,8 @@ void opening_reports_the_backend_and_what_it_can_do()
     if (!log.said_at(LogLevel::Info, "backend: x264direct")) {
         log.dump("open");
     }
-    check(log.said_at(LogLevel::Info, "backend: x264direct"), "§29 backend selected");
-    check(log.said_at(LogLevel::Debug, "capabilities:"), "§29 capability report");
+    check(log.said_at(LogLevel::Info, "backend: x264direct"), "backend selected");
+    check(log.said_at(LogLevel::Debug, "capabilities:"), "capability report");
     check(log.said("qp_map="), "the capability report carries the fields, not just a header");
 }
 
@@ -143,12 +138,12 @@ void reconfigure_and_stop_are_announced()
     RuntimeEncoderSettings change;
     change.quality = Quality{};
     check(enc->Reconfigure(change).ok(), "the encoder took the change");
-    check(log.said_at(LogLevel::Info, "reconfigured: quality"), "§29 reconfigure names it");
+    check(log.said_at(LogLevel::Info, "reconfigured: quality"), "reconfigure names it");
     check(!log.said("reconfigured: frame_rate"),
         "and names only what moved -- frame rate was not set");
 
     check(enc->Stop().ok(), "the encoder stopped");
-    check(log.said_at(LogLevel::Info, "encoder stopped"), "§29 encoder reset");
+    check(log.said_at(LogLevel::Info, "encoder stopped"), "encoder reset");
     check(log.said("frames in"), "the reset carries the counts a reader wants");
 }
 
@@ -163,7 +158,7 @@ void a_fallback_is_announced_and_only_once()
 
     check(guard_sei_unsupported(true, caps, FallbackPolicy::Permissive, logger, warned).ok(),
         "Permissive applies the degradation rather than refusing");
-    check(log.said_at(LogLevel::Warning, "bitstream SEI"), "§29 fallback");
+    check(log.said_at(LogLevel::Warning, "bitstream SEI"), "fallback");
     const std::size_t after_first = log.lines.size();
 
     check(guard_sei_unsupported(true, caps, FallbackPolicy::Permissive, logger, warned).ok(),
@@ -174,9 +169,8 @@ void a_fallback_is_announced_and_only_once()
 
 /// "unsupported feature" -- refused under Strict, and the refusal reaches the log.
 ///
-/// The regression this pins: until 2026-09-02 a Strict refusal returned a Status and said
-/// nothing. The caller knew; anyone reading the log to find out why an encode stopped did
-/// not, which is exactly the observability §50 asks for and does not get from a return value.
+/// A Status alone tells the caller; anyone reading the log to find out why an encode
+/// stopped needs the log line too.
 void a_strict_refusal_reaches_the_log_and_not_only_the_caller()
 {
     Captured log;
@@ -187,7 +181,7 @@ void a_strict_refusal_reaches_the_log_and_not_only_the_caller()
 
     const Status s = guard_sei_unsupported(true, caps, FallbackPolicy::Strict, logger, warned);
     check(s.code() == StatusCode::Unsupported, "Strict refuses");
-    check(log.said_at(LogLevel::Error, "unsupported:"), "§29 unsupported feature");
+    check(log.said_at(LogLevel::Error, "unsupported:"), "unsupported feature");
     // One text for both, so the two can never describe different refusals.
     check(log.said(s.message()), "the log carries the same words as the Status");
 }
@@ -201,10 +195,10 @@ void a_metadata_channel_that_cannot_carry_says_so()
     caps.sei = false;
     bool warned = false;
     (void)guard_sei_unsupported(true, caps, FallbackPolicy::Permissive, logger, warned);
-    check(log.said("SEI requested but not supported"), "§29 metadata failure");
+    check(log.said("SEI requested but not supported"), "metadata failure");
 }
 
-// --- the other half of §29: FFmpeg's own diagnostics ------------------------
+// --- FFmpeg's own diagnostics ----------------------------------------------
 
 /// FFmpeg logs into the sink, at the mapped level, with its newline removed.
 void ffmpeg_diagnostics_arrive_through_the_sink()
@@ -241,11 +235,9 @@ void ffmpeg_diagnostics_arrive_through_the_sink()
 /// A tinted level is still the level it is.
 ///
 /// av_log carries a colour tint in the high bits of its level -- AV_LOG_C(x) is (x << 8) --
-/// and every consumer inside FFmpeg masks it off before doing anything. The first version
-/// of this routing compared and mapped the raw value, so a tinted AV_LOG_ERROR arrived as
-/// 50192: it failed the level test and disappeared from the sink and from stderr both, and
-/// had it passed, it would have been classified as Trace. Found by review rather than by
-/// this file, which is the reason the case is written down here now.
+/// and every consumer inside FFmpeg masks it off before doing anything. Compared and mapped
+/// raw, a tinted AV_LOG_ERROR arrives as 50192: it fails the level test and disappears from
+/// the sink and from stderr both, and had it passed, it would be classified as Trace.
 void a_tinted_level_is_still_the_level_it_is()
 {
     Captured log;

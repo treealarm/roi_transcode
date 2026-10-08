@@ -1,6 +1,6 @@
 #pragma once
 
-// What the encoder is told about a frame besides its pixels -- TZ v3.4 §8.1 and §9.
+// What the encoder is told about a frame besides its pixels.
 //
 // This travels beside the frame rather than inside it: an AVFrame belongs to whoever
 // decoded it and has nowhere to put a detector's answer, and a library that stuffed its

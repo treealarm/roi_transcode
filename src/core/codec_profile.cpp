@@ -1,5 +1,5 @@
-// The spelling of a CodecProfile -- §8.2. Public API, declared in sve/types.h, and a name
-// only: which profile an input's bit depth admits is decided in the encoder, not here.
+// The spelling of a CodecProfile. Public API, declared in sve/types.h, and a name only:
+// which profile an input's bit depth admits is decided in the encoder, not here.
 
 #include "sve/types.h"
 

@@ -1,6 +1,6 @@
 #pragma once
 
-// The buffer behind WrapRawFrame (§8.10) -- the caller's planes plus the handle that keeps
+// The buffer behind WrapRawFrame -- the caller's planes plus the handle that keeps
 // them alive.
 //
 // PlaneBuffer in the public header describes the same pixels and deliberately owns nothing:

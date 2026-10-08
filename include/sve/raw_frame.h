@@ -1,15 +1,12 @@
 #pragma once
 
-// Raw planes API -- TZ v4.1 §8.10.
+// Raw planes API.
 //
-// Pixels a caller already has, wrapped into a Frame without copying. This used to live in
-// sve/frame.h, which is the one public header that names an FFmpeg type, and that placement
-// was wrong on its own terms: nothing about "here are my planes" needs libavutil, yet an
-// embedder who wanted §8.10 had to include §8.5's FFmpeg interop to reach it. §5.5 makes
-// the point structural -- the core depends on no FFmpeg -- so the declaration moved here
-// and the implementation stopped going through AVFrame.
+// Pixels a caller already has, wrapped into a Frame without copying. Nothing about "here
+// are my planes" needs libavutil, so this lives outside sve/frame.h and the implementation
+// does not go through AVFrame.
 //
-// sve/frame.h still includes this header, so a caller who was including it keeps compiling.
+// sve/frame.h includes this header for convenience.
 
 #include "sve/frame_buffer.h"
 #include "sve/input_format.h"
@@ -47,9 +44,7 @@ struct RawFrameView {
     std::size_t plane_count = 0;
     /// Carried for the caller's convenience, not read by the library: the timestamp an
     /// encoder uses comes from FrameMetadata, which is what SubmitFrame takes beside the
-    /// frame. It used to be written into the AVFrame this function built, and even then
-    /// the backend overwrote it from FrameMetadata one call later -- so a view whose
-    /// timestamp disagrees with the metadata has always lost that argument.
+    /// frame. A view whose timestamp disagrees with the metadata loses that argument.
     MediaTimestamp timestamp;
     std::shared_ptr<const void> owner;
 };

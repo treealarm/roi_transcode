@@ -1,13 +1,11 @@
 #pragma once
 
-// What a decoder needs before the first packet -- TZ v3.4 §8.11.
+// What a decoder needs before the first packet.
 //
 // Asked for separately from the packet stream, because the two have different lifetimes: a
 // muxer needs this once to declare its stream, while packets arrive for as long as the
-// encode runs. It arrived here in the slice that built the encoder rather than the one that
-// nominally owns §8.11, because the file path needed it the moment the muxer stopped being
-// handed an AVCodecContext -- and handing one over is the FFmpeg leak the public headers
-// exist to avoid.
+// encode runs. It exists so that the file path never has to be handed an AVCodecContext --
+// handing one over is the FFmpeg leak the public headers exist to avoid.
 
 #include "sve/packet.h"
 #include "sve/types.h"

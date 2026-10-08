@@ -26,12 +26,11 @@ namespace sve {
 inline constexpr int32_t kMaxQp = 51;
 /// The lowest quantiser this library will *ask* for. Zero is legal in both codecs and means
 /// lossless, which is never what a region asks for and is what a zero-filled buffer looks
-/// like -- iHD reading a per-block map of zeroes as QP 0 is how срез O found the mode it
-/// was really in (docs/STATUS.md). So a coded quantiser starts at one.
+/// like -- iHD reads a per-block map of zeroes as QP 0. So a coded quantiser starts at one.
 inline constexpr int32_t kMinCodedQp = 1;
 
-/// A quality offset, in whole quantiser steps. Negative raises quality (TZ §5.2), so the
-/// range is symmetric: at most the whole scale in either direction.
+/// A quality offset, in whole quantiser steps. Negative raises quality, so the range is
+/// symmetric: at most the whole scale in either direction.
 inline constexpr int32_t kMaxQpDelta = kMaxQp;
 inline constexpr int32_t kMinQpDelta = -kMaxQp;
 
@@ -46,7 +45,7 @@ struct Rational {
 //
 // Five steps of our own, not the encoder's own word. Every backend names its presets
 // differently and the lists do not line up -- libx264 has ten from "ultrafast" to
-// "placebo", QSV has seven and no "ultrafast" at all, NVENC calls them p1 to p7. A string
+// "placebo", QSV has seven and no "ultrafast" at all. A string
 // passed straight through meant the caller had to know which backend would open before
 // they could name a preset, which is exactly what Backend::Auto makes unknowable.
 //
@@ -83,7 +82,7 @@ enum class Codec {
     SameAsSource,
 };
 
-/// What the bitstream declares itself to be -- TZ v3.4 §8.2.
+/// What the bitstream declares itself to be.
 ///
 /// Auto picks from the pixel format: ten bits in means Main10, eight means Main. Naming one
 /// explicitly is how a caller says the pairing matters to them, and a pairing that cannot
@@ -97,16 +96,15 @@ enum class CodecProfile {
     H265Main10,
 };
 
-/// Which codecs a backend can produce at all, before any device is opened -- TZ v4.1 §8.4.
+/// Which codecs a backend can produce at all, before any device is opened.
 ///
 /// Answerable without opening anything, because that is what selection needs: a backend
 /// that could never serve the requested codec has to be skipped before it is asked for a
-/// device it may not have. The hardware backends answer yes to both; the two software ones
+/// device it may not have. The hardware backends answer yes to both; the software ones
 /// answer for their own library only.
 ///
 /// `registry` is which deployment is being asked. It defaults to the process-wide one, so
-/// the ordinary caller passes nothing; sve/backend_registry.h says an application may
-/// assemble its own, and this is one of the two entry points that has to honour that.
+/// the ordinary caller passes nothing; an application may assemble its own.
 ///
 /// Declared here rather than beside the registry because this is where the question is
 /// asked. The class and `default_backend_registry()` come from the header that owns them,
@@ -144,7 +142,7 @@ struct Box {
     float height = 0;
 
     /// What the detector knows beyond where the box is -- the inputs the importance model
-    /// of §11 needs and geometry alone cannot supply.
+    /// needs and geometry alone cannot supply.
     ///
     /// `confidence` is one of the five factors directly. `track_id` is what makes temporal
     /// stability computable at all: it is the only thing that says two boxes in different
@@ -167,13 +165,13 @@ struct Box {
     /// rectangles (overlays, area budget).
     std::vector<Point> polygon;
 
-    /// Explicit v3 ladder step from the wire. When set, kind→importance is not used to
+    /// Explicit priority-ladder step from the wire. When set, kind→importance is not used to
     /// pick the step (desired_qp_delta still wins over the ladder's QP).
     bool has_priority = false;
     ObjectPriority priority = ObjectPriority::Normal;
 
-    /// Optional override of the QP delta (v3 `desired_qp_delta`). When set, the priority
-    /// ladder's QP is skipped for this box.
+    /// Optional override of the QP delta. When set, the priority ladder's QP is skipped for
+    /// this box.
     bool has_desired_qp_delta = false;
     int32_t desired_qp_delta = 0;
 
@@ -192,11 +190,11 @@ struct KindQuality {
     double pad = 0.02;
 };
 
-/// How the halo / margin around a box is measured -- TZ v3 §11.3.
+/// How the halo / margin around a box is measured.
 enum class MarginMode {
-    /// Quality::pad as a fraction of the frame (historical default, still used by KindQuality).
+    /// Quality::pad as a fraction of the frame (the default, also used by KindQuality).
     FractionOfFrame,
-    /// Quality::margin_px fixed pixels on each side (v3 default: 8).
+    /// Quality::margin_px fixed pixels on each side (default: 8).
     FixedPixels,
 };
 
@@ -214,17 +212,17 @@ struct Quality {
     std::unordered_map<std::string, KindQuality> kinds;
 
     /// Halo used when a kind has no entry in `kinds` -- the importance path's default. An
-    /// explicit KindQuality.pad still wins for that kind. Without this, asking for a pad on
-    /// the importance path had nowhere to attach: pad used to travel only on per-kind rows,
-    /// and those rows are exactly what turn the model off.
+    /// explicit KindQuality.pad still wins for that kind. Without this, a pad on the
+    /// importance path would have nowhere to attach: per-kind rows are exactly what turn the
+    /// model off.
     double pad = 0.02;
 
-    /// v3 §11.3. FixedPixels uses margin_px; FractionOfFrame keeps the historical pad.
+    /// FixedPixels uses margin_px; FractionOfFrame keeps the fractional pad.
     MarginMode margin_mode = MarginMode::FixedPixels;
     int32_t margin_px = 8;
 
-    /// v3 §11.2. After margin, a box shorter than this on either side is expanded
-    /// symmetrically so the codec still sees it.
+    /// After margin, a box shorter than this on either side is expanded symmetrically so
+    /// the codec still sees it.
     int32_t min_roi_side = 64;
 
     // Mask input only: the strength a mask value of 255 asks for, and how many
@@ -233,7 +231,7 @@ struct Quality {
     int32_t mask_qp_delta_at_255 = -6;
     int32_t mask_levels = 4;
 
-    /// §11. What a region is worth, for kinds `kinds` does not name.
+    /// What a region is worth, for kinds `kinds` does not name.
     ///
     /// The two work together rather than competing: a kind with an explicit entry in
     /// `kinds` keeps its qp_delta, because someone said what they wanted and that is the
@@ -241,30 +239,27 @@ struct Quality {
     ///
     /// Which means a caller that registers every kind it has seen, all at one delta, turns
     /// this model off without meaning to -- every region ends up at the same delta and, since
-    /// importance is derived back from it, at the same importance, so the §12 ordering and the
-    /// area budget below both see a flat list. ta_vms did exactly that until it was noticed.
+    /// importance is derived back from it, at the same importance, so the importance
+    /// ordering and the area budget below both see a flat list.
     ImportancePolicy importance;
 
     /// How much of the frame may be protected before importance decides who misses out.
-    /// 0 disables the budget and every region keeps its own delta.
     ///
-    /// §15 spends a bitrate budget on the critical objects first. Under a constant
-    /// quantizer there is no bitrate to hand around, but there is a budget all the same,
-    /// and it is area: protection is paid for by the background it is taken from, so a
-    /// frame with no background left cannot pay. Measured across a real archive, a person
-    /// box averages 41.5% of the frame while a face averages 1.9% -- protect the person and
-    /// the file grows, protect the face and it does not. That is the whole of it.
+    /// Under a constant quantizer there is no bitrate to hand around, but there is a budget
+    /// all the same, and it is area: protection is paid for by the background it is taken
+    /// from, so a frame with no background left cannot pay. Measured across a real archive,
+    /// a person box averages 41.5% of the frame while a face averages 1.9% -- protect the
+    /// person and the file grows, protect the face and it does not.
     ///
-    /// Regions are already sorted by importance for §12, so the budget rides on that order:
-    /// take each until the next would not fit, and give what does not fit a delta of zero.
+    /// Regions are already sorted by importance, so the budget rides on that order: take
+    /// each until the next would not fit, and give what does not fit a delta of zero.
     /// Zero, not the background penalty -- a person nobody can afford to sharpen is still
     /// not background, and degrading them would be a worse answer than leaving them be.
     ///
     /// A quarter of the frame by default. Below that the codec still has three quarters to
     /// take bits from; above it the archive says the file grows instead of shrinking.
     ///
-    /// 0 protects nothing. Until 2026-09-04 it meant the opposite -- it switched the cap
-    /// off, and output at 0.0 was byte-identical to output at 1.0. Negative is read as zero.
+    /// 0 protects nothing. Negative is read as zero.
     ///
     /// **1.0 is not "no cap".** What is compared against the budget is the sum of the
     /// regions' areas, and overlapping regions each contribute their own: a face inside a
@@ -272,25 +267,23 @@ struct Quality {
     /// exceed a budget of 1.0. To mean "never refuse anything", give a number larger than
     /// the deepest nesting can reach -- 10 is beyond any plausible one.
     ///
-    /// Worth knowing before reaching for it: measured on real footage 2026-09-04, this
-    /// setting moves the encoded size by under one percent whatever it is set to, including
-    /// with a single box over half the frame (docs/tuning.md, section 9). It is a fuse,
-    /// not a dial -- what moves the size is `background_qp_delta`.
+    /// Worth knowing before reaching for it: on real footage this setting moves the encoded
+    /// size by under one percent whatever it is set to, including with a single box over
+    /// half the frame. It is a fuse, not a dial -- what moves the size is
+    /// `background_qp_delta`.
     float max_protected_fraction = 0.25f;
 };
 
 struct Settings {
     Backend encoder = Backend::Auto;
     /// Which backends Backend::Auto may try, and in what order. Empty is InvalidArgument
-    /// under Auto: since 4.1 the library ships no default order, because the only honest
-    /// default is the one whoever deploys the system chooses for their own hardware
-    /// (§8.4). `backend_choice_from_name` fills both fields together from a name.
+    /// under Auto: the library ships no default order, because the only honest default is
+    /// the one whoever deploys the system chooses for their own hardware.
+    /// `backend_choice_from_name` fills both fields together from a name.
     ///
     /// It sits beside `encoder` and not on EncoderConfig because the two are one decision:
     /// an order only means anything under Backend::Auto, and every helper that produces one
-    /// produces the other with it. EncoderConfig used to carry a second copy, which was the
-    /// one the encoder read, so an order set here reached nothing unless the caller knew to
-    /// copy it across by hand. There is one now, and this is it.
+    /// produces the other with it.
     BackendSelection backend_selection;
     /// H.264 by default: it is the codec every player and every browser handles, and a caller
     /// that has an opinion says so. `SameAsSource` is the one to reach for when transcoding.
@@ -300,17 +293,17 @@ struct Settings {
     // Keyframe interval in frames; 0 means two seconds.
     int32_t gop = 0;
     Preset preset = Preset::Balanced;
-    /// §8.2. Auto follows the input's bit depth.
+    /// Auto follows the input's bit depth.
     CodecProfile profile = CodecProfile::Auto;
     Quality quality;
 
-    /// §22 and Appendix C. Whether a capability the hardware lacks is worked around and
-    /// announced, or refused outright.
+    /// Whether a capability the hardware lacks is worked around and announced, or refused
+    /// outright.
     FallbackPolicy fallback = FallbackPolicy::Permissive;
 
-    /// §13 and §15. Temporal ROI is partly implemented (see TemporalROIConfig). Rate
-    /// control's average target drives the outer BitrateBudget loop; peak/recovery are
-    /// still refused at open when set.
+    /// Temporal ROI (see TemporalROIConfig) and rate control. Rate control's average target
+    /// drives the outer BitrateBudget loop; peak/recovery are still refused at open when
+    /// set.
     TemporalROIConfig temporal;
     RateControlPolicy rate_control;
     MetadataConfig metadata;

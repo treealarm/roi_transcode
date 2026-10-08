@@ -1,7 +1,5 @@
-// The importance model of TZ v2.0 §11, and the nested-ROI rule of §12.
-//
-// Level L1 of §18, which names exactly these: "importance normalization", "QP mapping",
-// "nested ROI", "overlap policy". Pure arithmetic -- no codec, no FFmpeg, no media.
+// The importance model and the nested-ROI rule: importance normalization, QP mapping,
+// nested ROI and overlap policy. Pure arithmetic -- no codec, no FFmpeg, no media.
 
 #include "importance.h"
 #include "object_normalizer.h"
@@ -44,25 +42,25 @@ sve::Box box(const std::string& kind, float x, float y, float w, float h,
     return b;
 }
 
-// §11's own table.
-void semantic_priorities_are_the_specification_s()
+// The semantic table.
+void semantic_priorities_match_the_table()
 {
     using sve::default_semantic_priority;
     check_near(default_semantic_priority("license_plate"), 1.00, 1e-6, "plate priority");
     check_near(default_semantic_priority("face"), 0.95, 1e-6, "face priority");
     check_near(default_semantic_priority("person"), 0.80, 1e-6, "person priority");
     check_near(default_semantic_priority("vehicle"), 0.60, 1e-6, "vehicle priority");
-    // Not in §11's table; ours, and deliberately not zero.
+    // Not in the semantic table; ours, and deliberately not zero.
     check_near(default_semantic_priority("unknown", 0.5f), 0.50, 1e-6, "unknown priority");
 }
 
-// The line §12's worked example defines: vehicle 0.60 -> -4, plate 1.00 -> -10.
-void the_qp_line_reproduces_the_specification_s_example()
+// The importance-to-QP line: vehicle 0.60 -> -4, plate 1.00 -> -10.
+void the_qp_line_passes_through_vehicle_and_plate()
 {
     const sve::ImportancePolicy policy;
     check(sve::qp_from_importance(0.60f, policy) == -4, "vehicle lands on -4");
     check(sve::qp_from_importance(1.00f, policy) == -10, "plate lands on -10");
-    // The background of §11 falls out of the same line rather than being set separately.
+    // The background falls out of the same line rather than being set separately.
     check(sve::qp_from_importance(0.05f, policy) == 4, "background lands on +4");
 }
 
@@ -92,8 +90,8 @@ void a_known_class_is_not_scaled_by_confidence()
 // body it belongs to, whatever the detector's confidence in each happened to be.
 //
 // The numbers are this deployment's own, measured over its archive: a face averages 0.633
-// confidence against a person's 0.892. Multiplied in -- which is what §11 says literally --
-// they invert the table, 0.601 against 0.714, and the body wins.
+// confidence against a person's 0.892. Multiplied in, they invert the table, 0.601 against
+// 0.714, and the body wins.
 void the_class_hierarchy_survives_an_unhelpful_detector()
 {
     const sve::ImportancePolicy policy;
@@ -112,7 +110,7 @@ void the_class_hierarchy_survives_an_unhelpful_detector()
             > sve::importance_of(vehicle, policy),
         "a plate outranks a vehicle despite being detected less confidently");
 
-    // And the letter of §11 is still reachable, for a deployment that wants it.
+    // And multiplying confidence in is still reachable, for a deployment that wants it.
     sve::ImportancePolicy literal = policy;
     literal.weigh_confidence_on_known_classes = true;
     check(sve::importance_of(face, literal) < sve::importance_of(person, literal),
@@ -142,12 +140,12 @@ void an_unknown_class_is_scaled_by_confidence()
         "an unknown never outranks a class we recognise");
 }
 
-// §12, as the specification draws it: a plate inside a vehicle.
+// Nesting: a plate inside a vehicle.
 void a_plate_inside_a_vehicle_keeps_the_plate_s_quality()
 {
     sve::Quality quality;
     quality.background_qp_delta = 0;   // isolate the two regions
-    quality.kinds.clear();            // nothing configured, so §11 decides
+    quality.kinds.clear();            // nothing configured, so the model decides
 
     const std::vector<sve::Box> boxes{
         box("vehicle", 0.20f, 0.20f, 0.40f, 0.40f, 1.0f),
@@ -163,8 +161,8 @@ void a_plate_inside_a_vehicle_keeps_the_plate_s_quality()
         return;
     }
 
-    // Ordered by importance, so the encoder's own first-wins rule is §12's rule.
-    // v3 ladder: plate → Critical (−8), vehicle → Normal (−4).
+    // Ordered by importance, so the encoder's own first-wins rule is the overlap rule.
+    // Ladder: plate → Critical (−8), vehicle → Normal (−4).
     check(rects[0].qp_delta == -8, "the plate comes first, at -8");
     check(rects[1].qp_delta == -4, "the vehicle follows, at -4");
 
@@ -225,7 +223,7 @@ void a_configured_kind_keeps_its_own_number()
         "the configured delta survives the model");
 }
 
-// §15's budget, in area. The case the archive handed us: a person filling nearly half the
+// The area budget. The case the archive handed us: a person filling nearly half the
 // frame, with their face inside it. There is no background left to pay for protecting the
 // body, so the body goes to neutral and the face -- 0.8% of the frame and the most valuable
 // thing in it -- keeps everything it asked for.
@@ -253,7 +251,7 @@ void the_budget_protects_the_face_and_lets_the_body_go()
     }
 
     // Importance order puts the face first, so it is the one that gets paid for.
-    // v3 ladder: face → Critical (−8), person would be High (−6) but the budget zeros it.
+    // Ladder: face → Critical (−8), person would be High (−6) but the budget zeros it.
     check(rects[0].qp_delta == -8, "the face keeps its own delta");
     check(rects[1].qp_delta == 0,
         "the person is neutral -- not sharpened, and not degraded either");
@@ -280,16 +278,14 @@ void a_budget_of_zero_changes_nothing()
 
     // 1.0, not 0.0. One frame's worth of budget is enough for this single box; it is not
     // "no cap" in general, because areas are summed and overlapping regions each spend
-    // their own (see Quality::max_protected_fraction). Zero used to spell "no cap" because
-    // the check was skipped when the budget was zero -- since 2026-09-04 zero means what it
-    // says, that nothing may be protected.
+    // their own (see Quality::max_protected_fraction). Zero means that nothing may be
+    // protected.
     quality.max_protected_fraction = 1.0f;
     const auto unbudgeted = builder.build(1000, 1000, dets, quality);
     check(unbudgeted.size() == 3 && unbudgeted[0].qp_delta == -6,
         "an unbudgeted person keeps its ladder delta and its halo");
 
-    // And the value that reads as "protect nothing" now does that, rather than the
-    // opposite. This is the case the old spelling made unreachable.
+    // And the value that reads as "protect nothing" does that, rather than the opposite.
     quality.max_protected_fraction = 0.0f;
     const auto forbidden = builder.build(1000, 1000, dets, quality);
     check(forbidden.size() == 2 && forbidden[0].qp_delta == 0,
@@ -387,8 +383,8 @@ void motion_weight_is_optional_and_prefers_movers()
 
 int main()
 {
-    semantic_priorities_are_the_specification_s();
-    the_qp_line_reproduces_the_specification_s_example();
+    semantic_priorities_match_the_table();
+    the_qp_line_passes_through_vehicle_and_plate();
     the_product_qp_line_lands_on_minus_twelve_and_minus_six();
     a_known_class_is_not_scaled_by_confidence();
     the_class_hierarchy_survives_an_unhelpful_detector();

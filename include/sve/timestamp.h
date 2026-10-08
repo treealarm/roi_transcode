@@ -1,6 +1,6 @@
 #pragma once
 
-// A timestamp that says what its own units are -- TZ v3.4 §8.7.
+// A timestamp that says what its own units are.
 //
 // The rule the type exists to enforce: nothing may assume milliseconds, microseconds or
 // anything else. Every value travels with the time base it is counted in, and a conversion

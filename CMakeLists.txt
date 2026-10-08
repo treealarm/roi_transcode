@@ -1,13 +1,8 @@
 # smart-video-encoder: adaptive video encoding driven by external CV results.
-#
-# Layout follows TZ v2.0 §52. What that document describes is the library alone --
-# include/, src/, tests/, benchmarks/. Our gRPC service, its JSON adapter and the ta_vms
-# scripts are not part of the deliverable and live under integration/, behind an option
-# that is off by default so a consumer building the library never sees gRPC at all.
 
 cmake_minimum_required(VERSION 3.22)
-# One version source (§26.3, §58.7): the manifest is the file a release already has to
-# touch, so it is the one that carries the number rather than a copy kept in step by hand.
+# One version source: the manifest is the file a release already has to touch, so it is the
+# one that carries the number rather than a copy kept in step by hand.
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg.json" SVE_MANIFEST)
 string(JSON SVE_VERSION GET "${SVE_MANIFEST}" version)
 
@@ -22,29 +17,21 @@ option(SVE_BUILD_TESTS       "Build the unit tests"                       ON)
 # have to keep a private copy of it -- the point of the component is that there is one
 # hardware decode in this repository, not one per caller.
 option(SVE_BUILD_DECODE      "Build the standalone video decoder (sve/decoder.h)" ON)
-# Whether this build installs the C++ package at all. On for an ordinary install; off for a
-# wheel, which carries the extension and the Python package and has no use for static
-# archives or headers -- they added 1.5 MB of unusable weight before this existed, and
-# §58.7 asks for the wheel's contents to be a deliberate decision rather than a leftover.
 option(SVE_INSTALL           "Install the C++ package (headers, libs, pkg-config)" ON)
 
-# Each backend is an independent optional component (TZ v4.2 §5.5), and the core names none
-# of them: what a build has is generated below into RegisterDeploymentBackends, which is the
-# aggregator §26.4 allows a deployment to provide.
+# Each backend is an independent optional component, and the core names none of them: what a
+# build has is generated below into RegisterDeploymentBackends.
 #
-# SVE_BUILD_BACKEND_FFMPEG is off by default and the others are on, which is the shape of
-# §5.5's normative graph: the direct libx264 and libx265 components plus an FFmpeg interop
-# that only converts frames. The libavcodec-backed encoders are not in that graph at all --
-# they stay as the reference backend-compare.sh measures the direct paths against, and the
-# linux-dev preset turns them on so the development loop and check.sh keep their coverage.
+# The libavcodec-backed encoders (QSV, VA-API, x264/x265 through libavcodec) are off by
+# default; consumers that want hardware encoding turn them on.
 option(SVE_BUILD_BACKEND_X264   "Build the direct libx264 backend component"      ON)
 option(SVE_BUILD_BACKEND_X265   "Build the direct libx265 backend component"      ON)
-# §5.2's native OneVplBackend. Off by default because it needs the oneVPL SDK, and §26.4
-# says a component whose SDK is absent must not be required to build.
+# Off by default because it needs the oneVPL SDK, and a component whose SDK is absent must
+# not be required to build.
 option(SVE_BUILD_BACKEND_ONEVPL "Build the native Intel oneVPL backend component"  OFF)
-option(SVE_BUILD_BACKEND_FFMPEG "Build the libavcodec-backed backends (reference)" OFF)
-option(SVE_BUILD_FFMPEG_INTEROP "Build the AVFrame interop adapter (§8.5)"        ON)
-option(SVE_BUILD_EXAMPLES       "Build transcode_file and Session (§52)"          ON)
+option(SVE_BUILD_BACKEND_FFMPEG "Build the libavcodec-backed backends"            OFF)
+option(SVE_BUILD_FFMPEG_INTEROP "Build the AVFrame interop adapter"               ON)
+option(SVE_BUILD_EXAMPLES       "Build transcode_file and Session"                ON)
 
 set(SVE_REGISTER_CALLS "")
 if(SVE_BUILD_BACKEND_X264)
@@ -78,24 +65,17 @@ pkg_check_modules(FFMPEG REQUIRED
 )
 message(STATUS "smart-video-encoder FFmpeg: ${FFMPEG_INCLUDE_DIRS}")
 
-# Each codec component declares its own library. Until the §5.5 split these headers were
-# found only because vcpkg puts them in the same include directory as FFmpeg's -- the
-# direct backends compiled against libx264 while depending on FFmpeg's include path to
-# find it, which is precisely the accident the split exists to remove.
+# Each codec component declares its own library rather than relying on vcpkg putting the
+# headers in the same include directory as FFmpeg's.
 pkg_check_modules(X264 x264)
 pkg_check_modules(X265 x265)
 
 # ---------------------------------------------------------------------------
-# sve -- the core of §5.5's dependency graph
+# sve -- the core
 #
 # Objects to importance to regions to a quantiser map, the encoder that drives it, and the
 # registry that says which backends this deployment has. It links nothing: no FFmpeg, no
-# codec, no vendor SDK. That is the property §26.3 turns into an empty Requires.private and
-# §44 checks with readelf, and it is why the split exists at all.
-#
-# sve_adaptive is folded in. It was a separate target so that the arithmetic tests could
-# link without dragging FFmpeg along; now that the core itself drags nothing, the split has
-# nothing left to protect.
+# codec, no vendor SDK, so its pkg-config Requires.private is empty.
 # ---------------------------------------------------------------------------
 add_library(sve
     src/adaptive/importance.cpp
@@ -130,23 +110,16 @@ target_include_directories(sve
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
-    # As sve_adaptive published it before the merge: the arithmetic tests and the example
-    # applications include these headers directly. Narrowing that is header hygiene, not
-    # the dependency split, and doing both at once would hide one behind the other.
-    # BUILD_INTERFACE only -- these are internal headers and are not installed, so an
-    # installed consumer never sees the path.
+    # The arithmetic tests and Session include these headers directly. BUILD_INTERFACE
+    # only -- these are internal headers and are not installed, so an installed consumer
+    # never sees the path.
     PUBLIC  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/adaptive>
 )
 target_compile_definitions(sve PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_compile_options(sve PRIVATE ${SVE_WARNINGS})
-# §26.3 wants libsve.so.<major> from a shared build. The targets above take their type from
-# BUILD_SHARED_LIBS rather than saying STATIC: an explicit STATIC ignores the switch, and
-# the first dependency scan reported "passed" having skipped every readelf check because
-# there was no shared object to read.
-# Static stays the default because
-# ta_vms links us statically through add_subdirectory() and changing that without its say
-# is not ours to do; BUILD_SHARED_LIBS=ON is what the dependency scan of §44 configures,
-# since readelf needs something to read.
+# The type comes from BUILD_SHARED_LIBS rather than an explicit STATIC, so a shared build
+# yields libsve.so.<major>. Static stays the default: consumers link it statically through
+# add_subdirectory().
 set_target_properties(sve PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}
@@ -155,8 +128,8 @@ set_target_properties(sve PROPERTIES
 add_library(sve::sve ALIAS sve)
 
 # A component links the core and is linked by the deployment, never the other way round.
-# The core must not gain a dependency on a backend: that is the direction §5.5 draws, and
-# reversing it would put libx264 back in front of everyone who embeds us.
+# The core must not gain a dependency on a backend: that would put libx264 in front of
+# everyone who embeds us.
 function(sve_add_backend_component name)
     target_include_directories(${name}
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -169,10 +142,10 @@ function(sve_add_backend_component name)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# sve_backend_x264 / sve_backend_x265 -- §5.4, §5.5
+# sve_backend_x264 / sve_backend_x265
 #
 # libx264 and libx265 through their own APIs. Separate components because they are separate
-# libraries with separate APIs, which is the same reason §5.4 makes them separate backends.
+# libraries with separate APIs.
 # ---------------------------------------------------------------------------
 if(SVE_BUILD_BACKEND_X264)
     add_library(sve_backend_x264 src/backend/x264/x264_backend.cpp)
@@ -193,10 +166,9 @@ if(SVE_BUILD_BACKEND_X265)
 endif()
 
 # ---------------------------------------------------------------------------
-# sve_backend_onevpl -- §5.2, §5.5
+# sve_backend_onevpl
 #
-# Intel oneVPL through its own API. The first component here that reaches vendor silicon
-# without libavcodec, which is the whole of what §5.2 asks for.
+# Intel oneVPL through its own API: vendor silicon without libavcodec.
 # ---------------------------------------------------------------------------
 if(SVE_BUILD_BACKEND_ONEVPL)
     pkg_check_modules(VPL vpl)
@@ -221,11 +193,10 @@ if(SVE_BUILD_BACKEND_ONEVPL)
 endif()
 
 # ---------------------------------------------------------------------------
-# sve_ffmpeg_interop -- §8.5, and the only FFmpeg §5.5's graph allows
+# sve_ffmpeg_interop
 #
 # Turns an AVFrame into a Frame and nothing else. libavutil alone: it does not encode, so
-# libavcodec has no business here, and §26.4 says the interop component may declare
-# libavutil but not libavcodec.
+# libavcodec has no business here.
 # ---------------------------------------------------------------------------
 if(SVE_BUILD_FFMPEG_INTEROP)
     add_library(sve_ffmpeg_interop
@@ -248,12 +219,9 @@ if(SVE_BUILD_FFMPEG_INTEROP)
 endif()
 
 # ---------------------------------------------------------------------------
-# sve_backend_ffmpeg -- the reference encoders, and not in §5.5's graph
+# sve_backend_ffmpeg
 #
-# libx264, libx265, oneVPL, VA-API and NVENC through libavcodec. §5.5 does not list these:
-# what it wants is the direct components above. They are kept because a comparison needs
-# both sides -- backend-compare.sh is what says whether the direct path holds the zone as
-# well -- and off by default so that the default build is the graph the specification draws.
+# libx264, libx265, QSV and VA-API through libavcodec.
 # ---------------------------------------------------------------------------
 if(SVE_BUILD_BACKEND_FFMPEG)
     add_library(sve_backend_ffmpeg
@@ -273,13 +241,8 @@ endif()
 # ---------------------------------------------------------------------------
 # sve_decode -- decode without an encoder
 #
-# FrameDecoder used to live in sve_examples, which made a caller who wanted pictures link
-# the file pipeline and the muxer to reach it -- and made "decode on the GPU" a property of
-# the example rather than of the library. It is here now, and sve_examples depends on this
-# instead of owning it, so Session and a standalone consumer decode through exactly the
-# same code.
-#
-# libavcodec and libavutil, and no libavformat: nothing here demuxes.
+# Session and a standalone consumer decode through exactly the same code. libavcodec and
+# libavutil, and no libavformat: nothing here demuxes.
 # ---------------------------------------------------------------------------
 if(SVE_BUILD_DECODE)
     add_library(sve_decode
@@ -310,12 +273,10 @@ if(SVE_BUILD_DECODE)
 endif()
 
 # ---------------------------------------------------------------------------
-# sve_examples -- §52's example applications, not the library
+# sve_examples -- transcode_file and Session
 #
-# transcode_file and Session: a demuxer, a decoder and a muxer around the encoder. The
-# specification calls them examples and question 12 asks the customer whether they belong
-# outside the core at all; either way they are the reason libavformat appears anywhere, and
-# keeping them in their own target is what stops that spreading.
+# A demuxer, a decoder and a muxer around the encoder. They are the reason libavformat
+# appears anywhere, and keeping them in their own target is what stops that spreading.
 # ---------------------------------------------------------------------------
 if(SVE_BUILD_EXAMPLES)
     if(NOT SVE_BUILD_DECODE)
@@ -348,28 +309,26 @@ endif()
 #
 # RegisterDeploymentBackends calls one function per enabled component, so whatever holds it
 # refers to every component in the build. In the core that would make the components
-# transitive dependencies of sve, which §26.4 forbids in as many words, and it showed up
-# immediately: a test linking the core alone could no longer link, because the core now
-# named libx264's registration function.
+# transitive dependencies of sve: a test linking the core alone could no longer link,
+# because the core would name libx264's registration function.
 #
 # So it lives on the deployment's side of the line. The core declares the function and
 # calls it lazily; this target defines it. A test that never touches backend selection
 # never pulls the object that needs it, which is how static archives work and why the
 # arithmetic tests still link against the core by itself.
-# ---------------------------------------------------------------------------
+#
 # An OBJECT library, not a static one, and that is the whole trick. The core has an
 # undefined RegisterDeploymentBackends and the components depend on the core, so CMake
 # topologically sorts the core last and an archive holding the definition would sit in
 # front of the reference that needs it. Object files go onto the link line unconditionally
-# and satisfy any archive whatever the order, so the cycle never has to be declared -- and
-# declaring it would have made the components transitive dependencies of the core, which
-# §26.4 forbids.
+# and satisfy any archive whatever the order, so the cycle never has to be declared.
+# ---------------------------------------------------------------------------
 add_library(sve_deployment OBJECT "${SVE_GENERATED_REGISTRY}")
 target_include_directories(sve_deployment PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_options(sve_deployment PRIVATE ${SVE_WARNINGS})
 
 # What a consumer links to get "everything this build has". Kept as one name so that
-# add_subdirectory() users -- ta_vms among them -- do not have to learn the component list.
+# add_subdirectory() users do not have to learn the component list.
 add_library(sve_all INTERFACE)
 target_link_libraries(sve_all INTERFACE sve $<TARGET_OBJECTS:sve_deployment>)
 foreach(component sve_backend_ffmpeg sve_ffmpeg_interop sve_decode sve_examples
@@ -380,16 +339,11 @@ foreach(component sve_backend_ffmpeg sve_ffmpeg_interop sve_decode sve_examples
 endforeach()
 
 # ---------------------------------------------------------------------------
-# Install and export -- §26.3
+# Install and export
 #
 # find_package(sve CONFIG) yields sve::sve, and each component is its own explicitly
-# linkable target. The pkg-config file is the part §26.4 states as a rule and §44 checks:
-#
-#     Основной sve.pc не объявляет FFmpeg, x264, x265 или vendor SDK зависимостями.
-#     Component metadata объявляет только собственные зависимости соответствующего backend.
-#
-# The core's Requires.private is empty, and that is now a fact about the build rather than
-# a promise: the core links nothing, so there is nothing for it to declare.
+# linkable target. Each pkg-config file declares only what its own unit links: the core's
+# Requires.private is empty, because the core links nothing.
 # ---------------------------------------------------------------------------
 include(CMakePackageConfigHelpers)
 
@@ -444,8 +398,7 @@ if(TARGET sve_backend_x265)
         "Adaptive ROI video encoding -- direct libx265 backend" "x265")
 endif()
 if(TARGET sve_ffmpeg_interop)
-    # libavutil and not libavcodec: the adapter converts a frame, it does not encode, and
-    # §26.4 allows the interop component exactly this one.
+    # libavutil and not libavcodec: the adapter converts a frame, it does not encode.
     sve_write_pc(sve-ffmpeg-interop sve_ffmpeg_interop
         "Adaptive ROI video encoding -- AVFrame interop" "libavutil")
 endif()
@@ -453,7 +406,7 @@ endif()
 endif()  # SVE_INSTALL
 
 # ---------------------------------------------------------------------------
-# Tests -- §52 tests/unit
+# Unit tests
 # ---------------------------------------------------------------------------
 if(SVE_BUILD_TESTS)
     enable_testing()
@@ -507,10 +460,10 @@ if(SVE_BUILD_TESTS)
     target_compile_options(encoder_faults_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME encoder_faults COMMAND encoder_faults_test)
 
-    add_executable(v3_policy_test tests/unit/v3_policy_test.cpp)
-    target_link_libraries(v3_policy_test PRIVATE sve)
-    target_compile_options(v3_policy_test PRIVATE ${SVE_WARNINGS})
-    add_test(NAME v3_policy COMMAND v3_policy_test)
+    add_executable(region_policy_test tests/unit/region_policy_test.cpp)
+    target_link_libraries(region_policy_test PRIVATE sve)
+    target_compile_options(region_policy_test PRIVATE ${SVE_WARNINGS})
+    add_test(NAME region_policy COMMAND region_policy_test)
 
     add_executable(geometry_test tests/unit/geometry_test.cpp)
     target_link_libraries(geometry_test PRIVATE sve)
@@ -538,19 +491,15 @@ if(SVE_BUILD_TESTS)
     target_compile_options(sei_payload_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME sei_payload COMMAND sei_payload_test)
 
-    # Compiles against the public headers only -- no src/ on the include path. That is the
-    # point of it: it stops compiling the moment an internal type leaks into the surface.
-    # frame_test links sve because it covers AvFrameAdapter, which is the §8.5 interop, so
-    # unlike the tests above there is a libavutil behind this one. WrapRawFrame is in the
-    # same test and no longer needs it: §8.10 moved to sve/raw_frame.h and is proved
-    # FFmpeg-free by public_headers_isolated below.
+    # Covers AvFrameAdapter, the AVFrame interop, so unlike the tests above there is a
+    # libavutil behind this one.
     add_executable(frame_test tests/unit/frame_test.cpp)
     target_link_libraries(frame_test PRIVATE sve_all)
     target_compile_options(frame_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME frame COMMAND frame_test)
 
     # encoder_test drives the public encoder end to end on the software backend: no GPU,
-    # but a real libx264 behind it, so it links sve like frame_test does.
+    # but a real libx264 behind it.
     add_executable(encoder_test tests/unit/encoder_test.cpp)
     target_link_libraries(encoder_test PRIVATE sve_all)
     target_compile_options(encoder_test PRIVATE ${SVE_WARNINGS})
@@ -566,18 +515,17 @@ if(SVE_BUILD_TESTS)
         add_test(NAME decoder COMMAND decoder_test)
     endif()
 
-    # §29's mandatory events and levels, plus the FFmpeg routing that carries the other
-    # half of them. Reaches encoder_runtime_warnings.h directly: the guards are where the
-    # fallback and refusal events are emitted, and provoking each one through the public
-    # API would need a backend that lacks the capability rather than a test that says so.
+    # Log events and levels, plus the FFmpeg routing. Reaches encoder_runtime_warnings.h
+    # directly: the guards are where the fallback and refusal events are emitted, and
+    # provoking each one through the public API would need a backend that lacks the
+    # capability rather than a test that says so.
     add_executable(logging_test tests/unit/logging_test.cpp)
     target_link_libraries(logging_test PRIVATE sve_all)
     target_include_directories(logging_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
     target_compile_options(logging_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME logging COMMAND logging_test)
 
-    # §50's guards, tested directly: they are pure functions, and the Strict half of each
-    # had never run until the coverage measurement said so.
+    # The runtime guards, tested directly: they are pure functions.
     add_executable(runtime_warnings_test tests/unit/runtime_warnings_test.cpp)
     target_link_libraries(runtime_warnings_test PRIVATE sve_all)
     target_include_directories(runtime_warnings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/core)
@@ -591,15 +539,16 @@ if(SVE_BUILD_TESTS)
     target_compile_options(names_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME names COMMAND names_test)
 
-    # AT-009 from §48. Runs where a backend reports main10 and skips with the encoder's own
-    # words where it does not, which is the capability evidence §50 asks a SKIP to carry.
+    # Runs where a backend reports main10 and skips with the encoder's own words where it
+    # does not.
     add_executable(ten_bit_test tests/unit/ten_bit_test.cpp)
     target_link_libraries(ten_bit_test PRIVATE sve_all)
     target_compile_options(ten_bit_test PRIVATE ${SVE_WARNINGS})
     add_test(NAME ten_bit COMMAND ten_bit_test)
 
-    # AT-002/003/006/007 across every backend in the build (§48). Absent hardware is a
-    # skip inside the test, so this runs everywhere and reports how much of it ran.
+    # Encode, decode, frame count, timestamps and end of stream across every backend in the
+    # build. Absent hardware is a skip inside the test, so this runs everywhere and reports
+    # how much of it ran.
     add_executable(backend_conformance_test tests/unit/backend_conformance_test.cpp)
     target_link_libraries(backend_conformance_test PRIVATE sve_all)
     target_compile_options(backend_conformance_test PRIVATE ${SVE_WARNINGS})
@@ -628,11 +577,10 @@ if(SVE_BUILD_TESTS)
     add_library(public_headers_selfcontained OBJECT ${SVE_SELFCONTAINED_SOURCES})
     target_include_directories(public_headers_selfcontained
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    # frame.h and push_encoder.h are the public headers that name an FFmpeg type (TZ v3.4
-    # §8.5, §8.8 and §8.10), so this target needs libavutil on its path to compile them. It does not
-    # weaken what the target checks -- self-containment -- and it does not weaken the
-    # FFmpeg-free claim either: public_headers_isolated below is what checks that, and it
-    # still sees include/ and nothing else.
+    # frame.h is the public header that names an FFmpeg type, so this target needs libavutil
+    # on its path to compile it. That does not weaken what the target checks --
+    # self-containment -- nor the FFmpeg-free claim: public_headers_isolated below is what
+    # checks that, and it still sees include/ and nothing else.
     target_include_directories(public_headers_selfcontained
         SYSTEM PRIVATE ${FFMPEG_INCLUDE_DIRS})
     target_compile_options(public_headers_selfcontained PRIVATE ${SVE_WARNINGS})

@@ -1,7 +1,5 @@
-// Keeping a region alive across a detector miss -- TZ v2.0 §13.
-//
-// Level L1 of §18, which names "temporal smoothing" among the unit-testable pieces. Pure
-// arithmetic: no codec, no media, no clock.
+// Keeping a region alive across a detector miss. Pure arithmetic: no codec, no media, no
+// clock.
 
 #include "temporal_roi.h"
 
@@ -44,7 +42,7 @@ sve::Box box(double t, uint64_t track, float x, float w = 0.1f)
     return b;
 }
 
-// The case §13 opens with: seen, missed, seen again.
+// The case it exists for: seen, missed, seen again.
 void a_gap_is_filled_from_both_ends()
 {
     // Samples at 0 and 2 seconds, so the one at 1 is the frame the detector missed.
@@ -128,7 +126,7 @@ void confidence_decays_only_where_it_is_a_guess()
         "one sample past the end, halved");
 }
 
-// Past the last detection the box keeps moving when prediction is on (TZ v3).
+// Past the last detection the box keeps moving when prediction is on.
 void prediction_continues_motion_past_the_last_sample()
 {
     // x: 0.10 at t=0, 0.30 at t=2 → at t=3 (one second past end) x = 0.40
@@ -162,7 +160,8 @@ void untracked_boxes_keep_the_symmetric_window()
     check(roi.at(1.6).empty(), "dropped outside it");
 }
 
-// §11's last two factors read track age and speed off what at() already knows.
+// The importance model's last two factors read track age and speed off what at() already
+// knows.
 void at_attaches_track_evidence_for_importance()
 {
     // Moves 0.20 of the frame in x over 2 s → speed = 0.20 / (√2 * 2) ≈ 0.0707 diagonals/s.
@@ -183,8 +182,8 @@ void at_attaches_track_evidence_for_importance()
         "a single-sample track has age but no speed");
 }
 
-/// §13's own switch, and the one field of TemporalROIConfig that had no code behind it
-/// until 2026-09-02. Off means the boxes the producer gave, at the times it gave them.
+/// TemporalROIConfig::enabled. Off means the boxes the producer gave, at the times it gave
+/// them.
 void switched_off_nothing_is_kept_alive()
 {
     const std::vector<sve::Box> boxes{box(0.0, 7, 0.10f), box(2.0, 7, 0.30f)};
@@ -193,8 +192,8 @@ void switched_off_nothing_is_kept_alive()
     off.enabled = false;
     const sve::TemporalRoi cold(boxes, off, 0.5);
 
-    // The miss the whole section exists to cover: with §13 on this is one interpolated
-    // region, and with it off there is nothing between the samples.
+    // The miss the whole feature exists to cover: switched on this is one interpolated
+    // region, and switched off there is nothing between the samples.
     check(cold.at(1.0).empty(), "nothing bridges a gap when temporal ROI is off");
     // Past the last sample, where patience and prediction would otherwise hold it.
     check(cold.at(2.5).empty(), "nothing is held past the last sample when off");
@@ -212,8 +211,7 @@ void switched_off_nothing_is_kept_alive()
 
     // And the untracked path, which the tracked assertions above cannot reach. It runs on
     // its own symmetric window rather than on reach, so it is switched off separately in
-    // the code and would stay on unnoticed: the first version of this slice left it on, and
-    // everything above still passed.
+    // the code and would stay on unnoticed while everything above still passed.
     sve::Box lone = box(1.0, 0, 0.1f);   // track_id 0 == the producer numbered nothing
     const sve::TemporalRoi cold_untracked({&lone, 1}, off, 0.5);
     check(cold_untracked.at(1.4).empty(), "an untracked box is not held either when off");

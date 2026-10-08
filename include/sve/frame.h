@@ -1,21 +1,19 @@
 #pragma once
 
-// FFmpeg interop -- TZ v4.1 §8.5.
+// FFmpeg interop.
 //
 // This is the one public header that names an FFmpeg type, and it is deliberately not
 // included by sve.h. Everything else in include/ compiles with nothing but include/ on the
-// path, which is what lets an embedder submit frames without libavutil; §20 makes AVFrame
-// an opt-in adapter rather than the input interface, so the two requirements are met by
-// keeping the interop in one file a caller opts into:
+// path, which is what lets an embedder submit frames without libavutil; AVFrame is an
+// opt-in adapter rather than the input interface, kept in one file a caller opts into:
 //
 //     #include "sve/sve.h"      // the library
 //     #include "sve/frame.h"    // ... and AVFrame, if you have one
 //
-// What lives here is only what needs an AVFrame to be spelled. Frame and TimedFrame moved
-// to sve/timed_frame.h in 4.1 and are in the umbrella now: the frame a caller submits is
-// an IFrameBuffer, and this header's job is turning an AVFrame into one. The raw-plane API
-// of §8.10 moved out for the same reason and now lives in sve/raw_frame.h, which this
-// header includes so that callers who had both from here still do.
+// What lives here is only what needs an AVFrame to be spelled. Frame and TimedFrame live in
+// sve/timed_frame.h: the frame a caller submits is an IFrameBuffer, and this header's job
+// is turning an AVFrame into one. The raw-plane API lives in sve/raw_frame.h, which this
+// header includes for convenience.
 //
 // tests/unit/public_headers_isolated.cpp compiles the rest without FFmpeg, so a stray
 // include of this header from a sibling stops the build rather than an embedder's.
@@ -40,7 +38,7 @@ extern "C" {
 
 namespace sve {
 
-/// An AVFrame as a Frame -- TZ v4.1 §8.5.
+/// An AVFrame as a Frame.
 ///
 /// The two ways in are named after what they do to the caller's frame, because the
 /// difference is the whole contract: Ref adds a reference and leaves the caller's frame
@@ -57,12 +55,11 @@ public:
     static Frame Adopt(AVFrame* frame);
 };
 
-/// Submits an AVFrame -- TZ v4.1 §8.1 and §8.5.
+/// Submits an AVFrame.
 ///
-/// The adapter §8.1 asks for and nothing more: it takes a reference through
-/// AvFrameAdapter::Ref and calls SubmitFrame(TimedFrame). Written as a free function
-/// rather than a member so that the encoder's own interface names no FFmpeg type; a member
-/// would put AVFrame back in encoder.h, which is exactly what §8.3 forbids.
+/// Takes a reference through AvFrameAdapter::Ref and calls SubmitFrame(TimedFrame).
+/// Written as a free function rather than a member so that the encoder's own interface
+/// names no FFmpeg type; a member would put AVFrame back in encoder.h.
 ///
 /// `frame` is borrowed for the length of the call. If the encoder keeps it -- lookahead,
 /// B-frames -- it is holding its own reference, not the caller's.

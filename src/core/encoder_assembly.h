@@ -1,10 +1,9 @@
 #pragma once
 
-// Building a SmartVideoEncoder against a deployment the caller assembled -- TZ v4.2 §26.4.
+// Building a SmartVideoEncoder against a deployment the caller assembled.
 //
-// sve/backend_registry.h has said since 4.2 that "an application assembling its own may
-// build a BackendRegistry instead", and since 2026-09-04 RoiEncoder honours that. This is
-// the same door one level up, for the facade.
+// RoiEncoder takes a BackendRegistry the caller built; this is the same door one level up,
+// for the facade.
 //
 // It is deliberately not in include/. The public entry point is CreateVideoEncoder(config)
 // and it stays one function: the registry is not something a caller of the library chooses,

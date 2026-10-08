@@ -1,5 +1,5 @@
-// The decoder's side of §8: what a caller promises about its buffers, and what that costs
-// when it is not asked.
+// The decoder's side: what a caller promises about its buffers, and what that costs when it
+// is not asked.
 //
 // One property is worth a test of its own. An Annex-B access unit ends where the next one
 // begins and nowhere else, so a parser in front of the decoder cannot emit a picture until
@@ -123,7 +123,7 @@ void a_whole_access_unit_decodes_to_a_picture_without_the_next_one()
     // would otherwise be handed to a parser.
     CHECK(decoder.Open(InputCodec::H264, {}).ok());
     CHECK(decoder.decoder_name() == "h264");
-    // Nothing was asked for, so nothing hardware may be reported -- §50 in miniature.
+    // Nothing was asked for, so nothing hardware may be reported.
     CHECK(decoder.hardware_name().empty());
 
     int64_t from_first = 0;

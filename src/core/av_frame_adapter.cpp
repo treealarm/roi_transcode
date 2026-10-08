@@ -1,7 +1,7 @@
 #include "sve/frame.h"
 
-// The encoder-facing half of §8.5's interop: submitting an AVFrame, and reading back the
-// device the encoder holds. Both name SmartVideoEncoder.
+// The encoder-facing half of the AVFrame interop: submitting an AVFrame, and reading back
+// the device the encoder holds. Both name SmartVideoEncoder.
 //
 // AvFrameAdapter::Ref and ::Adopt are next door in av_frame_ref.cpp, deliberately: they
 // name no encoder, and keeping them in a separate object is what lets the standalone

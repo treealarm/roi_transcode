@@ -8,8 +8,8 @@
 // release notes get to break. Here it can only be wrong in one place.
 //
 // It sits under backend/common rather than core/ because everything that needs it is an
-// FFmpeg-side file, and §5.5 puts the core on the other side of that boundary. The name of
-// a pixel format is a different question and stayed in core: pixel_format_name is public
+// FFmpeg-side file, and the core stays on the other side of that boundary. The name of a
+// pixel format is a different question and lives in core: pixel_format_name is public
 // API (frame_buffer.h) and knows nothing about FFmpeg.
 
 #include "sve/frame_buffer.h"

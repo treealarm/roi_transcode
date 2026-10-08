@@ -1,17 +1,17 @@
 #pragma once
 
-// Which backends may be tried, and in what order -- TZ v4.1 §8.4.
+// Which backends may be tried, and in what order.
 //
-// The list has no default, and that is the whole point of the type. v3.4 shipped one, and
-// taken as a rule it said that a machine with both integrated graphics and a discrete card
-// must prefer the integrated one -- usually the weaker choice. A library cannot know that
-// ordering; whoever deploys the system can, and now has to say so.
+// The list has no default, and that is the whole point of the type. A default order would
+// say, for instance, that a machine with both integrated graphics and a discrete card must
+// prefer the integrated one -- usually the weaker choice. A library cannot know that
+// ordering; whoever deploys the system can, and has to say so.
 //
 // The software encoders are ordinary entries in the same list. There is no separate
-// "allow software fallback" switch any more, because a switch and a list disagreeing about
-// the same question is one place too many to look: leaving X264 and X265 out of `preferred`
-// is how a caller says "hardware or nothing", and putting them last is how they say
-// "hardware if you have it".
+// "allow software fallback" switch, because a switch and a list disagreeing about the same
+// question is one place too many to look: leaving X264 and X265 out of `preferred` is how a
+// caller says "hardware or nothing", and putting them last is how they say "hardware if
+// you have it".
 
 #include <string>
 #include <vector>
@@ -21,45 +21,30 @@ namespace sve {
 // Which backend does the encoding.
 //
 // For the hardware entries this says nothing about the codec -- the same silicon encodes
-// both, and conflating the two is what made the old X265 name wrong the moment H.264
-// output existed. The two software entries are the exception, and deliberately so: libx264
-// and libx265 are separate libraries with separate APIs, so they are separate backends
-// rather than one that picks a library from the codec (TZ v4.1 §5.4).
+// both. The software entries are the exception, and deliberately so: libx264 and libx265
+// are separate libraries with separate APIs, so they are separate backends rather than one
+// that picks a library from the codec.
 //
 // The practical consequence is in selection. Naming X264 and asking for H.265 is not a
 // request the library can quietly satisfy: under Auto that backend is skipped with the
-// reason logged, and named outright it fails with Unsupported (§8.4).
+// reason logged, and named outright it fails with Unsupported.
 enum class Backend {
     // Tries whatever `BackendSelection::preferred` lists, in that order. Which one opened
     // is reported back, because on this hardware the difference is worth knowing.
     Auto,
-    /// Named after the SDK rather than after Intel's marketing word for it, following
-    /// §8.2. Quick Sync is what the hardware is called; oneVPL is what we talk to.
+    /// Named after the SDK rather than after Intel's marketing word for it. Quick Sync is
+    /// what the hardware is called; oneVPL is what we talk to.
     IntelOneVpl,
-    /// Not in §8.2's enumeration at all. Kept as this library's own: it reaches the same
-    /// integrated GPU when the oneVPL dispatcher finds no runtime, and it is what proved
-    /// the four-region limit on Intel H.264 (see the measurements in STATUS.md). Whether
-    /// it survives is question 10 to the customer, not something to decide by deleting it.
+    /// Reaches the same integrated GPU when the oneVPL dispatcher finds no runtime.
     Vaapi,
     X264,
     X265,
-    /// libx264 through its own API rather than through libavcodec -- TZ v4.1 §5.4.
-    /// Alongside X264 rather than instead of it, for as long as the two need comparing:
-    /// integration/scripts/backend-compare.sh is what says whether the direct path keeps
-    /// the zone as well, and it cannot say that if only one of them exists.
+    /// libx264 through its own API rather than through libavcodec.
     X264Direct,
-    /// libx265 through its own API -- TZ v4.1 §5.4. Alongside X265 for the same reason
-    /// X264Direct sits alongside X264: a comparison needs both sides.
+    /// libx265 through its own API rather than through libavcodec.
     X265Direct,
-    /// Intel oneVPL through its own API -- TZ v4.2 §5.2's OneVplBackend, the native one.
-    ///
-    /// Named Direct alongside IntelOneVpl for the same reason X264Direct sits alongside
-    /// X264: while both exist, a comparison needs both sides, and backend-compare.sh is
-    /// what says whether the native path holds the zone as well.
-    ///
-    /// The naming is transitional and backwards from §8.2, which gives the plain name to
-    /// the native backend -- our IntelOneVpl is the libavcodec one, and §5.5 does not list
-    /// it at all. The two collapse into one when the libavcodec encoders go.
+    /// Intel oneVPL through its own API. IntelOneVpl is the same hardware through
+    /// libavcodec.
     IntelOneVplDirect,
 };
 
@@ -72,7 +57,7 @@ struct BackendSelection {
     /// list is InvalidArgument rather than a silent choice made on the caller's behalf.
     ///
     /// A backend that cannot produce the requested codec is skipped here with its reason
-    /// logged -- X264 in a list used to encode H.265 costs nothing and hides nothing.
+    /// logged, so X264 in a list used to encode H.265 costs nothing and hides nothing.
     std::vector<Backend> preferred;
 
     /// Whether a backend absent from `preferred` may be used. False by default: a list
@@ -81,11 +66,10 @@ struct BackendSelection {
 };
 
 /// A backend named on a command line or in a config file, together with the preference
-/// order that name implies -- an application-side convenience, not part of §8.4.
+/// order that name implies -- an application-side convenience.
 ///
-/// It exists because two spellings do not name a single backend. "auto" needs an order,
-/// and since 4.1 the library supplies none. "cpu" named one backend until 4.1 split it in
-/// two, and every existing script and config still says it.
+/// It exists because two spellings do not name a single backend: "auto" needs an order,
+/// and "cpu" means both software encoders.
 struct BackendChoice {
     Backend kind = Backend::Auto;
     BackendSelection selection;
@@ -94,16 +78,14 @@ struct BackendChoice {
 /// Every name backend_choice_from_name accepts, joined by '|' in the order it lists them.
 ///
 /// It exists so that an application's help text and this parser's own refusal cannot drift
-/// apart from what the parser does. They had: the list was written by hand in three places
-/// -- the refusal, this header's comment, and the command line's usage text -- and all
-/// three still named the state of things before §5.4 and §5.2 added the direct backends,
-/// so `--encoder x264direct` worked while every list said it did not exist.
+/// apart from what the parser does: one table feeds all of them.
 std::string backend_choice_names();
 
 /// One of the names backend_choice_names() lists: a backend's own name, "cpu" for the two
 /// software encoders together, or "auto" for the order measured on this project's hardware.
 /// Unknown text throws std::invalid_argument rather than defaulting: a misspelled backend
-/// quietly becoming a different one is the substitution §8.4 exists to prevent.
+/// quietly becoming a different one is exactly the substitution this type exists to
+/// prevent.
 BackendChoice backend_choice_from_name(const char* name);
 
 } // namespace sve

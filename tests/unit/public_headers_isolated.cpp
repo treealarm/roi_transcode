@@ -8,7 +8,7 @@
 //
 // This translation unit has no library behind it and nothing to link. If it stops
 // compiling, a public header grew a dependency it must not have -- which is exactly the
-// property TZ v2.0 §7 and §8 rely on, and the reason BackendSession is opaque.
+// property the public interface relies on, and the reason BackendSession is opaque.
 
 #include "sve/ffmpeg_log.h"
 #include "sve/input_format.h"
@@ -64,9 +64,9 @@ private:
     sve::Mask mask;
     sve::Rational rational;
 
-    // §8.3, §8.6 and §8.7. These three are named here rather than only in frame_test
-    // because the claim being made is not that they work -- it is that they compile with
-    // no FFmpeg anywhere. frame.h is deliberately absent: it is the one public header that
+    // Input format, packet and timestamp. Named here rather than only in frame_test because
+    // the claim being made is not that they work -- it is that they compile with no FFmpeg
+    // anywhere. frame.h is deliberately absent: it is the one public header that
     // does name an AVFrame, and it is not reachable from sve.h.
     sve::InputVideoFormat input_format;
     sve::MediaTimestamp timestamp;
@@ -75,11 +75,8 @@ private:
     (void)timestamp.valid();
     (void)payload.empty();
 
-    // §8.5 and §8.8, and this is the claim 4.1 added. Submitting a frame and receiving
-    // packets through a callback used to need frame.h, because Frame was a wrapper around
-    // an AVFrame -- so the two entry points a caller actually uses were exactly the two
-    // that dragged FFmpeg in. Frame is a handle to an IFrameBuffer now, which an embedder
-    // implements with include/ and nothing else, and this compiles to prove it.
+    // Submitting a frame and receiving packets: Frame is a handle to an IFrameBuffer, which
+    // an embedder implements with include/ and nothing else, and this compiles to prove it.
     auto owned = std::make_shared<CallerOwnedBuffer>();
     sve::Frame frame(owned);
     sve::TimedFrame timed{frame, sve::FrameMetadata{}};
@@ -87,7 +84,7 @@ private:
     (void)frame.buffer().width();
     (void)timed.metadata.force_key_frame;
 
-    // §7: the backend contract, opaque session and all.
+    // The backend contract, opaque session and all.
     sve::BackendConfig config;
     sve::BackendFrameControl control;
     sve::EncoderCapabilities caps;
@@ -96,7 +93,7 @@ private:
     const std::vector<sve::BackendRef> backend =
         sve::resolve_backends(sve::Backend::X264, selection, sve::Codec::H264);
 
-    // §22 and §29: the policy and the log sink are part of the public vocabulary, and
+    // Fallback policy and the log sink: both are part of the public vocabulary, and
     // neither drags FFmpeg in with it.
     sve::Settings with_policy;
     with_policy.fallback = sve::FallbackPolicy::Strict;
@@ -106,13 +103,11 @@ private:
     (void)sve::log_level_name(sve::LogLevel::Trace);
     (void)sink;
 
-    // §29's FFmpeg routing, and it is here for the reason the whole file exists. The header
-    // is about FFmpeg and deliberately names no FFmpeg type, so that an embedder without
-    // FFmpeg on the include path can still compile against the public surface. Reached from
-    // neither sve.h nor the includes above until 2026-09-02, that claim was made in a commit
-    // message and checked nowhere -- only public_headers_selfcontained compiled it, and it
-    // does so with ${FFMPEG_INCLUDE_DIRS} on the path, which proves the opposite of what was
-    // wanted. Naming the function is what puts it under this target.
+    // The FFmpeg log routing. The header is about FFmpeg and deliberately names no FFmpeg
+    // type, so that an embedder without FFmpeg on the include path can still compile
+    // against the public surface. public_headers_selfcontained compiles it with
+    // ${FFMPEG_INCLUDE_DIRS} on the path, which proves the opposite of what is wanted;
+    // naming the function here is what puts it under this target.
     //
     // Declared, never called: this object library is never linked, and the definition lives
     // in the FFmpeg interop component that an isolated build does not have.
@@ -120,7 +115,7 @@ private:
     (void)route;
     (void)selection.allow_unlisted;
 
-    // §8 and §10: memory types, objects, policies.
+    // Memory types and objects.
     const sve::MemoryType memory = sve::MemoryType::ONEVPL;
     sve::Object object;
 
@@ -137,16 +132,13 @@ private:
     (void)plain.plane(0).row(999).size();
     (void)sve::pixel_format_name(sve::PixelFormat::NV12);
 
-    // §8.10, and the reason it moved out of sve/frame.h: wrapping planes the caller owns
-    // is an operation on plain memory, and it now compiles in a translation unit that has
-    // never seen libavutil. Before this, reaching WrapRawFrame meant including the one
-    // public header that names an AVFrame -- so the FFmpeg-free API had an FFmpeg-only
-    // door in it.
+    // Wrapping planes the caller owns is an operation on plain memory, and it compiles in a
+    // translation unit that has never seen libavutil.
     //
     // Nothing below runs: this target is an OBJECT library that is never linked, and
-    // building it is passing it. What it proves is exactly one thing -- that §8.10 can be
-    // spelled without FFmpeg on the include path. The owner contract and the no-copy
-    // guarantee are behaviour, and frame_test is what checks them.
+    // building it is passing it. What it proves is exactly one thing -- that the raw-plane
+    // API can be spelled without FFmpeg on the include path. The owner contract and the
+    // no-copy guarantee are behaviour, and frame_test is what checks them.
     auto owner = std::make_shared<std::vector<uint8_t>>(16 * 16, 0);
     sve::RawFrameView view;
     view.format.width = 16;

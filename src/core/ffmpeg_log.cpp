@@ -1,5 +1,5 @@
-// Routing FFmpeg's diagnostics into a LogSink -- TZ v4.2 §29. See sve/ffmpeg_log.h for why
-// this is process-wide and why that is the application's decision rather than an encoder's.
+// Routing FFmpeg's diagnostics into a LogSink. See sve/ffmpeg_log.h for why this is
+// process-wide and why that is the application's decision rather than an encoder's.
 
 #include "sve/ffmpeg_log.h"
 

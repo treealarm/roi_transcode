@@ -70,12 +70,10 @@ HeldRegions hold(const Regions& in)
 // access units, somewhere for the packets to go, and the bookkeeping that reconciles the
 // two.
 //
-// It owns a SmartVideoEncoder and adds nothing to it. The ROI pipeline, the bitrate budget,
-// the slew limiter and the region builder used to be assembled here as well as there, and
-// the second copy is where the two drifted -- only one of them was feeding its budget from
-// its own output. There is one now, and this class is the application layer on top: §3 puts
-// decoding and muxing outside the library's scope, and §52 calls this an example of using
-// it rather than part of it.
+// It owns a SmartVideoEncoder and adds nothing to it: the ROI pipeline, the bitrate budget,
+// the slew limiter and the region builder are assembled once, inside the encoder. This
+// class is the application layer on top -- decoding and muxing are outside the encoder's
+// scope.
 struct Session::Impl {
     SessionParams params;
     std::unique_ptr<FileMuxSink> file;
@@ -315,11 +313,9 @@ Report Session::finish()
             roiav::fail(s.message());
         }
         m_impl->drain();
-        // Stop before the sink is ended, matching transcode_file. §8.13 makes Stop the end
-        // of an encode, and the §19.4 report on sidecar records that never got a packet
-        // lives behind it -- until 2026-09-04 neither of the two paths that actually write
-        // a sidecar reached it, so the check existed and never ran where it mattered. The
-        // order matters because end_sink tells the caller the stream is complete, and a
+        // Stop before the sink is ended, matching transcode_file. Stop is the end of an
+        // encode, and the report on sidecar records that never got a packet lives behind it.
+        // The order matters because end_sink tells the caller the stream is complete, and a
         // complaint that it is not has to arrive before that, not after.
         if (const Status s = m_impl->encoder->Stop(); !s.ok()) {
             roiav::fail(s.message());

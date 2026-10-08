@@ -2,14 +2,12 @@
 
 // Every enumerator of every enum the public API exposes, spelled out once.
 //
-// Two things need this list and they must not keep separate copies: enum_surface, which
-// prints it for the Python surface check, and names_test, which asks the library's own
-// *_name() function for each value. A second copy is how one of them ends up describing an
-// enum that has moved on.
+// names_test asks the library's own *_name() function for each value; keeping the list here
+// rather than inside the test is what lets a new enum be added in one obvious place.
 //
 // Each enum is a switch with no `default:`, so adding an enumerator makes the compiler warn
-// here (-Wswitch, in -Wall). That warning is the first line of defence; the two consumers
-// are the second.
+// here (-Wswitch, in -Wall). That warning is the first line of defence; names_test is the
+// second.
 
 #include "sve/backend_selection.h"
 #include "sve/encoder.h"

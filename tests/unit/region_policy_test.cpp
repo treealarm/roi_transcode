@@ -1,4 +1,4 @@
-// ObjectPriority ladder (v3 §11.1), geometry policy (§11.2–11.3), QP slew / smoothing (§13).
+// ObjectPriority ladder, geometry policy (margin, min side), QP slew and smoothing.
 
 #include "box_smoother.h"
 #include "importance.h"
@@ -198,7 +198,7 @@ void roi_lag_acceptance_matches_v3_thresholds()
     for (int32_t i = 0; i < 100; ++i) {
         good.push_back(sve::measure_roi_lag(a, b, i < 95 ? 1 : 2, 0.033));
     }
-    check(sve::roi_lag_acceptance(good), "P95/P99 inside §14");
+    check(sve::roi_lag_acceptance(good), "P95/P99 inside the ROI-lag bounds");
 
     std::vector<sve::RoiLagSample> bad;
     for (int32_t i = 0; i < 100; ++i) {

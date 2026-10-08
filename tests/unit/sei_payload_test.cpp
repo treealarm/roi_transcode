@@ -1,4 +1,4 @@
-// SEI payload round-trip -- TZ v3 §19.2 (no codec).
+// SEI payload round-trip (no codec).
 
 #include "sve/metadata.h"
 
@@ -67,7 +67,7 @@ void the_checksum_is_crc32c_and_not_crc32()
 
 void a_payload_stays_under_sixteen_kilobytes()
 {
-    // §19.2 caps the whole frame's payload. The object count alone cannot enforce it: a
+    // The whole frame's payload is capped. The object count alone cannot enforce it: a
     // class name is up to 32 bytes, so a frame inside its object budget can still be over
     // its byte budget.
     sve::SeiFrame frame;
@@ -88,7 +88,8 @@ void a_payload_stays_under_sixteen_kilobytes()
     check(!back.objects.empty(), "!back.objects.empty()");
     check(back.objects.size() < frame.objects.size(), "back.objects.size() < frame.objects.size()");
 
-    // What survived is the important half: §19.2 drops from the least important upward.
+    // What survived is the important half: objects are dropped from the least important
+    // upward.
     for (const sve::SeiObject& o : back.objects) {
         check(o.priority == sve::ObjectPriority::Critical, "o.priority == sve::ObjectPriority::Critical");
     }

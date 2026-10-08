@@ -14,9 +14,9 @@ namespace sve {
 struct Report {
     Backend encoder_used = Backend::X264;
     std::string backend_name;
-    /// Where the §19.3 sidecar was written, empty when none was asked for. The library
-    /// writes records and the application names the file, so this is the application
-    /// saying which name it chose rather than the encoder reporting its own doing.
+    /// Where the sidecar was written, empty when none was asked for. The library writes
+    /// records and the application names the file, so this is the application saying which
+    /// name it chose rather than the encoder reporting its own doing.
     std::string sidecar_path;
     int64_t frames = 0;
     int64_t packets = 0;
@@ -51,7 +51,7 @@ struct Report {
     // CRF/CQP to avoid an unstable ROI+SEI path in libx265.
     bool cpu_h265_target_guard = false;
 
-    // §14 ROI lag observability. Filled when tracked boxes are available on the path.
+    // ROI lag observability. Filled when tracked boxes are available on the path.
     bool roi_lag_measured = false;
     int64_t roi_lag_samples = 0;
     float roi_lag_min_iou = 0.0f;

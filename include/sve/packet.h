@@ -1,15 +1,14 @@
 #pragma once
 
-// One encoded access unit and the bytes behind it -- TZ v3.4 §8.6.
+// One encoded access unit and the bytes behind it.
 //
 // The payload is shared and immutable, so copying a packet copies a refcount rather than a
 // frame's worth of bytes, and no copy can be modified out from under another.
 //
-// This replaces a borrowed span whose contract was "valid until the next call on the same
-// session". That contract is correct and unenforceable in equal measure: it reads fine at
-// the call site, and the one caller who queues a packet instead of writing it immediately
-// gets memory that was reused three frames ago. The cost of closing it is one allocation
-// and one copy per packet -- at archive bitrates, under a megabyte a second.
+// Not a borrowed span "valid until the next call on the same session": that contract reads
+// fine at the call site, and the one caller who queues a packet instead of writing it
+// immediately gets memory that was reused three frames ago. The cost of closing it is one
+// allocation and one copy per packet -- at archive bitrates, under a megabyte a second.
 
 #include "sve/timestamp.h"
 #include "sve/types.h"

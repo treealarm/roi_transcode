@@ -1,10 +1,10 @@
 #pragma once
 
-// What the detector found -- TZ v2.0 §10.
+// What the detector found.
 //
-// Geometry is where §10 goes beyond an axis-aligned box. A polygon used to collapse to its
-// AABB on the way in; the shape-preserving path paints it onto the same block qp-map a mask
-// uses, so a corner outside the outline is not protected. BoundingBox stays the cheap form.
+// Geometry goes beyond an axis-aligned box: a polygon is painted onto the same block qp-map
+// a mask uses, so a corner outside the outline is not protected. BoundingBox stays the
+// cheap form.
 
 #include "sve/geometry.h"
 
@@ -28,7 +28,7 @@ struct Polygon {
     std::vector<Point> points;
 };
 
-/// BoundingBox, Polygon or BinaryMask (§2). Mask holds a borrowed pointer, so an Object
+/// BoundingBox, Polygon or BinaryMask. Mask holds a borrowed pointer, so an Object
 /// carrying one must not outlive the pixels it points at.
 using Geometry = std::variant<BoundingBox, Polygon, Mask>;
 
@@ -37,22 +37,22 @@ struct Object {
     uint32_t class_id = 0;
     /// The class as a name -- "person", "face", "vehicle", "license_plate".
     ///
-    /// §10 has only the numeric class_id. A number would mean a second table mapping it to
-    /// the names everything else here already speaks: ONVIF reports classes as text, the
-    /// archive stores text, Quality::kinds is keyed by text. That table would be one more
-    /// place for the two to disagree, so the name travels and class_id stays for a caller
-    /// who has one.
+    /// A name rather than only a numeric class_id: a number would need a second table
+    /// mapping it to the names everything else here already speaks -- ONVIF reports classes
+    /// as text, the archive stores text, Quality::kinds is keyed by text. That table would
+    /// be one more place for the two to disagree, so the name travels and class_id stays
+    /// for a caller who has one.
     std::string kind;
     float confidence = 1.0f;
     Geometry geometry;
 
-    /// How much this class is worth in general -- the "license plate 1.00, vehicle 0.60"
-    /// column of §11. Consumed by the importance model, not by the encoder directly.
+    /// How much this class is worth in general -- "license plate 1.00, vehicle 0.60".
+    /// Consumed by the importance model, not by the encoder directly.
     float semantic_priority = 0.5f;
     /// How much it is worth to the task at hand, which may differ from the class alone:
     /// a plate matters more to ALPR than to counting pedestrians.
     float task_priority = 1.0f;
-    /// Never sacrificed when the bitrate budget runs short (§15).
+    /// Never sacrificed when the bitrate budget runs short.
     bool critical = false;
 };
 

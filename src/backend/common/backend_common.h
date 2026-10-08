@@ -3,12 +3,10 @@
 // What every backend shares: the parts of Configure that do not depend on which encoder
 // opened, and the whole of SubmitFrame / ReceivePacket / Flush.
 //
-// §7 gives all five methods to IEncoderBackend, and all four of our backends implement the
-// last three identically -- they are the same avcodec_send_frame / avcodec_receive_packet
-// pair, because every one of them reaches the hardware through libavcodec. Putting that
-// implementation in a base class rather than in each backend is what keeps the interface
-// faithful to the specification without three copies of one function behind it. A backend
-// that does not go through libavcodec at all (Rockchip MPP, §6) overrides them.
+// The libavcodec-backed backends implement the last three identically -- they are the same
+// avcodec_send_frame / avcodec_receive_packet pair, because every one of them reaches the
+// hardware through libavcodec. Putting that implementation in a base class rather than in
+// each backend keeps one copy of it.
 
 #include "backend/common/backend_session.h"
 #include "sve/encoder_backend.h"
@@ -19,12 +17,9 @@ namespace sve {
 
 namespace backend_common {
 
-/// What an encoder will actually take, asked of it rather than assumed.
-///
-/// §48's AT-009 allows a SKIP for a backend without ten-bit support, but only with
-/// capability evidence -- so the answer has to come from the encoder, not from a table
-/// somebody wrote down. Whether libx265 was built with a ten-bit path, and whether the
-/// driver exposes one, are properties of the machine.
+/// What an encoder will actually take, asked of it rather than assumed: whether libx265 was
+/// built with a ten-bit path, and whether the driver exposes one, are properties of the
+/// machine, not of a table somebody wrote down.
 struct TenBitSupport {
     bool main10 = false;      ///< accepts some ten-bit pixel format
     bool p010_input = false;  ///< accepts AV_PIX_FMT_P010 without conversion

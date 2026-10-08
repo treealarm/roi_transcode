@@ -1,16 +1,13 @@
 #pragma once
 
-// A frame the encoder can hold on to, and what it is to be told about it -- TZ v4.1 §8.5.
+// A frame the encoder can hold on to, and what it is to be told about it.
 //
 // This header names no FFmpeg type, which is the whole point of it existing separately.
-// Until 4.1 `Frame` was a wrapper around AVFrame, so the one type a caller needs in order
-// to submit anything dragged libavutil in with it, and `sve.h` could not include it. Now
-// the frame is an owning handle to an IFrameBuffer -- an interface an embedder can
-// implement over their own pixels without linking FFmpeg at all -- and this header is in
-// the umbrella where it belongs.
+// The frame is an owning handle to an IFrameBuffer -- an interface an embedder can
+// implement over their own pixels without linking FFmpeg at all.
 //
-// AVFrame has not gone anywhere. It moved to `sve/frame.h`, which is the opt-in interop
-// header and turns one into a Frame; see AvFrameAdapter there.
+// AVFrame interop lives in `sve/frame.h`, which is the opt-in header and turns one into a
+// Frame; see AvFrameAdapter there.
 
 #include "sve/frame_buffer.h"
 #include "sve/frame_metadata.h"
@@ -22,10 +19,10 @@ namespace sve {
 
 /// A frame this object keeps alive, however its pixels are stored.
 ///
-/// Copyable, and shared rather than unique, because §8.5 asks for shared ownership and the
-/// reason is the encoder's own behaviour: with lookahead or B-frames it holds a frame past
-/// the call that submitted it. Unique ownership would force the caller to choose between
-/// giving the frame away and keeping a way to look at it.
+/// Copyable, and shared rather than unique, because of the encoder's own behaviour: with
+/// lookahead or B-frames it holds a frame past the call that submitted it. Unique ownership
+/// would force the caller to choose between giving the frame away and keeping a way to look
+/// at it.
 ///
 /// The buffer behind it can be CPU planes, a surface from a backend's own pool, or
 /// anything else an embedder implements IFrameBuffer over. That is what makes this type
@@ -50,7 +47,7 @@ private:
     std::shared_ptr<IFrameBuffer> m_buffer;
 };
 
-/// A frame and what the encoder is to be told about it -- TZ v4.1 §8.5.
+/// A frame and what the encoder is to be told about it.
 ///
 /// The frame inside holds its own reference, so an encoder that buffers it for lookahead
 /// or B-frames is not depending on the caller keeping theirs.

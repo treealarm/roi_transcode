@@ -35,7 +35,7 @@ BoundingBox extent_of(const Polygon& poly)
 BoundingBox extent_of(const Mask& mask)
 {
     // consistent() is the whole check: it says the span really holds the rows the
-    // dimensions claim, which is what the old pointer form could not express.
+    // dimensions claim, which a bare pointer could not express.
     if (!mask.consistent()) {
         return {};
     }

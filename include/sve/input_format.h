@@ -1,7 +1,6 @@
 #pragma once
 
-// What the encoder is being fed, apart from what it is being asked to produce --
-// TZ v3.4 §8.3.
+// What the encoder is being fed, apart from what it is being asked to produce.
 //
 // The split is the point. Frame geometry, pixel layout and the two rationals belong to the
 // input; bitrate, GOP, preset and rate control belong to the output. Holding them in one
@@ -12,10 +11,9 @@
 // re-negotiated its input mid-stream would have to re-open the backend, which is a new
 // encode with a new codec configuration, not a reconfiguration of this one.
 //
-// Departure from the letter of §8.3, named rather than discovered: width and height are
-// int32_t, not uint32_t. Every dimension in this library is signed -- geometry, strides,
-// block grids -- and one unsigned pair in the middle of that is where a subtraction wraps
-// to four billion.
+// Width and height are int32_t, not uint32_t. Every dimension in this library is signed --
+// geometry, strides, block grids -- and one unsigned pair in the middle of that is where a
+// subtraction wraps to four billion.
 
 #include "sve/frame_buffer.h"
 #include "sve/types.h"

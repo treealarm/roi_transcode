@@ -1,40 +1,33 @@
 #pragma once
 
 // One encoder backend: what it can do, how to configure it, and how frames go through it.
-// TZ v2.0 §7.
 //
-// This header is public on purpose. §7 describes IEncoderBackend as part of the contract,
-// and an interface a reader cannot find by opening include/ is not one. Which means no
-// FFmpeg type may appear below: BackendSession is opaque here and defined beside the
-// implementations, and tests/unit/public_api_test.cpp compiles against include/ alone so
-// that a leak stops the build rather than the release.
+// This header is public on purpose: an interface a reader cannot find by opening include/
+// is not one. Which means no FFmpeg type may appear below: BackendSession is opaque here
+// and defined beside the implementations, and tests/unit/public_api_test.cpp compiles
+// against include/ alone so that a leak stops the build rather than the release.
 //
-// What the four backends actually differ in is opening a device and what the hardware will
-// accept. Submitting frames and draining packets is the same libavcodec pair for all of
-// them, so backend_common carries one implementation they inherit -- the interface matches
-// the specification without three copies of the same function behind it.
+// What the backends actually differ in is opening a device and what the hardware will
+// accept. Submitting frames and draining packets is the same libavcodec pair for the
+// libavcodec-backed ones, so backend_common carries one implementation they inherit.
 //
-// Where this departs from the letter of §7, and why. Named here rather than discovered at
-// acceptance:
+// Design choices worth knowing before changing this interface:
 //
-//   * §7's interface is stateful: Configure() then SubmitFrame() on the same object, with
-//     the open encoder held inside it. Every method here takes a BackendSession& instead,
-//     and Configure() returns one. A backend is therefore a stateless description of a way
-//     to encode, and one of them can serve many encodes at once -- which is what this
-//     library is for: a single service transcoding several clips concurrently would
+//   * Every method takes a BackendSession&, and Configure() returns one. A backend is
+//     therefore a stateless description of a way to encode, and one of them can serve many
+//     encodes at once -- a single service transcoding several clips concurrently would
 //     otherwise need a backend instance per job, or a lock around a shared one.
 //
-//   * GetCapabilities takes the output codec. §7 spells it without an argument; the answer
-//     genuinely differs per codec, see the comment on the method.
+//   * GetCapabilities takes the output codec, because the answer genuinely differs per
+//     codec; see the comment on the method.
 //
-//   * SubmitFrame takes IFrameBuffer&, where §7 has `const Frame&`. Same idea, stricter
-//     shape: by the time a frame reaches a backend there is exactly one form of it, so
-//     there is nothing to be null and nothing to decide. See the comment on the method.
+//   * SubmitFrame takes IFrameBuffer&: by the time a frame reaches a backend there is
+//     exactly one form of it, so there is nothing to be null and nothing to decide.
 //
-//   * CreateFrame is an addition. §7 has no frame factory; without one, a caller cannot
-//     write into the encoder's own memory and every submitted frame costs a copy.
+//   * CreateFrame exists so that a caller can write into the encoder's own memory instead
+//     of paying a copy for every submitted frame.
 //
-//   * kind() is an addition, for reporting which backend opened under Backend::Auto.
+//   * kind() reports which backend opened under Backend::Auto.
 
 #include "sve/backend_selection.h"
 #include "sve/capabilities.h"
@@ -56,29 +49,18 @@
 
 namespace sve {
 
-/// What a backend is being asked to open with. The geometry and timing here do not depend
-/// on which backend answers.
-///
-/// A named departure from §21, which calls this argument `EncoderConfig` -- the same name
-/// §8.2 gives the public configuration, because in the specification they are one type.
-/// Here they are two: the public EncoderConfig carries the caller's whole request, log sink
-/// and all, while this carries only what a backend needs to open a codec. Putting §8.2's
-/// name on the type §8.2 means, and a name that says what it is on this one, is the reading
-/// that leaves nobody guessing. Merging them is a design change, not a rename, and is not
-/// one to make while the backend layer is being replaced.
 /// What the caller means to ask of an encoder, for the capabilities that depend on it.
 ///
-/// GetCapabilities took only a Codec until 2026-09-01, and that was enough while every
-/// answer was a property of the hardware. It is not one. On Intel the per-block QP map and
-/// the encoder's own bitrate control exclude each other: mfxExtMBQP carries *absolute*
-/// quantisers (measured -- iHD does not implement the delta mode), and absolute quantisers
-/// mean nothing while a rate controller is moving the global one. So "does this backend
-/// have a block map" cannot be answered without knowing whether a target bitrate is coming.
+/// Not every answer is a property of the hardware. On Intel the per-block QP map and the
+/// encoder's own bitrate control exclude each other: mfxExtMBQP carries *absolute*
+/// quantisers (iHD does not implement the delta mode), and absolute quantisers mean nothing
+/// while a rate controller is moving the global one. So "does this backend have a block
+/// map" cannot be answered without knowing whether a target bitrate is coming.
 ///
 /// It has to be answerable, because the adaptive layer changes its own behaviour on the
 /// answer: effective_region_budget() drops the rectangle budget entirely once qp_map is
 /// true. A backend that claimed the map and then opened VBR would be handed a full block
-/// grid and would silently discard all but four regions, which is what §50 forbids.
+/// grid and would silently discard all but four regions.
 ///
 /// Kept as a struct rather than a second argument so that the next configuration-dependent
 /// capability does not change the signature again.
@@ -90,11 +72,16 @@ struct CapabilityQuery {
     uint64_t target_bitrate = 0;
 };
 
+/// What a backend is being asked to open with. The geometry and timing here do not depend
+/// on which backend answers.
+///
+/// Not the public EncoderConfig: that one carries the caller's whole request, log sink and
+/// all, while this carries only what a backend needs to open a codec.
 struct BackendConfig {
-    /// Geometry, pixel layout, frame rate and time base -- TZ v3.4 §8.3. Held as one
-    /// structure rather than as loose fields so that "what is coming in" cannot be edited
-    /// while meaning to change "what should come out": those were neighbours here, and a
-    /// caller reaching for a bitrate landed on a resolution.
+    /// Geometry, pixel layout, frame rate and time base. Held as one structure rather than
+    /// as loose fields so that "what is coming in" cannot be edited while meaning to change
+    /// "what should come out": those were neighbours here, and a caller reaching for a
+    /// bitrate landed on a resolution.
     ///
     /// `input.time_base` left at den == 0 follows the frame rate, which is what a file
     /// wants; a pushed source usually has its own units instead.
@@ -105,13 +92,13 @@ struct BackendConfig {
     int32_t crf = 28;
     int32_t gop = 0;
     Preset preset = Preset::Balanced;
-    /// §8.2 and §15.3. Auto follows input.pixel_format's bit depth.
+    /// Auto follows input.pixel_format's bit depth.
     CodecProfile profile = CodecProfile::Auto;
 
     TemporalROIConfig temporal;
     RateControlPolicy rate_control;
 
-    /// Which backends Backend::Auto may consider, and in what order (§8.4).
+    /// Which backends Backend::Auto may consider, and in what order.
     BackendSelection backend_selection;
 };
 
@@ -130,7 +117,7 @@ struct BackendFrameControl {
     std::span<const uint8_t> sei_unregistered;
 };
 
-/// What one session did on its way to producing packets -- §21 and Appendix C.
+/// What one session did on its way to producing packets.
 struct BackendStatistics {
     /// Frames the encoder would not take in the format they arrived in.
     long frames_converted = 0;
@@ -144,10 +131,9 @@ struct BackendStatistics {
     /// and a delta only becomes unreachable once it is added to that. On a path that sends
     /// deltas rather than absolute values it stays zero, which is the honest answer there.
     ///
-    /// Measured 2026-09-02 and the reason this field exists: on the native oneVPL path at
-    /// crf 28, a background delta of 30 or of 40 produce byte-identical output, because
-    /// 28+30 and 28+40 both clamp to 51. Asking for more than the scale holds did nothing
-    /// and said nothing, which is what §50 forbids.
+    /// Without it, asking for more than the scale holds does nothing and says nothing: on
+    /// the native oneVPL path at crf 28, a background delta of 30 or of 40 produce
+    /// byte-identical output, because 28+30 and 28+40 both clamp to 51.
     long frames_quantiser_clamped = 0;
 };
 
@@ -193,7 +179,7 @@ using FrameBufferPtr = std::unique_ptr<IFrameBuffer, FrameBufferDeleter>;
 /// What a handle out of a backend is, when the thing handed out has no type this header may
 /// name.
 ///
-/// `kind` is not here for extension, it is here for the check. A Rockchip MppCtx and an
+/// `kind` is not here for extension, it is here for the check. A vendor SDK handle and an
 /// FFmpeg AVBufferRef are both a pointer, so an untagged void* would let a caller read one
 /// as the other -- and the result of that is a crash somewhere else, not a diagnostic here.
 enum class NativeHandleKind {
@@ -213,16 +199,16 @@ class IEncoderBackend {
 public:
     virtual ~IEncoderBackend() = default;
 
-    /// Which backend this is. Not in §7, but the caller needs it to report what opened:
-    /// with Backend::Auto that is the only way to find out.
+    /// Which backend this is. The caller needs it to report what opened: with
+    /// Backend::Auto that is the only way to find out.
     virtual Backend kind() const = 0;
 
     /// What this backend can do for a given output codec.
     ///
-    /// §7 spells this without an argument. It takes one here because the answer genuinely
-    /// differs: on Alder Lake HEVC encodes through EncSliceLP with CQP only, and H.264 does
-    /// not share those limits. One capability set for both codecs would have to be the
-    /// intersection, which would understate what the hardware does.
+    /// The answer genuinely differs per codec: on Alder Lake HEVC encodes through
+    /// EncSliceLP with CQP only, and H.264 does not share those limits. One capability set
+    /// for both codecs would have to be the intersection, which would understate what the
+    /// hardware does.
     virtual EncoderCapabilities GetCapabilities(const CapabilityQuery& query) const = 0;
 
     /// The same question for a caller with nothing to say about rate control. Non-virtual
@@ -237,11 +223,9 @@ public:
     /// machine" -- the caller moves to the next backend in the chain, so an absent GPU must
     /// not come back as an error.
     ///
-    /// The whole open sequence lives here rather than in the caller. It used to be split:
-    /// the caller found the AVCodec, allocated the context and opened it, and the backend
-    /// only filled in the middle. That split was three libavcodec calls sitting in code
-    /// that is supposed to know nothing about libavcodec, and a backend talking to an SDK
-    /// directly could not have used any of them.
+    /// The whole open sequence lives here rather than in the caller, so that the caller
+    /// knows nothing about libavcodec and a backend talking to an SDK directly can open
+    /// itself.
     virtual Result<SessionPtr> Configure(const BackendConfig& config) const = 0;
 
     /// A frame allocated where the encoder can read it without a copy. The caller fills
@@ -270,16 +254,15 @@ public:
     /// ReceivePacket afterwards.
     virtual Status Flush(BackendSession& session) const = 0;
 
-    /// What the opened encoder produces, in the public vocabulary -- §8.11.
+    /// What the opened encoder produces, in the public vocabulary.
     ///
-    /// On the interface rather than read off the session by the caller, and that is the
-    /// whole point of it being here. The file pipeline needs the codec, the geometry, the
-    /// time base and the extradata to open a muxer; it used to reach into the session for
-    /// an AVCodecContext, which meant every backend had to have one. A backend on its own
-    /// SDK has no such thing and answers this from its own headers.
+    /// On the interface rather than read off the session by the caller: the file pipeline
+    /// needs the codec, the geometry, the time base and the extradata to open a muxer, and
+    /// a backend on its own SDK has no AVCodecContext to read them from. It answers this
+    /// from its own headers.
     virtual Result<CodecParameters> GetCodecParameters(BackendSession& session) const = 0;
 
-    /// What this session did that the caller did not ask for -- §21.
+    /// What this session did that the caller did not ask for.
     ///
     /// Conversions and uploads are the two that matter: both zero is what zero-copy means,
     /// and without a number there is no way to tell a factory frame that avoided the copy
@@ -290,7 +273,7 @@ public:
     /// probe: the caller encodes one throwaway frame, and reopens if it worked.
     virtual bool NeedsProbe() const { return false; }
 
-    /// What this session actually settled on, for §38's calibration profile.
+    /// What this session actually settled on.
     ///
     /// Defaulted rather than pure: a backend that cannot read its own settings back says
     /// nothing, and nothing is a truthful answer here -- every field is optional and absent
@@ -324,27 +307,22 @@ public:
 /// that are never released.
 using BackendRef = std::reference_wrapper<const IEncoderBackend>;
 
-/// The backends to try, in order -- TZ v4.1 §8.4.
+/// The backends to try, in order.
 ///
 /// Backend::Auto walks `selection`; a named kind gives just that one and ignores the
 /// selection's permissions, because the caller has already been explicit and asking for
 /// QSV while getting libx264 is exactly what must not happen silently.
 ///
 /// `codec` is what the caller intends to produce, and backends that cannot produce it are
-/// left out: since 4.1 split the software encoder into X264 and X265, a preference list can
-/// name one that has nothing to offer this particular encode. Each one left out appends its
-/// reason to `skipped` when that is given -- §50 forbids a silent fallback, and a backend
-/// quietly dropped from the chain is one.
+/// left out: a preference list can name one that has nothing to offer this particular
+/// encode. Each one left out appends its reason to `skipped` when that is given -- a
+/// backend quietly dropped from the chain would be a silent fallback.
 ///
-/// An empty result means nothing can serve this codec. For a named kind that is §8.4's
+/// An empty result means nothing can serve this codec. For a named kind that is
 /// Unsupported; for Auto it is an exhausted chain.
 ///
-/// Returns a vector rather than a span over static storage: the order is now the caller's
-/// to choose, so there is no fixed list to point at.
-///
 /// `registry` is the deployment whose backends are walked, defaulting to the process-wide
-/// one. The registry of §26.4 has been an object since 4.2, and this is what makes the
-/// promise in its header -- that an application may assemble its own -- reachable.
+/// one; an application may assemble its own.
 std::vector<BackendRef> resolve_backends(Backend requested, const BackendSelection& selection,
     Codec codec, std::vector<std::string>* skipped = nullptr,
     const BackendRegistry& registry = default_backend_registry());

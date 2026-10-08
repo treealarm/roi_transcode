@@ -1,10 +1,10 @@
 #pragma once
 
-// Object priority ladder -- TZ v3 §11.1.
+// Object priority ladder.
 //
-// v3 replaced the continuous Importance product of v2.0 with five named steps and a fixed
-// QP delta for each. The public contract is this enum; how a detector class lands on a step
-// is our business (see priority_from_importance). Desired deltas on a box still win when set.
+// Five named steps with a fixed QP delta for each. The public contract is this enum; how a
+// detector class lands on a step is our business (see priority_from_importance). Desired
+// deltas on a box still win when set.
 
 #include <cstdint>
 
@@ -18,7 +18,7 @@ enum class ObjectPriority {
     Critical = 4,
 };
 
-/// Canonical QP delta for a priority step (§11.1). Background is neutral (0); the frame-wide
+/// Canonical QP delta for a priority step. Background is neutral (0); the frame-wide
 /// background penalty lives on Quality::background_qp_delta, not on an object.
 inline int32_t qp_delta_for(ObjectPriority p)
 {
@@ -44,12 +44,12 @@ inline const char* object_priority_name(ObjectPriority p)
     return "background";
 }
 
-/// Map a v2-style importance in [0, 1] onto the v3 ladder. Thresholds follow §11's own
-/// semantic table: plate/face (>=0.95) Critical, person (>=0.80) High, vehicle (>=0.60)
-/// Normal, weak/unknown Low, near-background Background.
+/// Map an importance in [0, 1] onto the ladder. Thresholds follow the semantic table:
+/// plate/face (>=0.95) Critical, person (>=0.80) High, vehicle (>=0.60) Normal,
+/// weak/unknown Low, near-background Background.
 ObjectPriority priority_from_importance(float importance);
 
-/// Ordering key: Critical outranks High, and so on. Used wherever §12 resolves an overlap.
+/// Ordering key: Critical outranks High, and so on. Used wherever an overlap is resolved.
 inline int32_t priority_rank(ObjectPriority p)
 {
     return static_cast<int32_t>(p);

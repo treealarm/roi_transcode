@@ -9,7 +9,7 @@
 namespace sve {
 
 
-// NVIDIA NVENC qpDeltaMap: signed QP delta per CTU/MB, raster order.
+// The block QP map: signed QP delta per CTU/MB, raster order.
 // H.264 = 16×16, HEVC = 32×32. First Rect wins on overlap (same as VPL).
 
 /// Cells across and down for a frame of `width`/`height` painted at `block`.

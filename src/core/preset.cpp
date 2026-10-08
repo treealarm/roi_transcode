@@ -1,8 +1,8 @@
 // Preset names, and the per-backend vocabularies they map onto.
 //
 // The mapping is a table rather than a formula because the lists are not comparable: QSV's
-// "veryfast" is not libx264's "veryfast", and NVENC's p1..p7 are not a scale of the same
-// thing at all. What is comparable is the caller's intent, which is what Preset names.
+// "veryfast" is not libx264's "veryfast". What is comparable is the caller's intent, which
+// is what Preset names.
 
 #include "preset.h"
 

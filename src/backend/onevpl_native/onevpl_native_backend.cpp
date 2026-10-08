@@ -1,27 +1,25 @@
-// Intel oneVPL through its own API -- TZ v4.2 §5.2.
+// Intel oneVPL through its own API.
 //
-// The first backend here that reaches vendor silicon without libavcodec. §5.5 puts it in
-// the dependency graph as sve_backend_onevpl -> Intel oneVPL, and that is the whole point:
-// the FFmpeg-mediated QSV path silently clamps ROI to four regions on H.264 (measured, see
-// STATUS.md) and cannot express a per-block map at all, so what the hardware can do was
-// never visible from where we stood.
+// A backend that reaches vendor silicon without libavcodec. The FFmpeg-mediated QSV path
+// clamps ROI to four regions on H.264 and cannot express a per-block map at all, so what
+// the hardware can do is not visible from there.
 //
-// Three things §5.2 asks for by name, and where each is:
+// Three properties worth knowing, and where each is:
 //
-//   * "Для ROI использовать capability query" -- GetCapabilities asks the dispatcher what
-//     this implementation encodes rather than assuming, and the region limit comes from
-//     intel_roi_limit.h, which is a measurement rather than a table.
-//   * "отрицательная коррекция QP повышает качество" -- mfxExtEncoderROI::DeltaQP has the
-//     same sign as ours, so nothing is inverted. Getting this backwards protects the
-//     background and crushes the object, and both files look plausible.
-//   * "библиотека не должна предполагать фиксированное число ROI" -- the list is clamped to
-//     what the codec allows and the loss is reported, never silently dropped (§50).
+//   * Capabilities are asked, not assumed -- GetCapabilities asks the dispatcher what this
+//     implementation encodes, and the region limit comes from intel_roi_limit.h, which is a
+//     measurement rather than a table.
+//   * Negative QP correction raises quality -- mfxExtEncoderROI::DeltaQP has the same sign
+//     as ours, so nothing is inverted. Getting this backwards protects the background and
+//     crushes the object, and both files look plausible.
+//   * No fixed number of regions is assumed -- the list is clamped to what the codec
+//     allows and the loss is reported, never silently dropped.
 //
 // System memory in, and deliberately. VPL will take a VA surface and skip a copy, but the
 // caller here has planes in system memory; handing VPL those and letting it upload is one
 // copy, while allocating VA surfaces to copy into first is also one copy plus a device
 // allocator to get wrong. The zero-copy path belongs with a caller who already has a
-// surface, which is what CreateFrame is for and a later slice.
+// surface, which is what CreateFrame would be for.
 
 #include "adaptive/importance_map.h"
 #include "backend/common/intel_roi_limit.h"
@@ -101,9 +99,7 @@ void fill_encode_params(mfxVideoParam& p, Codec codec, int32_t width, int32_t he
     // whatever the sign of its delta -- measured at 0.931 against 0.998 for an
     // untouched frame, and 0.881 with the sign flipped, so it was not a sign error
     // either. H.264 works both ways, which is what made this look codec-specific.
-    //
-    // The hint was in our own notes: STATUS.md records the libavcodec QSV path as
-    // "CQP + low_power", written down long before this backend existed.
+    // The libavcodec QSV path needs "CQP + low_power" for the same reason.
     p.mfx.LowPower = MFX_CODINGOPTION_ON;
     p.mfx.GopRefDist = 1;   // no B-frames: keeps PTS in submission order
     p.mfx.GopPicSize = gop > 0 ? static_cast<mfxU16>(gop) : 0;
@@ -114,8 +110,8 @@ void fill_encode_params(mfxVideoParam& p, Codec codec, int32_t width, int32_t he
     p.IOPattern = MFX_IOPATTERN_IN_SYSTEM_MEMORY;
 
     if (target_bitrate > 0) {
-        // The hardware's own rate control, which is what §16's rolling criterion needs.
-        // The block map is given up here and GetCapabilities has already said so.
+        // The hardware's own rate control, which is what holding a rolling one-second
+        // bound needs. The block map is given up here and GetCapabilities has already said so.
         const VbvPlan vbv = vbv_plan_for(target_bitrate);
         p.mfx.RateControlMethod = MFX_RATECONTROL_VBR;
         p.mfx.TargetKbps = static_cast<mfxU16>(std::min(vbv.bitrate_kbps, 65535));
@@ -131,7 +127,7 @@ void fill_encode_params(mfxVideoParam& p, Codec codec, int32_t width, int32_t he
         p.mfx.QPB = qp;
     }
 
-    // §15.3's ten-bit profile. P010 is NV12 with sixteen bits a sample and the ten of them
+    // The ten-bit profile. P010 is NV12 with sixteen bits a sample and the ten of them
     // in the high end, which is what Shift says; the profile has to be named too, because
     // Main cannot carry ten bits and a driver asked for one with the other refuses at Query
     // rather than at the first frame.
@@ -166,25 +162,12 @@ mfxExtCodingOption3 coding_option3(mfxU16 enable_mbqp)
     return co3;
 }
 
-/// Does this implementation take a per-block QP map at all -- §2.2's block-level quality.
-///
-/// Query rather than a table: EnableMBQP is a tri-state the runtime corrects, so asking is
-/// the only way that stays true across drivers. Measured here on iHD 25.2: it comes back ON
-/// for both codecs and both LowPower modes, and it survives Init. BlockSize is not part of
-/// the question -- the driver echoes 0 back whatever is asked for (16, 32 and 64 all
-/// measured), so it is not observable and kMbqpBlock stands on the header's alignment rule.
-///
-/// Note what the answer is *not* asked about: without an mfxExtCodingOption3 attached at
-/// all, GetVideoParam after Init reports EnableMBQP as OFF. So "does the driver support it"
-/// and "did we ask for it" are the same question here, and the probe has to attach the
-/// buffer to get an answer.
 /// Does this implementation encode ten bits -- P010 in, Main10 out?
 ///
-/// Asked of the driver in the same shape as the MBQP question above, and for the same
-/// reason: §15.3 makes the ten-bit profile mandatory for backends that report main10, so
-/// reporting it on anything but the driver's own answer would be promising on its behalf.
-/// H.264 is not asked at all: §15.3's ten-bit profile is HEVC, and this library refuses
-/// ten-bit H.264 at the public interface.
+/// Asked of the driver in the same shape as the MBQP question below: reporting main10 on
+/// anything but the driver's own answer would be promising on its behalf. H.264 is not
+/// asked at all: the ten-bit profile here is HEVC's, and this library refuses ten-bit H.264
+/// at the public interface.
 bool query_accepts_main10(mfxSession session, Codec codec)
 {
     if (codec != Codec::H265) {
@@ -202,6 +185,18 @@ bool query_accepts_main10(mfxSession session, Codec codec)
         && out.mfx.FrameInfo.BitDepthLuma == 10;
 }
 
+/// Does this implementation take a per-block QP map at all.
+///
+/// Query rather than a table: EnableMBQP is a tri-state the runtime corrects, so asking is
+/// the only way that stays true across drivers. Measured here on iHD 25.2: it comes back ON
+/// for both codecs and both LowPower modes, and it survives Init. BlockSize is not part of
+/// the question -- the driver echoes 0 back whatever is asked for (16, 32 and 64 all
+/// measured), so it is not observable and kMbqpBlock stands on the header's alignment rule.
+///
+/// Note what the answer is *not* asked about: without an mfxExtCodingOption3 attached at
+/// all, GetVideoParam after Init reports EnableMBQP as OFF. So "does the driver support it"
+/// and "did we ask for it" are the same question here, and the probe has to attach the
+/// buffer to get an answer.
 bool query_accepts_mbqp(mfxSession session, Codec codec)
 {
     // A nominal clip. Whether the runtime implements MBQP is a property of the driver, not
@@ -233,23 +228,22 @@ bool query_accepts_mbqp(mfxSession session, Codec codec)
 struct DeviceProbe {
     /// A hardware implementation opened for this codec.
     bool device = false;
-    /// mfxExtCodingOption3::EnableMBQP survived Query -- the per-block QP map of §2.2.
+    /// mfxExtCodingOption3::EnableMBQP survived Query -- the per-block QP map.
     bool mbqp = false;
-    /// P010 with the Main10 profile survived Query -- §15.3's ten-bit profile.
+    /// P010 with the Main10 profile survived Query -- the ten-bit profile.
     bool main10 = false;
 };
 
 /// The dispatcher's answer to "is there hardware here that encodes this, and how well".
 ///
-/// Asked rather than assumed, which is what §5.2 means by capability query and what §48
-/// means when it allows a SKIP only with capability evidence. Creating a session is the
-/// honest form of the question: an implementation that enumerates and then fails to open
-/// is not an implementation this machine has.
+/// Asked rather than assumed. Creating a session is the honest form of the question: an
+/// implementation that enumerates and then fails to open is not an implementation this
+/// machine has.
 ///
 /// MBQP is asked the same way, and it has to be asked rather than assumed for a reason the
 /// adaptive layer depends on: effective_region_budget() drops the rectangle budget entirely
 /// once qp_map is true, so a backend that claims the map and cannot deliver it would be
-/// handed every region and would silently discard all but four (§50 forbids exactly that).
+/// handed every region and would silently discard all but four.
 DeviceProbe run_probe(Codec codec)
 {
     mfxLoader loader = MFXLoad();
@@ -285,9 +279,9 @@ DeviceProbe run_probe(Codec codec)
 ///
 /// Memoised rather than asked again: every call opens a dispatcher, enumerates
 /// implementations and creates a session, and GetCapabilities is called for every encoder
-/// this process creates and again by the §23 report. A GPU does not appear or leave during
-/// a run, so the answer does not change; the magic-static initialisation is what makes this
-/// safe to call from several threads.
+/// this process creates. A GPU does not appear or leave during a run, so the answer does not
+/// change; the magic-static initialisation is what makes this safe to call from several
+/// threads.
 const DeviceProbe& probe(Codec codec)
 {
     if (codec == Codec::H264) {
@@ -327,33 +321,32 @@ public:
     /// The regions live on the surface rather than on the session, and that is a
     /// correctness requirement rather than tidiness. Per frame they go through
     /// mfxEncodeCtrl and not through mfxVideoParam: setting them on the video parameters
-    /// looks plausible, compiles, and does nothing -- the first version of this file did
-    /// exactly that and encoded every frame flat while reporting success.
+    /// looks plausible, compiles, and does nothing -- every frame encodes flat while the
+    /// calls report success.
     ///
-    /// **VPL does not read them during EncodeFrameAsync.** The comment here used to say it
-    /// did, on the strength of the API being documented as taking the control block for the
-    /// duration of the call. It was wrong, and the experiment that settled it took five
-    /// lines: overwrite the map with QP 51 the instant EncodeFrameAsync returns, and the
-    /// output collapses -- SSIM in the protected zone 0.870 against 0.999, the file 41%
-    /// smaller. So the buffers are read after the call, and one set of them shared by every
-    /// frame is one frame overwriting a map another frame has not been encoded with yet.
+    /// **VPL does not read them during EncodeFrameAsync**, whatever the documentation of
+    /// the control block suggests. Overwrite the map with QP 51 the instant
+    /// EncodeFrameAsync returns, and the output collapses -- SSIM in the protected zone
+    /// 0.870 against 0.999, the file 41% smaller. So the buffers are read after the call,
+    /// and one set of them shared by every frame is one frame overwriting a map another
+    /// frame has not been encoded with yet.
     ///
-    /// It never showed, because it cannot show on a static ROI: every frame's map is
-    /// identical, so overwriting it changes nothing. A moving object is what it breaks, and
-    /// that is the case the library exists for.
+    /// It cannot show on a static ROI: every frame's map is identical, so overwriting it
+    /// changes nothing. A moving object is what it breaks, and that is the case the library
+    /// exists for.
     ///
     /// The lifetime is the surface's own, and it is the runtime's signal rather than our
     /// guess: VPL clears Data.Locked when it has finished with a surface, and it cannot be
     /// finished with the frame while still to read the regions it was submitted with. This
-    /// is the same shape as the x265 fix -- what is in flight is whatever the encoder has
-    /// not handed back yet -- and it arrives here from the same lesson.
+    /// is the same shape as the x265 backend -- what is in flight is whatever the encoder
+    /// has not handed back yet.
     struct Surface {
         std::vector<mfxU8> data;
         mfxFrameSurface1 surface{};
         bool in_use = false;
 
         mfxExtEncoderROI roi{};
-        /// §2.2's block map: one quantiser per 16x16 block, raster order. Absolute values
+        /// The block map: one quantiser per 16x16 block, raster order. Absolute values
         /// rather than deltas -- see set_qp_map. Sized once at allocate().
         mfxExtMBQP mbqp{};
         std::vector<int8_t> mbqp_cells;
@@ -407,10 +400,8 @@ void to_nv12(const IFrameBuffer& src, mfxFrameSurface1& dst, int width, int heig
     const mfxU16 pitch = dst.Data.Pitch;
 
     // A caller who already has NV12 is handing over the layout the encoder wants, and there
-    // is nothing to interleave: the second plane *is* the chroma. Reading a third one --
-    // which this did until 2026-09-03, while the check at SubmitFrame admitted NV12 in as
-    // many words -- takes an empty PlaneView and dereferences its null pointer. Found by
-    // reading the two together rather than by any test: nothing in the suite submitted NV12.
+    // is nothing to interleave: the second plane *is* the chroma. Reading a third one would
+    // take an empty PlaneView and dereference its null pointer.
     if (const_cast<IFrameBuffer&>(src).format() == PixelFormat::NV12) {
         for (int row = 0; row < height; ++row) {
             std::memcpy(dst.Data.Y + static_cast<std::size_t>(row) * pitch,
@@ -486,21 +477,21 @@ public:
         EncoderCapabilities c;
         const DeviceProbe& device = probe(codec);
         if (!device.device) {
-            // Empty rather than trimmed: §8.4's selection reads this to skip a backend
-            // with nothing to offer, and a half-filled answer would let it through.
+            // Empty rather than trimmed: selection reads this to skip a backend with
+            // nothing to offer, and a half-filled answer would let it through.
             return c;
         }
         (codec == Codec::H264 ? c.h264 : c.h265) = true;
         c.roi_rectangles = true;
         c.runtime_roi_update = true;
         // Measured on this silicon, not read from a table: four for H.264 and eight for
-        // H.265. The FFmpeg path had to learn this the hard way -- see STATUS.md.
+        // H.265 (see intel_roi_limit.h).
         //
         // Still declared with the map on, and deliberately: it is what the rectangle path
         // is clamped to if a driver turns out to have no MBQP, and the adaptive layer
         // already knows to ignore it while qp_map is true (effective_region_budget).
         c.max_roi_regions = intel_max_roi_regions(codec);
-        // §2.2's block-level quality, through mfxExtMBQP. Asked of the driver rather than
+        // Block-level quality, through mfxExtMBQP. Asked of the driver rather than
         // assumed -- see query_accepts_mbqp -- because the whole rectangle budget is
         // dropped upstream on the strength of this answer.
         c.qp_map = cqp && device.mbqp;
@@ -508,15 +499,14 @@ public:
             c.qp_map_block_width = kMbqpBlock;
             c.qp_map_block_height = kMbqpBlock;
         }
-        // Still false, and now for a reason rather than for want of a backend. §7.2's
-        // emphasis map is an importance hint rather than a quantiser offset, and the
-        // pinned oneVPL headers have no expression of one: the word does not occur in
-        // them, and mfxExtMBQP's three modes are all quantisers -- a QP, a QP delta, or a
-        // per-block choice between those two. What this backend now delivers is the delta
-        // map, which is qp_map. Reporting emphasis_map for it would be renaming a feature
-        // rather than having it.
+        // Still false: an emphasis map is an importance hint rather than a quantiser
+        // offset, and the pinned oneVPL headers have no expression of one -- the word does
+        // not occur in them, and mfxExtMBQP's three modes are all quantisers -- a QP, a QP
+        // delta, or a per-block choice between those two. What this backend delivers is
+        // the delta map, which is qp_map. Reporting emphasis_map for it would be renaming a
+        // feature rather than having it.
         c.emphasis_map = false;
-        // §15.3, and from the driver's answer rather than from the hardware's reputation.
+        // From the driver's answer rather than from the hardware's reputation.
         c.main10 = device.main10;
         c.p010_input = device.main10;
         // The encoder's own bitrate control, which this backend does have -- and which is
@@ -525,9 +515,9 @@ public:
         // of the other and neither is silent: the answer above says which one the caller
         // is about to get.
         //
-        // This is the one mechanism on this hardware that can meet §16's rolling criterion.
-        // §15's outer loop cannot -- measured, срез Q in docs/STATUS.md -- so refusing VBR
-        // in order to keep the map would have cost §16 on Intel entirely.
+        // This is the one mechanism on this hardware that can hold a rolling one-second
+        // bound; the outer bitrate loop cannot, so refusing VBR in order to keep the map
+        // would give that up on Intel entirely.
         c.native_bitrate = true;
         return c;
     }
@@ -563,8 +553,8 @@ public:
         fill_encode_params(p, config.codec, config.input.width, config.input.height,
             config.input.frame_rate, config.crf, config.gop, target, s->ten_bit);
 
-        // The per-block QP map of §2.2, asked for at Init because that is the only place
-        // mfxExtCodingOption3::EnableMBQP can be set -- the runtime buffer of §26 below is
+        // The per-block QP map, asked for at Init because that is the only place
+        // mfxExtCodingOption3::EnableMBQP can be set -- the runtime mfxExtMBQP buffer is
         // refused outright without it. Held in the session: VPL keeps the pointer in
         // mfxVideoParam, and Init reads it after this function's frame is gone.
         // Asked for only when the map is what this session is going to use. Under VBR it
@@ -610,8 +600,8 @@ public:
         // the point: GetCapabilities has already told the adaptive layer qp_map is true, and
         // effective_region_budget() dropped the rectangle budget on the strength of it. The
         // regions arriving from now on are a full block map, four of which this driver would
-        // accept as rectangles. Encoding them anyway is the silent fallback §50 forbids;
-        // failing sends §8.4 to the next backend in the chain, which is audible and correct.
+        // accept as rectangles. Encoding them anyway would be a silent fallback; failing
+        // sends the chain to the next backend, which is audible and correct.
         mfxVideoParam opened{};
         mfxExtCodingOption3 opened_co3 = coding_option3(MFX_CODINGOPTION_UNKNOWN);
         mfxExtBuffer* opened_ext[1] = {&opened_co3.Header};
@@ -644,8 +634,8 @@ public:
 
     Result<FrameBufferPtr> CreateFrame(BackendSession&, MemoryType) const override
     {
-        // A VA surface pool is the zero-copy path and its own slice; saying so is better
-        // than handing back a system-memory buffer that pretends to be one.
+        // A VA surface pool would be the zero-copy path and is not implemented; saying so
+        // is better than handing back a system-memory buffer that pretends to be one.
         return Status::Unsupported("the native oneVPL backend has no frame pool yet");
     }
 
@@ -669,7 +659,7 @@ public:
         VplSession::Surface* slot = free_surface(s);
         if (slot == nullptr) {
             // Every surface is still with the encoder. Again is the honest answer: the
-            // caller drains and comes back, which is §24's backpressure.
+            // caller drains and comes back.
             return Status::Again();
         }
         if (s.ten_bit) {
@@ -722,8 +712,7 @@ public:
             out.key_frame = s.key;
             out.codec = s.codec;
             // The unit the timestamps above are counted in. Left at its 1/1 default this
-            // muxes a 25 fps clip as one frame a second -- the defect slice H3 fixed on the
-            // other two direct backends, not repeated here.
+            // muxes a 25 fps clip as one frame a second.
             out.time_base = Rational{static_cast<int32_t>(s.param.mfx.FrameInfo.FrameRateExtD),
                 static_cast<int32_t>(s.param.mfx.FrameInfo.FrameRateExtN)};
             return out;
@@ -777,7 +766,7 @@ public:
             static_cast<int32_t>(s.param.mfx.FrameInfo.FrameRateExtN)};
 
         // The parameter sets, asked of the encoder rather than scraped out of the first
-        // packet: §8.11 wants extradata a muxer can use before any frame has been encoded.
+        // packet: a muxer needs extradata before any frame has been encoded.
         //
         // HEVC needs three, and mfxExtCodingOptionSPSPPS carries two. The VPS comes in its
         // own mfxExtCodingOptionVPS, and leaving it out produces a file that muxes, plays
@@ -972,9 +961,9 @@ private:
 
     /// This frame's ROI, in whichever of the two forms the encoder opened with.
     ///
-    /// The map when it is there, because it is the same information without the merge, and
-    /// it is what §2.2 asks for. The rectangles otherwise. Never both: they are two ways of
-    /// saying the same thing to one encoder, and the header does not say which would win.
+    /// The map when it is there, because it is the same information without the merge. The
+    /// rectangles otherwise. Never both: they are two ways of saying the same thing to one
+    /// encoder, and the header does not say which would win.
     static mfxEncodeCtrl* set_regions(
         VplSession& s, VplSession::Surface& slot, std::span<const Rect> regions)
     {
@@ -987,14 +976,13 @@ private:
         return s.mbqp_ready ? set_qp_map(s, slot, regions) : set_roi(s, slot, regions);
     }
 
-    /// The whole block grid, through mfxExtMBQP -- §2.2's block-level quality.
+    /// The whole block grid, through mfxExtMBQP.
     ///
-    /// This is what the rectangle list was always a lossy summary of. The adaptive layer
-    /// paints a QP delta per coding block and then merges equal-delta blocks into
-    /// rectangles, because rectangles are all mfxExtEncoderROI can carry -- four of them on
-    /// H.264 here, eight on H.265. mfxExtMBQP carries the grid itself, so the merge is
-    /// undone at the last moment and nothing is dropped: 3600 cells on a 1280x720 frame,
-    /// against the four regions the same frame used to arrive as.
+    /// This is what the rectangle list is a lossy summary of. The adaptive layer paints a QP
+    /// delta per coding block and then merges equal-delta blocks into rectangles, because
+    /// rectangles are all mfxExtEncoderROI can carry -- four of them on H.264 here, eight on
+    /// H.265. mfxExtMBQP carries the grid itself, so the merge is undone at the last moment
+    /// and nothing is dropped: 3600 cells on a 1280x720 frame, against four regions.
     ///
     /// Painted by the adaptive layer's own builder rather than by a second implementation
     /// here. Overlap resolves to the first rectangle, and a backend that resolved it the
@@ -1005,13 +993,13 @@ private:
     /// MFX_MBQP_MODE_QP_DELTA is documented as "QP[i] = BrcQP[i] + DeltaQP[i]", which is
     /// exactly what qp_delta means everywhere above this line -- and iHD 25.2 does not
     /// implement it. It accepts the mode, returns MFX_ERR_NONE, and reads the array as QP
-    /// values anyway. The result was inverted and unmistakable -- HEVC, synth_plateonly,
-    /// which asks only that the plate be improved and leaves the background alone: cells at
-    /// 0, meaning "leave this block alone", became QP 0, so the untouched background came
-    /// out at SSIM 0.999999 and the file grew 191%, while the plate, carrying -10, came out
-    /// at SSIM 0.042. Every call succeeded. Writing base + delta into MFX_MBQP_MODE_QP_VALUE
-    /// puts every one of those numbers back where it belongs -- and the CQP equalities the
-    /// acceptance asserts come out exact, which is what says the cells land where painted.
+    /// values anyway. The result is inverted and unmistakable: on an HEVC clip that asks
+    /// only that a plate be improved, cells at 0 ("leave this block alone") became QP 0, so
+    /// the untouched background came out at SSIM 0.999999 and the file grew 191%, while the
+    /// plate, carrying -10, came out at SSIM 0.042. Every call succeeded. Writing
+    /// base + delta into MFX_MBQP_MODE_QP_VALUE puts every one of those numbers back where
+    /// it belongs, and the CQP equalities come out exact, which is what says the cells land
+    /// where painted.
     ///
     /// The base quantiser is knowable only because this backend opens CQP; that constraint
     /// is where native_bitrate = false comes from.
@@ -1043,8 +1031,8 @@ private:
             slot.mbqp_cells[i] = static_cast<int8_t>(given);
         }
         // Counted per frame rather than per cell: what a caller can act on is "the scale
-        // ran out", not how many blocks it ran out in. §50 -- a request that quietly did
-        // less than it asked for has to be visible.
+        // ran out", not how many blocks it ran out in. A request that quietly did less than
+        // it asked for has to be visible.
         if (clamped) {
             ++s.frames_quantiser_clamped;
         }
@@ -1068,9 +1056,9 @@ private:
 
     /// The regions, clamped to what this codec's hardware accepts.
     ///
-    /// §5.2 forbids assuming a fixed number, and §50 forbids losing any of them quietly.
-    /// The list arrives strongest-first, so truncating from the end drops the least
-    /// important -- which is the only truncation that can be defended.
+    /// No fixed number is assumed, and none of them is lost quietly. The list arrives
+    /// strongest-first, so truncating from the end drops the least important -- which is
+    /// the only truncation that can be defended.
     ///
     /// Reached only when the map is not available. It is kept rather than deleted because
     /// "this driver has no MBQP" is a machine we cannot see from here, not a case that
@@ -1083,15 +1071,14 @@ private:
         // Without this the field below is not a QP delta at all. ROIMode defaults to
         // MFX_ROI_MODE_PRIORITY, and Priority shares its memory with DeltaQP through a
         // union -- range -3..3, and the header says "Bigger value produces better quality",
-        // which is the opposite sense. The first version of this file left it unset and
-        // the measurement came out exactly inverted: the protected zone lost quality
-        // (0.9977 to 0.9921) while the background gained it (0.9966 to 0.99999) and the
-        // file grew by 68%. Every call succeeded.
+        // which is the opposite sense. Left unset, the result comes out exactly inverted:
+        // the protected zone loses quality (0.9977 to 0.9921) while the background gains it
+        // (0.9966 to 0.99999) and the file grows by 68%. Every call succeeds.
         slot.roi.ROIMode = MFX_ROI_MODE_QP_DELTA;
         // Overlap resolves to the lowest index -- the header is explicit: "If macroblock
         // belongs to several ROI, Priority from ROI with lowest index is used". Our list
-        // arrives strongest-first, which is also how §11 resolves overlap, so the two
-        // conventions agree and the object beats the background rectangle underneath it.
+        // arrives strongest-first, so the two conventions agree and the object beats the
+        // background rectangle underneath it.
         const int limit = intel_max_roi_regions(s.codec);
         const std::size_t take = std::min<std::size_t>(regions.size(),
             std::min<std::size_t>(static_cast<std::size_t>(limit), kMfxRoiCapacity));
@@ -1103,7 +1090,7 @@ private:
             slot.roi.ROI[i].Top = align_down(r.top);
             slot.roi.ROI[i].Right = align_up(std::max(0, r.right));
             slot.roi.ROI[i].Bottom = align_up(std::max(0, r.bottom));
-            // Same sign as ours: §5.2 says negative raises quality, and so does qp_delta.
+            // Same sign as ours: negative raises quality, and so does qp_delta.
             slot.roi.ROI[i].DeltaQP = static_cast<mfxI16>(std::clamp(r.qp_delta, kMinQpDelta, kMaxQpDelta));
         }
         slot.ext[0] = &slot.roi.Header;

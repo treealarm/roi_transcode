@@ -28,9 +28,9 @@ namespace {
 
 /// The policy the outer loop should run under, given what the backend does for itself.
 ///
-/// §15's loop exists for encoders that have no bitrate mode of their own. Where one does,
-/// the target belongs to it: this returns the same policy with the target cleared, which is
-/// how `BitrateBudget` is told to stand down (`active()` is a non-zero target).
+/// The outer loop exists for encoders that have no bitrate mode of their own. Where one
+/// does, the target belongs to it: this returns the same policy with the target cleared,
+/// which is how `BitrateBudget` is told to stand down (`active()` is a non-zero target).
 RateControlPolicy outer_loop_policy(const RateControlPolicy& policy, bool native_bitrate)
 {
     if (!native_bitrate) {
@@ -41,9 +41,9 @@ RateControlPolicy outer_loop_policy(const RateControlPolicy& policy, bool native
     return off;
 }
 
-/// Depth of the packet queue between the backend and the caller (§24 asks for a bounded
-/// one). Generous rather than tight: a backend with lookahead can hand back a burst after
-/// a quiet stretch, and the caller drains between frames anyway.
+/// Depth of the packet queue between the backend and the caller -- bounded, and generous
+/// rather than tight: a backend with lookahead can hand back a burst after a quiet stretch,
+/// and the caller drains between frames anyway.
 constexpr std::size_t kMaxQueuedPackets = 64;
 
 } // namespace
@@ -62,12 +62,8 @@ const char* encoder_state_name(EncoderState s)
     return "?";
 }
 
-/// The four stateful collaborators plus the pipeline over them, in one place.
-///
-/// They used to be assembled separately by the file path and by the session path, each
-/// constructing the pipeline inside its own per-frame loop. That was the same wiring twice,
-/// and the second copy is where the two drifted: only one of them fed the bitrate budget
-/// from its own output. Here there is one.
+/// The four stateful collaborators plus the pipeline over them, in one place, so that the
+/// file path and the session path cannot wire them differently.
 struct SmartVideoEncoder::Impl : PacketSink {
     Impl(const EncoderConfig& cfg, const BackendRegistry& registry)
         : config(cfg)
@@ -129,10 +125,9 @@ struct SmartVideoEncoder::Impl : PacketSink {
             }
             bitrate.observe(static_cast<int64_t>(packet.payload.size()),
                 dt > 0.0 ? dt : frame_sec);
-            // §50: said once, and counted, the moment the loop runs out of authority. A
-            // target that cannot be reached because the expensive part of the frame is
-            // protected is a degradation the caller is entitled to hear about -- until now
-            // the only evidence was the file being the wrong size.
+            // Said once, and counted, the moment the loop runs out of authority. A target
+            // that cannot be reached because the expensive part of the frame is protected
+            // is a degradation the caller is entitled to hear about.
             if (bitrate.target_unreachable() && !stats.bitrate_target_unreachable) {
                 stats.bitrate_target_unreachable = true;
                 ++stats.fallbacks_applied;
@@ -161,15 +156,15 @@ struct SmartVideoEncoder::Impl : PacketSink {
         // `sidecar_unmatched_packets` is a packet arriving under a timestamp nothing was
         // submitted with. `pending_sidecar` is the reverse: a frame submitted whose packet
         // never came. A backend that skews timestamps produces one of each per frame, and
-        // adding them reported eight for four frames until 2026-09-04 -- the same frame
-        // counted once on the way in and once on the way out.
+        // adding them would count the same frame once on the way in and once on the way
+        // out.
         const auto never_emitted = static_cast<int64_t>(pending_sidecar.size());
         pending_sidecar.clear();
-        // Only once the stream was actually finished. §8.13 makes Stop safe from any
-        // state, so it is also the cleanup path of a cancelled job -- and frames still
-        // inside a lookahead when the caller gave up are not a broken sidecar, they are an
-        // encode nobody drained. Warning there would report a data-integrity fault about a
-        // decision the caller made on purpose.
+        // Only once the stream was actually finished. Stop is safe from any state, so it is
+        // also the cleanup path of a cancelled job -- and frames still inside a lookahead
+        // when the caller gave up are not a broken sidecar, they are an encode nobody
+        // drained. Warning there would report a data-integrity fault about a decision the
+        // caller made on purpose.
         const bool stream_was_finished =
             state == EncoderState::Draining || state == EncoderState::EndOfStream;
         if (never_emitted > 0 && stream_was_finished) {
@@ -195,8 +190,8 @@ struct SmartVideoEncoder::Impl : PacketSink {
         }
         const auto it = pending_sidecar.find(pts);
         if (it == pending_sidecar.end()) {
-            // A packet whose frame we never held. Not silently skipped: §19.3's guarantee
-            // is that records correspond to packets, and a missing one breaks it. Counted
+            // A packet whose frame we never held. Not silently skipped: records are
+            // promised to correspond to packets, and a missing one breaks that. Counted
             // separately from the frames that never produced a packet -- see end().
             ++sidecar_unmatched_packets;
             return;
@@ -303,10 +298,8 @@ struct SmartVideoEncoder::Impl : PacketSink {
 
     int32_t last_block = 16;
 
-    /// One line describing the region map, on the first frame that has one.
-    ///
-    /// It reads as a diagnostic and is also a contract: integration/scripts/check.sh
-    /// asserts the region count from it, which is how the per-codec Intel limit is checked
+    /// One line describing the region map, on the first frame that has one -- the place
+    /// to read the region count, which is how the per-codec Intel limit can be checked
     /// without a GPU-specific crash to look for.
     void log_roi_once(const std::vector<Rect>& rects, const EncoderCapabilities& caps)
     {
@@ -323,37 +316,31 @@ struct SmartVideoEncoder::Impl : PacketSink {
     }
     bool warned_roi_map = false;
 
-    /// Submitted metadata waiting for the packet it belongs to -- §19.3.
+    /// Submitted metadata waiting for the packet it belongs to.
     ///
-    /// Keyed by PTS because that is §19.4's first synchronisation key and the only one the
-    /// packet carries back. Submission order is not emission order once a codec has
-    /// lookahead or B-frames, so writing the record at submit would produce a file whose
-    /// Nth line is not the Nth packet -- which is the one thing §19.3 asks of it.
+    /// Keyed by PTS because that is the only synchronisation key the packet carries back.
+    /// Submission order is not emission order once a codec has lookahead or B-frames, so
+    /// writing the record at submit would produce a file whose Nth line is not the Nth
+    /// packet -- which is the one thing the sidecar promises.
     std::map<int64_t, SeiFrame> pending_sidecar;
-    /// Position of the packet this record accompanies, which is what §19.3 calls
-    /// frame_index. Counts emissions, not submissions.
+    /// Position of the packet this record accompanies (the record's frame_index). Counts
+    /// emissions, not submissions.
     uint64_t sidecar_index = 0;
     /// Packets that arrived under a timestamp no frame was submitted with.
     ///
     /// The mirror of `pending_sidecar` left non-empty at end(), and counted apart from it
-    /// on purpose: one is a record with no packet, the other a packet with no record. They
-    /// were one number until 2026-09-04, which reported eight faults for four frames.
+    /// on purpose: one is a record with no packet, the other a packet with no record.
     int64_t sidecar_unmatched_packets = 0;
 
-    /// §19.1 keeps `objects` and `roi_info` as separate fields, and §19.2's payload is the
-    /// objects -- so what goes in is what the caller submitted, not what the pipeline made
-    /// of it after smoothing and normalisation. The two entry points disagreed about this
-    /// until they were built on one encoder: the file path embedded the applied boxes, the
-    /// session path the submitted ones. The session path was right.
-    /// The metadata for one frame, for both channels §19 defines.
+    /// The metadata for one frame, for both channels: the SEI payload and the sidecar.
     ///
     /// Built once and used twice on purpose. The sidecar exists precisely for the case
-    /// where the bitstream cannot carry the objects -- §19.3 opens with "если SEI
-    /// недоступен или отключён" -- so it must not be reachable only through the SEI path.
-    /// Deriving both from one SeiFrame is also what keeps the two channels describing the
-    /// same frame the same way; the file path and the session path once disagreed about
-    /// exactly this, and §19.1's separation of `objects` from `roi_info` is the rule they
-    /// broke. What goes in is what the caller submitted.
+    /// where the bitstream cannot carry the objects, so it must not be reachable only
+    /// through the SEI path, and deriving both from one SeiFrame keeps the two channels
+    /// describing the same frame the same way.
+    ///
+    /// What goes in is the objects the caller submitted, not what the pipeline made of them
+    /// after smoothing and normalisation: objects and the applied ROI are separate things.
     Status metadata_for(const FrameMetadata& meta, int64_t pts, std::vector<uint8_t>* out)
     {
         const MetadataConfig& cfg = config.settings.metadata;
@@ -406,9 +393,9 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoderIn(
         throw EncoderError(Status::InvalidArgument("input video format is not usable"));
     }
 
-    // §19.3 asks for a sink when it asks for a sidecar. Refused here rather than accepted
-    // and dropped: a caller who set the format and forgot the sink would otherwise get a
-    // successful encode and no metadata, which is the shape of failure §50 forbids.
+    // A sidecar needs a sink. Refused here rather than accepted and dropped: a caller who
+    // set the format and forgot the sink would otherwise get a successful encode and no
+    // metadata.
     if (config.settings.metadata.sidecar != SidecarFormat::None
         && !config.settings.metadata.sidecar_sink) {
         throw EncoderError(Status::InvalidArgument(
@@ -430,8 +417,8 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoderIn(
     ep.gop = config.settings.gop;
     ep.preset = config.settings.preset;
 
-    // §8.2: P010 needs Main10, and a profile that cannot carry the input's depth is
-    // refused here rather than producing a file nothing will play.
+    // P010 needs Main10, and a profile that cannot carry the input's depth is refused here
+    // rather than producing a file nothing will play.
     {
         const bool ten_bit = config.input.pixel_format == PixelFormat::P010;
         const CodecProfile profile = config.settings.profile;
@@ -444,16 +431,15 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoderIn(
                 "the h265-main10 profile needs ten-bit input; this one is eight"));
         }
         if (ten_bit && ep.codec == Codec::H264) {
-            // §15.3's ten-bit profile is HEVC. H.264 has a ten-bit profile of its own, but
-            // nothing in this specification asks for it, and claiming it would be inventing
-            // a contract.
+            // The ten-bit profile here is HEVC's. H.264 has a ten-bit profile of its own,
+            // but nothing here supports it, and claiming it would be inventing a contract.
             throw EncoderError(Status::InvalidArgument("ten-bit input is supported for H.265 only"));
         }
         ep.profile = profile;
     }
 
-    // §8.4: the preference list is the caller's to give, and an unusable one is refused
-    // here rather than turned into a choice nobody asked for.
+    // The preference list is the caller's to give, and an unusable one is refused here
+    // rather than turned into a choice nobody asked for.
     if (ep.kind == Backend::Auto) {
         const std::vector<Backend>& want = ep.backend_selection.preferred;
         if (want.empty()) {
@@ -479,9 +465,9 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoderIn(
             "Codec::SameAsSource needs a source; resolve it before creating an encoder"));
     }
 
-    // §8.4: named outright and unable to produce this codec -- X264 asked for HEVC, say --
-    // is Unsupported. Under Auto the same backend is merely skipped, which is why this
-    // check is here and not in the chain walk.
+    // Named outright and unable to produce this codec -- X264 asked for HEVC, say -- is
+    // Unsupported. Under Auto the same backend is merely skipped, which is why this check is
+    // here and not in the chain walk.
     if (ep.kind != Backend::Auto && !backend_supports(ep.kind, ep.codec, registry)) {
         throw EncoderError(Status::Unsupported(std::format("the {} backend cannot encode {}",
             backend_name(ep.kind), ep.codec == Codec::H264 ? "H.264" : "HEVC")));
@@ -502,20 +488,15 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoderIn(
         throw EncoderError(Status::DeviceUnavailable(e.what()));
     }
 
-    // See STATUS.md, decision Р5: the libx265 target-bitrate path is unstable, so it is
-    // refused rather than half-honoured, and the refusal is both logged and counted.
+    // The libx265 target-bitrate path is unstable, so it is refused rather than
+    // half-honoured, and the refusal is both logged and counted.
     //
-    // Asked of the backend that opened, not of the one that was requested. Those were the
-    // same question while there was a single Cpu backend named outright, and they stopped
-    // being the same the moment selection could arrive at libx265 on its own -- which it
-    // always could: Auto on a machine with no Quick Sync walks down to the software
-    // encoder, and the guard for the path that is known to be unstable would not have
-    // fired. Reading it off the opened backend is what makes it hold for every route in.
-    // Keyed on the capability, not on which backend it is. It named Backend::X265 until a
-    // second HEVC software backend existed, and X265Direct -- which has no native bitrate
-    // mode either -- walked straight past it and accepted a target it does not honour.
-    // That is the silent degradation §50 forbids, produced by a guard asking "who are you"
-    // where it meant "what can you do".
+    // Asked of the backend that opened, not of the one that was requested: Auto on a
+    // machine with no Quick Sync walks down to the software encoder on its own, and the
+    // guard has to hold for every route in. Keyed on the capability rather than on which
+    // backend it is, so that every HEVC software backend without a native bitrate mode is
+    // caught -- a guard asking "who are you" where it means "what can you do" lets the next
+    // such backend walk straight past it.
     if (!impl->encoder.capabilities().native_bitrate && ep.codec == Codec::H265
         && ep.rate_control.target_bitrate > 0) {
         if (const Status s = guard_cpu_h265_target(true, impl->policy, impl->log); !s.ok()) {
@@ -536,7 +517,7 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoderIn(
     // allocator that is itself reacting to the result. Two controllers on one plant, each
     // treating the other's correction as content: measured on a 36 s crowd scene at 3 Mbps,
     // x265direct came out at P95 120% of target with both running and 113% with only its
-    // own, and its average went from 79% of target to 99% (docs/STATUS.md, срез Z13).
+    // own, and its average went from 79% of target to 99%.
     impl->bitrate = BitrateBudget(outer_loop_policy(ep.rate_control,
         impl->encoder.capabilities().native_bitrate));
 
@@ -554,11 +535,10 @@ std::unique_ptr<SmartVideoEncoder> CreateVideoEncoderIn(
         backend_name(impl->stats.encoder_used), impl->encoder.label(),
         impl->stats.backends_declined));
 
-    // §29's "capability report", which until 2026-09-02 existed only as a number a caller
-    // could fetch. It is the answer every fallback below is decided against, so a log that
-    // records the fallbacks and not the capabilities they came from is a log that cannot be
-    // read back to a cause. At Debug: it is one line per encode, not per frame, but it is
-    // detail rather than news, and the built-in sink stays as quiet as it was.
+    // The "capability report" event. It is the answer every fallback below is decided
+    // against, so a log that records the fallbacks and not the capabilities they came from
+    // is a log that cannot be read back to a cause. At Debug: it is one line per encode, not
+    // per frame, but it is detail rather than news.
     {
         const EncoderCapabilities& c = impl->encoder.capabilities();
         impl->log.debug(std::format(
@@ -599,7 +579,7 @@ Status SmartVideoEncoder::Impl::submit(const FrameMetadata& metadata, const Hand
             std::string("SubmitFrame in state ") + encoder_state_name(s.state));
     }
     if (s.queue_full()) {
-        // Backpressure by §24: a code, not a block. The caller drains and comes back.
+        // Backpressure: a code, not a block. The caller drains and comes back.
         return Status::Again();
     }
 
@@ -695,7 +675,7 @@ Status SmartVideoEncoder::Stop()
     if (s.state == EncoderState::Stopped) {
         return Status::Ok();
     }
-    // §29's "encoder reset". Said at Info because it is the end of an encode and the
+    // The "encoder reset" event. Said at Info because it is the end of an encode and the
     // counts beside it are what a reader wants when the next line is from a different
     // encoder: how much came out, and how much of it was degraded.
     s.log.info(std::format(
@@ -703,12 +683,10 @@ Status SmartVideoEncoder::Stop()
         "{} fallback(s), {} region(s) dropped",
         encoder_state_name(s.state), s.stats.frames_submitted, s.stats.packets_received,
         s.stats.bytes_encoded, s.stats.fallbacks_applied, s.stats.regions_dropped));
-    // §19.4's report on the records that never got a packet. It lives in the sink's end(),
-    // and until 2026-09-04 nothing on this path called it: the counter was kept and thrown
-    // away, so a sidecar that had stopped corresponding to the stream said nothing at all.
-    // Stop is where it belongs: §8.13 makes it the end of an encode. A caller who simply
-    // destroys the encoder still gets nothing, and that is deliberate -- warning from a
-    // destructor is a worse trade than a caller who skipped the documented ending.
+    // The report on the records that never got a packet. It lives in the sink's end(), and
+    // Stop is where it belongs: Stop is the end of an encode. A caller who simply destroys
+    // the encoder still gets nothing, and that is deliberate -- warning from a destructor is
+    // a worse trade than a caller who skipped the documented ending.
     s.end();
     s.queued.clear();
     s.state = EncoderState::Stopped;
@@ -767,14 +745,13 @@ Status SmartVideoEncoder::Reconfigure(const RuntimeEncoderSettings& settings)
         s.bitrate = BitrateBudget(
             outer_loop_policy(rc, s.encoder.capabilities().native_bitrate));
     }
-    // §29's "reconfigure", and it names what actually changed rather than that a call
-    // happened: §8.2 lets three things move and a caller may set any subset, so "reconfigured"
-    // on its own would leave a reader to guess which.
+    // The "reconfigure" event, and it names what actually changed rather than that a call
+    // happened: three things may move and a caller may set any subset, so "reconfigured" on
+    // its own would leave a reader to guess which.
     //
     // A call that set nothing says nothing. It is Ok -- there was nothing invalid about it --
     // but no setting moved, and a bare "reconfigured:" naming no field would put a
-    // reconfiguration in the log that did not happen, which is the opposite of what §29
-    // wants the event for.
+    // reconfiguration in the log that did not happen.
     if (settings.frame_rate || settings.quality || settings.target_bitrate) {
         s.log.info(std::format("reconfigured:{}{}{}",
             settings.frame_rate ? " frame_rate" : "", settings.quality ? " quality" : "",
@@ -791,8 +768,8 @@ Status SmartVideoEncoder::GetCodecParameters(CodecParameters* parameters) const
     if (m_impl->state == EncoderState::Created) {
         return Status::InvalidArgument("no encoder is open");
     }
-    // Read once at open from whichever backend answered, so this no longer needs a codec
-    // context and works for a backend that has none.
+    // Read once at open from whichever backend answered, so this needs no codec context
+    // and works for a backend that has none.
     *parameters = m_impl->encoder.codec_parameters();
     return Status::Ok();
 }

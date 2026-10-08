@@ -1,14 +1,14 @@
 #pragma once
 
-// How a backend reports what happened -- TZ v2.0 §7, where every method returns Status or
-// Result<T> rather than throwing.
+// How a backend reports what happened: every backend method returns Status or Result<T>
+// rather than throwing.
 //
 // The library's own entry points (transcode_file, Session) still throw: a caller that hands
 // over a whole file wants one answer at the end, and turning every internal failure into a
-// returned code on the way there would bury the reason. What §7 governs is the *backend*
-// boundary, and there a returned status is right for a reason that has nothing to do with
-// taste -- "this backend did not open" is the normal case on a machine without that GPU,
-// not an error, and the caller's response is to try the next backend in the chain.
+// returned code on the way there would bury the reason. At the *backend* boundary a
+// returned status is right for a reason that has nothing to do with taste -- "this backend
+// did not open" is the normal case on a machine without that GPU, not an error, and the
+// caller's response is to try the next backend in the chain.
 
 #include <stdexcept>
 #include <string>
@@ -19,24 +19,24 @@ namespace sve {
 enum class StatusCode {
     Ok = 0,
     /// The device this backend needs is not on this machine. Not a failure: the caller
-    /// moves to the next backend in the chain. Named DeviceUnavailable after TZ v3.4 §25.
+    /// moves to the next backend in the chain.
     DeviceUnavailable,
     /// The caller asked for something this backend cannot do.
     Unsupported,
     /// The request itself does not make sense -- a plane shorter than its own stride
-    /// claims, a format paired with a profile that cannot carry it. TZ v3.4 §25.
+    /// claims, a format paired with a profile that cannot carry it.
     InvalidArgument,
     /// Correct request, wrong moment -- no packet ready yet, more input needed.
     Again,
     /// No more output will come.
     EndOfStream,
     /// The backend failed at what it was asked to do. Carries the backend, the codec and
-    /// the native code in its message (TZ v3.4 §25).
+    /// the native code in its message.
     BackendError,
     /// An allocation failed.
     OutOfMemory,
-    /// A bounded wait expired. Only the optional blocking variants of §24 produce this;
-    /// the normative API is non-blocking and answers Again instead.
+    /// A bounded wait expired. The API is non-blocking and answers Again instead, so
+    /// nothing in this library produces it today.
     Timeout,
     /// Everything else.
     Error,
@@ -104,13 +104,13 @@ private:
     std::string m_message;
 };
 
-/// How the factory functions report a failure -- TZ v4.1 §8.12.
+/// How the factory functions report a failure.
 ///
-/// An exception rather than a returned Result, because §8.12 asks for one, and the reason
-/// it can ask is that creating an encoder is not the case Status exists for. Status is
-/// right at the backend boundary, where "this GPU is not here" is the ordinary answer and
-/// the caller's move is to try the next backend. By the time a factory returns, that walk
-/// is over: what is left is a request that cannot be served at all.
+/// An exception rather than a returned Result, because creating an encoder is not the case
+/// Status exists for. Status is right at the backend boundary, where "this GPU is not here"
+/// is the ordinary answer and the caller's move is to try the next backend. By the time a
+/// factory returns, that walk is over: what is left is a request that cannot be served at
+/// all.
 ///
 /// It carries the whole Status and not only its text, so a caller can branch on the code
 /// without parsing a message -- InvalidArgument means fix the configuration, Unsupported
@@ -153,10 +153,9 @@ public:
 
     /// The value. Throws std::logic_error when there is none.
     ///
-    /// It used to return a default-constructed T instead, which is the worst of the three
-    /// options: a caller who forgot to check got a plausible-looking empty answer and
-    /// carried on. A throw here is not error handling -- it is a bug being reported, and
-    /// the message names the failure that was ignored.
+    /// Not a default-constructed T: a caller who forgot to check would get a
+    /// plausible-looking empty answer and carry on. A throw here is not error handling -- it
+    /// is a bug being reported, and the message names the failure that was ignored.
     const T& value() const
     {
         require_value();

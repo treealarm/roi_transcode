@@ -1,12 +1,12 @@
 #pragma once
 
-// A backend that does exactly what it is told to do, including nothing -- TZ v4.2 §7.
+// A backend that does exactly what it is told to do, including nothing.
 //
 // The backends this project ships work: libx264 opens on any machine and encodes what it is
 // given. That is what makes half of the pipeline untestable through them -- the branch taken
 // when Configure declines, when a probe encodes nothing, when SubmitFrame throws, when a
-// backend has no rate control of its own. Those branches run on the customer's machine,
-// where the hardware is missing or busy, and on ours they never did.
+// backend has no rate control of its own. Those branches run where the hardware is missing
+// or busy.
 //
 // Shared by roi_encoder_test (the pipeline) and encoder_faults_test (the facade above it),
 // for the reason tests/unit/enum_table.h is shared: the second copy is where the two would
@@ -73,8 +73,8 @@ public:
     Backend reports = Backend::X265Direct;
     Codec serves = Codec::H265;
     /// Whether the backend honours a target bitrate itself. False is what puts the outer
-    /// loop of §15 in charge, which is the only way to reach it: every backend in this
-    /// build either has its own rate control or is guarded away from a target.
+    /// loop in charge, which is the only way to reach it: every backend in this build
+    /// either has its own rate control or is guarded away from a target.
     bool native_bitrate = false;
     bool qp_map = false;
     uint32_t max_roi_regions = 0;
@@ -100,9 +100,9 @@ public:
     /// wrappers hand them over.
     bool packets_are_bare = false;
     /// Added to every packet's timestamp, so that a record keyed on the submitted pts has
-    /// no packet to belong to -- §19.4's orphan.
+    /// no packet to belong to -- the sidecar's orphan.
     int64_t pts_skew = 0;
-    /// What Statistics reports for the per-block map running out of scale (§50).
+    /// What Statistics reports for the per-block map running out of scale.
     long quantiser_clamped = 0;
     /// Bytes each packet claims to carry. The outer bitrate loop reads exactly this, so it
     /// is what makes a stream "over target" without encoding anything.

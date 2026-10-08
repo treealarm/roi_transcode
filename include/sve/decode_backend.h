@@ -7,8 +7,7 @@
 // one; the software ones do not. Backend::X264 names libx264, which encodes and cannot
 // decode at all -- decoding on the CPU is libavcodec's own h264/hevc decoder, which is not
 // a backend in the encoder's sense and has no entry over there. Folding the two lists
-// would give one name two meanings depending on which direction the pixels were going,
-// which is the mistake §5.4 describes in the encoder's own vocabulary.
+// would give one name two meanings depending on which direction the pixels were going.
 //
 // The ordering rule is borrowed intact, because the reason for it is the same: a machine
 // with integrated graphics and a discrete card has no library-knowable "right" choice, so
@@ -25,11 +24,11 @@ enum class DecodeBackend {
     Auto,
     /// VA-API, through the hardware accelerator on libavcodec's ordinary decoder.
     Vaapi,
-    /// Named after the SDK rather than after Intel's marketing word for it, following
-    /// §8.2 -- Quick Sync is what the hardware is called, oneVPL is what we talk to. The
-    /// same silicon Vaapi reaches, through the other API.
+    /// Named after the SDK rather than after Intel's marketing word for it -- Quick Sync is
+    /// what the hardware is called, oneVPL is what we talk to. The same silicon Vaapi
+    /// reaches, through the other API.
     IntelQsv,
-    /// NVDEC. Named for what decodes, not for NVENC, which is the other half of the chip.
+    /// NVDEC. Named for what decodes.
     NvidiaNvdec,
     /// libavcodec's own decoder. An ordinary entry in the list rather than a separate
     /// "allow software fallback" switch: leaving it out is how a caller says "hardware or

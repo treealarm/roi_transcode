@@ -2,12 +2,10 @@
 
 // Compressed frames in, pictures out -- decode on its own, without an encoder behind it.
 //
-// Until now the library decoded only inside Session, on the way to re-encoding. A consumer
-// that wants pictures and nothing else -- an analytics worker sampling a frame a second --
-// had to either open libavcodec itself or drag an encoder along to reach the decoder
-// inside it. This is that consumer's entry point, and it is the same FrameDecoder
-// underneath, so there is one implementation of hardware decode in this repository rather
-// than one per caller.
+// For a consumer that wants pictures and nothing else -- an analytics worker sampling a
+// frame a second -- without opening libavcodec itself or dragging an encoder along. It is
+// the same FrameDecoder Session uses underneath, so there is one implementation of hardware
+// decode in this repository rather than one per caller.
 //
 // No FFmpeg type is named here. Frames come out as Frame, over IFrameBuffer, exactly as
 // they go into the encoder -- so a caller reaches the pixels through plane() and links no

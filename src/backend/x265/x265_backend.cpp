@@ -1,21 +1,20 @@
-// libx265 through its own API -- TZ v4.1 §5.4.
+// libx265 through its own API.
 //
-// The second direct backend, and the one that shows why §5.4 says "Backend'ы не обязаны
-// иметь одинаковые grid, диапазон, знак или единицы offsets". Against x264 it differs in
-// three ways that all had to be found in the header rather than assumed from the sibling.
+// Backends need not share the grid, range, sign or units of their offsets, and against
+// x264 this one differs in three ways that all had to be found in the header rather than
+// assumed from the sibling.
 //
 // The grid is not the coding unit. x265 codes in CTUs up to 64x64, but the header is
 // explicit that offsets "should be given for each 16x16 block (8x8 block, when qg-size is
-// 8)" -- so the array is sized on 16x16 like x264's, except when qgSize is 8. Our
-// libavcodec-backed HEVC path has been declaring 32x32 in its capabilities, which was a
-// guess about CTU merging and is not what libx265 actually reads.
+// 8)" -- so the array is sized on 16x16 like x264's, except when qgSize is 8. The
+// libavcodec-backed HEVC path declares 32x32 in its capabilities, which is a guess about
+// CTU merging and is not what libx265 actually reads.
 //
-// The lifetime is undocumented for the arrays themselves, and that is the finding rather
-// than an oversight to work around. x264 gives quant_offsets_free and sei_free; x265's
-// x265_picture has a bare `float *quantOffsets` and an x265_sei with no callback at all,
-// so the header says nothing about who owns either or for how long. Guessing "it copies
-// during encode" is exactly the guess that cost a crash on the x264 side, where the header
-// did say otherwise. So neither is freed while x265 might still read it.
+// The lifetime is undocumented for the arrays themselves. x264 gives quant_offsets_free and
+// sei_free; x265's x265_picture has a bare `float *quantOffsets` and an x265_sei with no
+// callback at all, so the header says nothing about who owns either or for how long.
+// Guessing "it copies during encode" is exactly the guess that crashes the x264 side, where
+// the header does say otherwise. So neither is freed while x265 might still read it.
 //
 // What the header *does* document is the signal that says when that moment has passed:
 //
@@ -28,22 +27,19 @@
 // Nothing is guessed and nothing is sized: what is in flight is whatever x265 has not
 // handed back yet.
 //
-// This replaces a ring sized from lookaheadDepth + bframes + frameNumThreads, and that ring
-// was wrong. It assumed a frame recycled after that many submissions was further behind
-// than anything x265 could still be holding; measurement said otherwise. Thirty frames
-// passed and sixty aborted -- heap corruption that surfaced far from its cause, in the
-// demuxer reading the *input* file, because the freed offsets were reused by an unrelated
-// allocation. See STATUS.md, the finding recorded with slice G.
+// A ring sized from lookaheadDepth + bframes + frameNumThreads does not work: it assumes a
+// frame recycled after that many submissions is further behind than anything x265 could
+// still be holding, and measurement says otherwise. Thirty frames pass and sixty abort --
+// heap corruption that surfaces far from its cause, in the demuxer reading the *input*
+// file, because the freed offsets are reused by an unrelated allocation.
 //
 // The return convention differs too: x264_encoder_encode returns a byte count, x265's
 // returns 1 when a picture came out and 0 while the pipeline is filling. Reading it as a
 // size would treat every output as a one-byte packet.
 
-// The public interface and nothing else. This used to include backend_common.h, which
-// exists for the libavcodec backends and pulls libavcodec in behind it -- invisible while
-// everything was one target, and the first thing the §5.5 split refused to compile. All
-// this backend ever needed from it was BackendSession, which sve/encoder_backend.h
-// declares.
+// The public interface and nothing else: backend_common.h exists for the libavcodec
+// backends and pulls libavcodec in behind it. All this backend needs is BackendSession,
+// which sve/encoder_backend.h declares.
 #include "backend/common/rate_control.h"
 #include "sve/backend_registry.h"
 #include "sve/encoder_backend.h"
@@ -134,15 +130,10 @@ public:
         c.qp_map_block_height = 16;
         c.runtime_roi_update = true;
         c.sei = true;
-        // Claimed only once it was measured, which is what Р5 asked for in as many words:
-        // "вернуть SEI и native bitrate можно только отдельным срезом с regression-
-        // покрытием, не тихой сменой поведения".
-        //
-        // What Р5 was guarding against was heap corruption on the ROI+SEI path -- "free():
-        // invalid size", aborts on real clips. That was diagnosed in slice H1 and it was
-        // not ours: x265 4.1 allocates its per-frame SEI buffer once and writes into it
-        // without a size check (copyUserSEIMessages). This backend has written the SEI NAL
-        // itself ever since, so the defect Р5 named is gone rather than avoided.
+        // x265 4.1 allocates its per-frame SEI buffer once and writes into it without a
+        // size check (copyUserSEIMessages), which corrupts the heap on the ROI+SEI path --
+        // "free(): invalid size" on real clips. This backend writes the SEI NAL itself, so
+        // SEI and the native bitrate mode are safe to claim.
         c.native_bitrate = true;
         c.max_roi_regions = 0;
         return c;
@@ -158,8 +149,6 @@ public:
             // and points at the wrong fix. libx265 is packaged per depth, and what a build
             // links decides the matter: this one answers x265_max_bit_depth, and where that
             // is 8 there is nothing to wire -- the library cannot encode ten bits at all.
-            // §55 asks for that number in the build manifest, and it is there since
-            // 2026-09-03 (sve::build::kX265BitDepth).
             if (config.input.pixel_format == PixelFormat::P010) {
                 return Status::Unsupported(std::string(
                     "ten-bit input needs a ten-bit libx265; this build links one with "
@@ -201,7 +190,7 @@ public:
         }
         if (config.rate_control.target_bitrate > 0) {
             // ABR for the average, VBV for the peak -- the same pair as the x264 backend
-            // and for the same reason: §16 measures a one-second rolling window, and an
+            // and for the same reason: the bound is a one-second rolling window, and an
             // average-only mode is free to spend a burst anywhere inside the clip.
             const VbvPlan vbv = vbv_plan_for(config.rate_control.target_bitrate);
             p.rc.rateControlMode = X265_RC_ABR;
@@ -301,10 +290,9 @@ public:
             out.codec = Codec::H265;
             // The unit s.pts is counted in, and the muxer has nothing else to go on:
             // EncodedPacket::time_base defaults to 1/1, so leaving it unset does not fail
-            // loudly -- it silently declares one tick per second. That is what both direct
-            // backends did until 2026-08-31, and a 25 fps clip muxed out as 300 seconds
-            // instead of 12. The libavcodec path has always set this (backend_common.cpp);
-            // packet_sink.h states the contract, that a packet carries its own time base.
+            // loudly -- it silently declares one tick per second, and a 25 fps clip muxes out
+            // as 300 seconds instead of 12. packet_sink.h states the contract, that a packet
+            // carries its own time base.
             out.time_base = Rational{static_cast<int32_t>(s.param.fpsDenom),
                 static_cast<int32_t>(s.param.fpsNum)};
             return out;
@@ -484,7 +472,7 @@ private:
         const int bh = (s.height + block - 1) / block;
         out.assign(static_cast<std::size_t>(bw) * static_cast<std::size_t>(bh), 0.0f);
 
-        // Back to front, so the strongest region -- first in the list, §11 resolves overlap
+        // Back to front, so the strongest region -- first in the list, overlap is resolved
         // by index -- is written last and survives.
         for (auto it = regions.rbegin(); it != regions.rend(); ++it) {
             const Rect& r = *it;

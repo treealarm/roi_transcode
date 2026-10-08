@@ -59,10 +59,9 @@ FrameRoiPipelineOutput FrameRoiPipeline::process(const FrameRoiPipelineInput& in
     auto dets = m_roi_builder.detections_from(
         out.applied_boxes, in.quality, in.width, in.height);
     m_bitrate.soften_detections(dets);
-    // Under target bitrate, the outer loop must be free to move QP aggressively.
     // Zero under a target bitrate, because the outer loop must be free to move QP
-    // aggressively -- and zero with §13 switched off, because the slew limit is one of the
-    // behaviours TemporalROIConfig::enabled governs.
+    // aggressively -- and zero with temporal ROI switched off, because the slew limit is
+    // one of the behaviours TemporalROIConfig::enabled governs.
     const int32_t slew = (m_bitrate.active() || !in.temporal.enabled)
         ? 0
         : in.temporal.max_qp_delta_per_frame;
@@ -73,7 +72,7 @@ FrameRoiPipelineOutput FrameRoiPipeline::process(const FrameRoiPipelineInput& in
     if (budget > 0 && static_cast<int32_t>(out.rects.size()) > budget) {
         // Adds to what the shaped path already discarded rather than replacing it: on that
         // path the builder has truncated once inside itself, and both losses are the same
-        // degradation as far as §50 is concerned.
+        // degradation.
         int32_t here = 0;
         truncate_roi_rects(out.rects, budget, in.width, in.height, &here);
         out.regions_dropped += here;

@@ -4,8 +4,7 @@
 //
 // It is a friend rather than a public accessor so that sve/decoder.h stays free of
 // libavutil: a public method returning AVBufferRef* would put FFmpeg back into a header an
-// embedder compiles, which is what §8.3 keeps out. Everything that needs the handle is on
-// this side of the boundary.
+// embedder compiles. Everything that needs the handle is on this side of the boundary.
 
 #include "sve/decoder.h"
 

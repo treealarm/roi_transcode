@@ -6,8 +6,7 @@
 // does not need libav* on its include path to write a handler. Muxing to a file
 // is not done this way -- set SessionParams::output_path and the session does it.
 //
-// The packet itself lives in packet.h (TZ v3.4 §8.6); this header is the sink it
-// arrives at.
+// The packet itself lives in packet.h; this header is the sink it arrives at.
 
 #include "sve/packet.h"
 #include "sve/types.h"

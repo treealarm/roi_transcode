@@ -7,23 +7,14 @@
 // Adaptive encoding -- keep the regions a detector found sharp, and spend fewer bits on
 // everything else.
 //
-// Named after the library rather than after a feature. It was roi.h, from when the whole
-// thing was called roi_transcode, and smartvideo.h after that; a consumer should not have
-// to know that history to find the door.
-//
 // One header is deliberately not pulled in from here, because it names an AVFrame:
 //
-//   #include "sve/frame.h"          // AVFrame interop (§8.5)
-//
-// It used to be two. push_encoder.h was the second, and only because the frame it took
-// was a wrapper around an AVFrame; 4.1 made Frame a handle to an IFrameBuffer, so the
-// callback API (§8.8) now compiles with include/ and nothing else, and belongs in the
-// umbrella with everything else.
+//   #include "sve/frame.h"          // AVFrame interop
 //
 // Everything reachable from this header compiles with include/ and nothing else on the
 // path, which is what lets an embedder write a PacketHandler -- or submit frames -- without
-// libavutil. §20 makes FFmpeg an opt-in interop adapter rather than the input interface, so
-// a caller who has AVFrames adds one include and everyone else saves a dependency.
+// libavutil. A caller who has AVFrames adds one include and everyone else saves a
+// dependency.
 //
 // Every other header here is self-contained and can be included on its own -- a caller who
 // only writes a PacketHandler needs packet_handler.h and nothing else. The
@@ -31,12 +22,10 @@
 // unit per header, compiled against include/ and nothing else. This header exists so that
 // not knowing which one you need is also an answer.
 //
-// This is the whole public surface. Two ways in -- hand over a file, or push
-// frames -- and both take the same Settings and give back the same Report.
-// IEncoderBackend (TZ v2.0 §7) comes with it: a reader who wants to know what the
-// hardware paths look like should find them here, not by digging through src/.
-// Nothing here needs gRPC, Dapr, JSON or anything else from ta_vms; the only
-// dependency is FFmpeg, so another project can add_subdirectory() this directory
+// Two ways in -- hand over a file, or push frames -- and both take the same Settings and
+// give back the same Report. IEncoderBackend comes with it: a reader who wants to know
+// what the hardware paths look like should find them here, not by digging through src/.
+// The only dependency is FFmpeg, so another project can add_subdirectory() this directory
 // and link sve.
 //
 //   sve::Report r = sve::transcode_file("in.mp4", "out.mp4", boxes, settings);

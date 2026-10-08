@@ -65,7 +65,7 @@ TenBitSupport query_ten_bit(const char* backend_name)
 
 
 /// The profile in libavcodec's numbering. Auto is left unset, so the encoder picks from the
-/// pixel format -- which is what §8.2 says Auto means.
+/// pixel format -- which is what Auto means.
 int av_profile_of(CodecProfile profile)
 {
     switch (profile) {
@@ -325,13 +325,10 @@ Result<FrameBufferPtr> LibavBackend::CreateFrame(
 
     auto buffer = std::make_unique<AvFrameBuffer>(nullptr);
 
-    // A caller who asked for system memory gets system memory, on every backend.
-    //
-    // This used to ignore `memory` the moment the session was a hardware one and hand back
-    // a mapped surface regardless. Nothing was reported: buffer->memory() answered ONEVPL
-    // to a caller who had asked for CPU, so the only way to find out was to look at what
-    // arrived. Honouring the request costs an upload at submit, which is counted in
-    // Report::frames_uploaded and therefore visible, and is what the caller chose.
+    // A caller who asked for system memory gets system memory, on every backend, even when
+    // the session is a hardware one. Honouring the request costs an upload at submit, which
+    // is counted in Report::frames_uploaded and therefore visible, and is what the caller
+    // chose.
     if (memory == MemoryType::CPU) {
         roiav::Frame f;
         f.p->format = s.sw_pix;

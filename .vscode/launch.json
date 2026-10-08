@@ -10,7 +10,7 @@
         "encoder_test", "decoder_test", "frame_test", "backend_conformance_test",
         "ten_bit_test", "public_api_test", "sei_payload_test", "cbor_test",
         "object_normalizer_test", "object_geometry_test", "geometry_test",
-        "importance_test", "temporal_roi_test", "bitrate_budget_test", "v3_policy_test"
+        "importance_test", "temporal_roi_test", "bitrate_budget_test", "region_policy_test"
       ]
     }
   ],

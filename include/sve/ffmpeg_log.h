@@ -1,6 +1,6 @@
 #pragma once
 
-// FFmpeg's own diagnostics, routed into a sink the application named -- TZ v4.2 §29.
+// FFmpeg's own diagnostics, routed into a sink the application named.
 //
 // FFmpeg writes to stderr by default, from inside libavcodec and from inside the codec
 // libraries below it -- the "[libx264 @ 0x...]" lines. An application that gave this library
@@ -19,10 +19,10 @@
 // this library. That is stated plainly rather than hidden behind an encoder option that
 // would look narrower than it is.
 //
-// Linking: the implementation lives in the FFmpeg interop component (§5.5), so a build
-// without SVE_BUILD_FFMPEG_INTEROP has this declaration and no definition. The header
-// itself names no FFmpeg type and needs no FFmpeg include path, which is what keeps §20's
-// rule intact -- sve/frame.h stays the only public header that mentions one.
+// Linking: the implementation lives in the FFmpeg interop component, so a build without
+// SVE_BUILD_FFMPEG_INTEROP has this declaration and no definition. The header itself names
+// no FFmpeg type and needs no FFmpeg include path -- sve/frame.h stays the only public
+// header that mentions one.
 
 #include "sve/logging.h"
 

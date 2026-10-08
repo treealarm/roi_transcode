@@ -1,8 +1,8 @@
-// Frame ownership and raw-plane wrapping -- TZ v4.1 §8.5 and §8.10.
+// Frame ownership and raw-plane wrapping.
 //
-// Asserted through IFrameBuffer rather than through the AVFrame behind it. Since 4.1
-// that is the interface a caller actually holds, and a test reaching past it would be
-// checking an implementation detail this header exists to hide.
+// Asserted through IFrameBuffer rather than through the AVFrame behind it: that is the
+// interface a caller actually holds, and a test reaching past it would be checking an
+// implementation detail this header exists to hide.
 //
 // What is worth testing here is not that a wrap succeeds; it is every way it must refuse.
 // A view that lies about its plane lengths is the failure this function exists to catch,
@@ -164,8 +164,8 @@ void ref_leaves_the_caller_their_own_frame()
 
 void copies_of_a_frame_share_one_buffer()
 {
-    // §8.5 makes Frame copyable and shared, because an encoder with lookahead holds a
-    // frame past the call that submitted it.
+    // Frame is copyable and shared, because an encoder with lookahead holds a frame past
+    // the call that submitted it.
     auto pixels = std::make_shared<Pixels>();
     Frame first;
     CHECK(WrapRawFrame(view_of(pixels), &first).ok());

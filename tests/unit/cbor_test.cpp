@@ -1,4 +1,4 @@
-// CBOR, checked against the standard rather than against itself -- TZ v3.4 §19.2.
+// CBOR, checked against the standard rather than against itself.
 //
 // A round-trip test proves only that this code agrees with itself, and the whole point of
 // CBOR here is that somebody else's decoder can read what we write. So the encodings below
@@ -195,12 +195,11 @@ void a_truncated_stream_does_not_read_past_its_end()
 }
 
 
-/// The two argument widths nothing had ever encoded: sixteen and thirty-two bits.
+/// The two middle argument widths: sixteen and thirty-two bits.
 ///
-/// CBOR spends one byte on an argument below 24, then jumps to 1, 2, 4 or 8 extra bytes.
-/// The suite covered the ends and skipped the middle, and the middle is where a real payload
-/// lives: a sidecar record with 300 objects writes a 16-bit array header, and a PTS in
-/// microseconds writes a 32-bit one. Both were unexecuted lines until 2026-09-03.
+/// CBOR spends one byte on an argument below 24, then jumps to 1, 2, 4 or 8 extra bytes,
+/// and the middle is where a real payload lives: a sidecar record with 300 objects writes a
+/// 16-bit array header, and a PTS in microseconds writes a 32-bit one.
 void the_middle_argument_widths_match_the_rfc()
 {
     std::vector<uint8_t> out;
@@ -288,8 +287,7 @@ void a_reader_refuses_a_map_that_is_not_there()
 
 /// A container that contains a container, on and on: one stack frame per byte until the
 /// process dies. These bytes come off a bitstream through decode_sei_payload, so this is
-/// reachable from a file rather than from a bug in our own writer, and §43.2 asks for no
-/// unexpected crash.
+/// reachable from a file rather than from a bug in our own writer.
 void nesting_deeper_than_the_format_allows_is_refused_not_followed()
 {
     // 0x81 is "an array of one item". Repeated, each byte opens another level.
@@ -298,7 +296,8 @@ void nesting_deeper_than_the_format_allows_is_refused_not_followed()
     sve::cbor::Reader reader(deep);
     CHECK(!reader.skip());
 
-    // And the legitimate depth still passes: §19.2 nests three levels, the limit is 32.
+    // And the legitimate depth still passes: the SEI payload nests three levels, the limit
+    // is 32.
     std::vector<uint8_t> shallow(3, uint8_t{0x81});
     shallow.push_back(0x00);
     sve::cbor::Reader ok(shallow);

@@ -46,9 +46,8 @@ namespace {
 // caller guessing which backends lie.
 //
 // Written entirely against the interface: a grey frame from the backend's own factory,
-// submitted and drained the way any caller would. It used to build an AVFrame by hand,
-// which meant the one piece of code whose job is to find out whether a backend works could
-// only ever have worked for libavcodec backends.
+// submitted and drained the way any caller would, so that it works for backends that are
+// not libavcodec backends.
 bool probe_one_frame(const IEncoderBackend& backend, BackendSession& session)
 {
     auto made = backend.CreateFrame(session, MemoryType::CPU);
@@ -170,10 +169,9 @@ void RoiEncoder::open_deferred(const BackendConfig& config)
 
     m_codec = config.codec;
     // Kept because capabilities() has to ask the same question the session was opened
-    // with. Since 2026-09-01 one of the answers depends on it: the native oneVPL backend
-    // has a per-block QP map under CQP and hardware VBR under a target, and not both.
-    // Asking without the target would tell the adaptive layer it may drop the rectangle
-    // budget on a session that is going to want rectangles.
+    // with: the native oneVPL backend has a per-block QP map under CQP and hardware VBR
+    // under a target, and not both. Asking without the target would tell the adaptive
+    // layer it may drop the rectangle budget on a session that is going to want rectangles.
     m_target_bitrate = config.rate_control.target_bitrate;
 
     // Asked of the backend rather than read off its session: this is what replaced

@@ -1,4 +1,4 @@
-// Outer bitrate controller for TZ v2.0 §15. Pure arithmetic -- no codec.
+// Outer bitrate controller. Pure arithmetic -- no codec.
 
 #include "bitrate_budget.h"
 
@@ -94,19 +94,17 @@ void undershoot_releases_only_after_debt_is_paid()
 ///
 /// The recovery debt is fed per packet, so four seconds at three times the target leaves
 /// sixteen megabits owing, and an undershoot repays it at the target rate: eight seconds,
-/// against a one-second recovery window. The escalation test "(debt / repay_rate) >
-/// recovery_sec" was therefore true for all eight of them, and the ladder was pinned at its
-/// ceiling -- background_extra 30 with roi_soften 20, which is the whole frame at QP 51,
-/// object included -- while the stream underneath was producing nothing at all.
+/// against a one-second recovery window. An escalation rule "(debt / repay_rate) >
+/// recovery_sec" would be true for all eight of them and pin the loop at its ceiling --
+/// the whole frame at QP 51, object included -- while the stream underneath produced
+/// nothing at all. On the real 36 s clip that meant twelve consecutive seconds of silence
+/// against a 2 Mbps target; here, 22.00 s to let go with the escalation and 15.28 s
+/// without. The bound below sits between them, so this fails outright if it comes back.
 ///
-/// Measured on the real 36 s clip this came from: twelve consecutive seconds of silence
-/// against a 2 Mbps target. Measured here: 22.00 s to let go before the fix, 15.28 s after.
-/// The bound below sits between them, so this fails outright if the escalation comes back.
-///
-/// What it claims after 2026-09-02: the release is proportional too, so how fast the loop
-/// lets go depends on how far under the target the stream has fallen. A stream at two
-/// percent of target is released in a few seconds; a stream fifteen percent under barely
-/// moves, which is what stops the oscillation the first proportional version had.
+/// The release is proportional too, so how fast the loop lets go depends on how far under
+/// the target the stream has fallen. A stream at two percent of target is released in a
+/// few seconds; a stream fifteen percent under barely moves, which is what stops the loop
+/// oscillating.
 void a_quiet_stream_is_released_in_bounded_time()
 {
     sve::RateControlPolicy policy;
@@ -212,9 +210,9 @@ void the_correction_is_sized_from_the_miss()
 }
 
 /// Releasing is deliberately slower than tightening, and this is where that is stated. It
-/// is the property that stopped the oscillation: measured on a 36 s crowd scene, a loop
-/// that let go as fast as it clamped down reached a P95 of 170% of target where this one
-/// reaches 114% (docs/STATUS.md, срез Z13).
+/// is the property that stops the oscillation: measured on a 36 s crowd scene, a loop that
+/// lets go as fast as it clamps down reaches a P95 of 170% of target where this one reaches
+/// 114%.
 void the_loop_lets_go_more_slowly_than_it_clamps_down()
 {
     sve::RateControlPolicy policy;
@@ -273,11 +271,11 @@ void it_converges_against_a_plant_it_does_not_model_exactly()
         }
     }
     check(worst_late_ratio < 1.2,
-        "after twenty seconds the plant is held inside §16's rolling bound");
+        "after twenty seconds the plant is held inside the rolling bound");
     check(worst_late_ratio > 0.0, "and the loop did not simply stop the stream");
 }
 
-/// §50: a target the loop cannot reach has to be reported, not merely missed. It happens
+/// A target the loop cannot reach has to be reported, not merely missed. It happens
 /// when the expensive part of the frame is inside a protected region -- measured on a crowd
 /// scene whose box covers 38% of the frame and all of its detail, moving the background
 /// penalty from +6 to +30 changed the rate by four percent.

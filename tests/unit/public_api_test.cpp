@@ -73,9 +73,9 @@ public:
     int ends = 0;
 };
 
-// §7's interface, named with the public vocabulary alone. This is the part that keeps the
-// interface honest: BackendSession is opaque here, so an AVCodecContext creeping into the
-// public header would stop this file compiling -- which is the point of compiling it
+// The backend interface, named with the public vocabulary alone. This is the part that keeps
+// the interface honest: BackendSession is opaque here, so an AVCodecContext creeping into
+// the public header would stop this file compiling -- which is the point of compiling it
 // without libav* on the include path at all.
 [[maybe_unused]] void names_the_backend_interface()
 {
@@ -108,8 +108,8 @@ public:
         std::fprintf(stderr, "fail: x264 must advertise native_bitrate\n");
         std::exit(1);
     }
-    // The HEVC answer comes from the other backend now, and asking x264 for it gives an
-    // empty capability rather than a smaller one -- which is what selection reads (§8.4).
+    // The HEVC answer comes from the other backend, and asking x264 for it gives an empty
+    // capability rather than a smaller one -- which is what selection reads.
     if (caps.h265) {
         std::fprintf(stderr, "fail: x264 must not advertise H.265\n");
         std::exit(1);
@@ -247,8 +247,8 @@ int main()
         }
     }
 
-    // And the refusal names them all. It used to name seven of eleven, so asking for
-    // x264direct with a typo was answered with a list that denied x264direct existed.
+    // And the refusal names them all, so a typo is answered with the full list of what
+    // does exist.
     const std::string names = sve::backend_choice_names();
     try {
         sve::backend_choice_from_name("no-such-encoder");

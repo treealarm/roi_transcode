@@ -33,8 +33,8 @@ public:
     // decoder produces frames that already live in the encoder's memory and SubmitAvFrame
     // hands them straight over -- no conversion, no upload, no copy. Given one it cannot
     // use (a codec the device has no decoder for, a profile the silicon does not implement)
-    // it decodes in software instead and says so through hardware_name(), because a
-    // hardware path that quietly became a software one is what §50 forbids.
+    // it decodes in software instead and says so through hardware_name(): a hardware path
+    // that quietly became a software one would be a silent fallback.
     enum class Framing {
         /// Buffers may split an access unit or carry several; a parser reassembles them.
         Arbitrary,

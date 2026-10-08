@@ -1,10 +1,8 @@
 #pragma once
 
 // Frames in, encoded packets out, with the quality spent where a detector said it matters.
-// TZ v3.4 §8.1, §8.13 and §24.
 //
-// This is the normative public API. The two older ways in -- Session and transcode_file --
-// are being rewritten on top of it; transcode_file already is.
+// This is the core public API; Session and transcode_file are built on top of it.
 //
 // The shape is submit/receive rather than a callback, and both halves are non-blocking:
 //
@@ -19,19 +17,16 @@
 // lookahead or B-frames and to emit in decode order later. Nothing here assumes a packet
 // belongs to the frame that was just submitted.
 //
-// **Threads.** One encoder is driven by one thread at a time. There is no lock inside it
-// and none is planned while the facade stays thin (Р7 in docs/STATUS.md): the state behind
-// submit and receive is plain, and two threads in it at once is a data race rather than a
-// slow path. §24 describes a pipeline as "SubmitFrame from one thread, ReceivePacket from
-// another"; that is the shape of the model it is explaining, not a promise made here.
+// **Threads.** One encoder is driven by one thread at a time. There is no lock inside it:
+// the state behind submit and receive is plain, and two threads in it at once is a data
+// race rather than a slow path.
 //
 // Separate encoders on separate threads are supported and are the intended way to use this
 // library concurrently -- a service transcoding several clips at once gives each its own.
 // They share the backends, which is safe because a backend owns nothing: it is a stateless
 // immortal singleton and every encode's state lives in its own BackendSession. That claim
 // is checked rather than asserted -- tests/unit/concurrency_test.cpp runs eight encoders
-// released at the same instant and requires byte-identical output from each, and
-// integration/scripts/tsan-check.sh runs it under ThreadSanitizer.
+// released at the same instant and requires byte-identical output from each.
 
 #include "sve/backend_selection.h"
 #include "sve/capabilities.h"
@@ -53,7 +48,7 @@
 
 namespace sve {
 
-/// Where the encoder is in its life -- TZ v3.4 §8.13.
+/// Where the encoder is in its life.
 ///
 ///     Created -> Configured -> Running -> Draining -> EndOfStream -> Stopped
 ///                                 |                        |
@@ -73,7 +68,7 @@ enum class EncoderState {
 
 const char* encoder_state_name(EncoderState s);
 
-/// What may change while frames are flowing -- TZ v3.4 §8.2.
+/// What may change while frames are flowing.
 ///
 /// Everything absent from this structure is fixed at Create. Codec, resolution, backend and
 /// pixel format are not runtime knobs: changing any of them is a different encode with a
@@ -85,18 +80,18 @@ struct RuntimeEncoderSettings {
     std::optional<Quality> quality;
 };
 
-/// What the encoder has done so far -- TZ v3.4 §8.1, and Appendix C leaves the shape to us.
+/// What the encoder has done so far.
 ///
 /// Everything here is a count of something that happened, not a setting echoed back. The
-/// two rules it is built to serve: §50 forbids a silent fallback, so every degradation is
-/// counted; and "zero-copy" is a claim nobody can check unless the copies are reported.
+/// two rules it is built to serve: no silent fallback, so every degradation is counted;
+/// and "zero-copy" is a claim nobody can check unless the copies are reported.
 struct EncoderStatistics {
     int64_t frames_submitted = 0;
     int64_t packets_received = 0;
     int64_t bytes_encoded = 0;
 
     /// Regions the backend's own limit could not take. Non-zero is not a fault -- it is a
-    /// degradation, and §50 wants it visible rather than inferred.
+    /// degradation, and it should be visible rather than inferred.
     int64_t regions_dropped = 0;
 
     /// Frames that needed a pixel-format conversion, and frames that needed an upload,
@@ -104,8 +99,8 @@ struct EncoderStatistics {
     int64_t frames_converted = 0;
     int64_t frames_uploaded = 0;
 
-    /// Keyframe requests the encoder was asked for. Best effort by §8.1, so this counts
-    /// what was asked rather than what the bitstream ended up containing.
+    /// Keyframe requests the encoder was asked for. Best effort, so this counts what was
+    /// asked rather than what the bitstream ended up containing.
     int64_t keyframes_requested = 0;
 
     /// Frames whose per-block quality map asked for a quantiser the codec does not have.
@@ -119,21 +114,20 @@ struct EncoderStatistics {
     /// that only appeared in a log would be invisible to anything but a human reading it.
     bool cpu_h265_target_guard = false;
 
-    /// Set when the outer bitrate loop (§15) ran out of authority: it has been holding its
-    /// whole range -- background crushed, low-importance regions softened -- and the stream
-    /// is still above the target band.
+    /// Set when the outer bitrate loop ran out of authority: it has been holding its whole
+    /// range -- background crushed, low-importance regions softened -- and the stream is
+    /// still above the target band.
     ///
-    /// This is §50's rule applied to a case that used to be silent. It happens when the
-    /// expensive part of the frame is inside a protected region: measured on a crowd scene
-    /// whose protected box covers 38% of the frame and all of its detail, moving the
-    /// background penalty from +6 to +30 changed the rate by four percent, so no setting of
-    /// this loop could have reached the target. A caller who asked for a bitrate and is
-    /// missing it deserves to know it was arithmetic and not a knob left unturned.
+    /// It happens when the expensive part of the frame is inside a protected region: on a
+    /// crowd scene whose protected box covers 38% of the frame and all of its detail, moving
+    /// the background penalty from +6 to +30 changes the rate by four percent, so no setting
+    /// of this loop can reach the target. A caller who asked for a bitrate and is missing it
+    /// deserves to know it was arithmetic and not a knob left unturned.
     bool bitrate_target_unreachable = false;
 
     /// Backends that were tried and declined before one opened. Non-zero is normal on a
     /// machine without the hardware; it is here so "which one opened, and what did it beat"
-    /// can be answered without reading a log (§22).
+    /// can be answered without reading a log.
     int64_t backends_declined = 0;
 
     /// Distinct degradations applied under FallbackPolicy::Permissive: regions cut to the
@@ -145,7 +139,7 @@ struct EncoderStatistics {
     Backend encoder_used = Backend::X264;
     std::string backend_name;
 
-    /// §14 ROI lag, when the boxes carried track ids to measure it from.
+    /// ROI lag, when the boxes carried track ids to measure it from.
     bool roi_lag_measured = false;
     int64_t roi_lag_samples = 0;
     float roi_lag_min_iou = 0.0f;
@@ -158,34 +152,31 @@ struct EncoderStatistics {
 
 /// Everything the encoder needs, from the input format to how quality is spent.
 ///
-/// `settings` is the adaptive half (TZ calls it AdaptiveConfig; Appendix C leaves it open):
-/// which codec and backend, the constant quantizer, and the whole Quality model. `backend`
-/// is the geometry and timing the backends take.
+/// `settings` is the adaptive half: which codec and backend, the constant quantizer, and
+/// the whole Quality model. `input` is the geometry and timing the backends take.
 struct EncoderConfig {
     InputVideoFormat input;
     Settings settings;
 
-    /// Where diagnostics go (§29). Left unset they go to stderr, one line each, which is
-    /// what a command-line tool and the acceptance scripts want.
+    /// Where diagnostics go. Left unset they go to stderr, one line each, which is what a
+    /// command-line tool wants.
     LogSink log;
 };
 
 class SmartVideoEncoder;
 
-/// Opens a backend and returns an encoder -- TZ v4.1 §8.12.
+/// Opens a backend and returns an encoder.
 ///
-/// A free function, and the only public way to make one. §8.12 asks that the codec and the
-/// backend not be spelled into a factory's name, and a static Create on the class is that
-/// same mistake one level up: it makes the class the thing you name to get an encoder,
-/// which is what a second entry point would then have to be named against.
+/// A free function, and the only public way to make one, so that the codec and the backend
+/// are never spelled into a factory's name.
 ///
 /// The chain is walked when settings.encoder is Backend::Auto; a named backend is tried
 /// alone, so asking for QSV and silently getting libx264 is not something that can happen.
 ///
-/// Throws EncoderError, carrying the StatusCode, when nothing can serve the request.
-/// Returning nullptr instead is forbidden by §8.12, and rightly: nullptr says only that
-/// something went wrong, while the caller's next move depends entirely on which thing --
-/// InvalidArgument is a configuration to fix, DeviceUnavailable is a machine to change.
+/// Throws EncoderError, carrying the StatusCode, when nothing can serve the request rather
+/// than returning nullptr: nullptr says only that something went wrong, while the caller's
+/// next move depends entirely on which thing -- InvalidArgument is a configuration to fix,
+/// DeviceUnavailable is a machine to change.
 std::unique_ptr<SmartVideoEncoder> CreateVideoEncoder(const EncoderConfig& config);
 
 class SmartVideoEncoder {
@@ -194,27 +185,23 @@ public:
     SmartVideoEncoder(const SmartVideoEncoder&) = delete;
     SmartVideoEncoder& operator=(const SmartVideoEncoder&) = delete;
 
-    /// Hands one frame over -- TZ v4.1 §8.1. Non-blocking: `Again` means the input queue
-    /// is full and the caller should drain before submitting again. A frame is never
-    /// accepted in part.
+    /// Hands one frame over. Non-blocking: `Again` means the input queue is full and the
+    /// caller should drain before submitting again. A frame is never accepted in part.
     ///
     /// Takes the frame by value, and the Frame inside is a shared handle, so the encoder
     /// keeping it for lookahead or B-frames costs the caller nothing to allow. An empty
     /// Frame is InvalidArgument.
     ///
-    /// There is no AVFrame overload here, deliberately: §8.1 puts it in `sve/frame.h` as
-    /// SubmitAvFrame, so that an embedder with their own pixels never sees an FFmpeg type
-    /// in the interface they compile against.
+    /// There is no AVFrame overload here, deliberately: it is SubmitAvFrame in
+    /// `sve/frame.h`, so that an embedder with their own pixels never sees an FFmpeg type in
+    /// the interface they compile against.
     Status SubmitFrame(TimedFrame frame);
 
     /// The same, for pixels the caller holds and will outlive the call. Borrowed rather
     /// than shared: a buffer the backend handed out through CreateFrame lives in the
     /// encoder's own memory and is reused frame after frame, so wrapping it in a shared
-    /// handle every time would count references nobody is racing for.
-    ///
-    /// A departure from §8.1, which spells one SubmitFrame. Kept because the difference is
-    /// real -- one owns, one does not -- and collapsing them would make the zero-copy path
-    /// pay for ownership it does not need.
+    /// handle every time would count references nobody is racing for. Collapsing the two
+    /// overloads would make the zero-copy path pay for ownership it does not need.
     Status SubmitFrame(IFrameBuffer& pixels, const FrameMetadata& metadata);
 
     /// Takes one packet if there is one. `Again` means feed more frames; `EndOfStream`
@@ -232,29 +219,30 @@ public:
     /// statistics whether or not the encoder obliged.
     Status RequestKeyFrame();
 
-    /// Applies what §8.2 allows to change on the fly. Anything else -- codec, resolution,
-    /// backend, pixel format -- returns InvalidArgument rather than reopening silently.
+    /// Applies what may change on the fly (RuntimeEncoderSettings). Anything else -- codec,
+    /// resolution, backend, pixel format -- returns InvalidArgument rather than reopening
+    /// silently.
     Status Reconfigure(const RuntimeEncoderSettings& settings);
 
-    /// What a decoder needs before the first packet -- TZ v3.4 §8.11. Available as soon as
-    /// the encoder exists, so a muxer can declare its stream without waiting for a frame.
+    /// What a decoder needs before the first packet. Available as soon as the encoder
+    /// exists, so a muxer can declare its stream without waiting for a frame.
     Status GetCodecParameters(CodecParameters* parameters) const;
 
     EncoderCapabilities GetCapabilities() const;
 
-    /// What the backend that opened actually settled on -- §15.1's b_frames, lookahead and
-    /// the two adaptive-quantisation switches, as they ended up rather than as they were
-    /// asked for. §38's calibration profile pins these; a field left unset means the
-    /// backend cannot report it, which is not the same as it being off.
+    /// What the backend that opened actually settled on -- b_frames, lookahead and the two
+    /// adaptive-quantisation switches, as they ended up rather than as they were asked for.
+    /// A field left unset means the backend cannot report it, which is not the same as it
+    /// being off.
     EffectiveSettings GetEffectiveSettings() const;
 
     /// The hardware device the backend opened, as its own native handle. Empty when the
     /// encoder is running on the CPU.
     ///
-    /// Untyped on purpose: naming AVBufferRef here would put an FFmpeg type back into the
-    /// interface §8.3 keeps free of them. `sve/frame.h` -- the one header that may say
-    /// AVFrame -- turns this into an AVBufferRef*, and the tag NativeHandle carries is what
-    /// makes that conversion checkable rather than assumed.
+    /// Untyped on purpose: naming AVBufferRef here would put an FFmpeg type into this
+    /// interface. `sve/frame.h` -- the one header that may say AVFrame -- turns this into an
+    /// AVBufferRef*, and the tag NativeHandle carries is what makes that conversion
+    /// checkable rather than assumed.
     ///
     /// There is one caller and it is worth naming: a decoder that hands this encoder frames
     /// without a round trip through system memory has to decode onto the device the encoder

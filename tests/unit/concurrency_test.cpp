@@ -1,9 +1,8 @@
 // What holds when this library is used from several threads at once.
 //
-// There is no worker thread here and no mutex: §Р6 keeps the facade thin and §Р7 makes the
-// backends stateless immortal singletons, so concurrency in this library is entirely the
-// caller's. That is a claim, and until 2026-09-01 it was only a claim -- nothing anywhere
-// ran two encoders at the same time. This file is what turns it into something checked.
+// There is no worker thread here and no mutex: the facade is thin and the backends are
+// stateless immortal singletons, so concurrency in this library is entirely the caller's.
+// This file is what turns that claim into something checked.
 //
 // Three properties, and they are the ones a caller actually relies on:
 //
@@ -21,8 +20,8 @@
 // in the header instead.
 //
 // A green run is weaker evidence than it looks: a data race can stay invisible for a
-// thousand runs. Under ThreadSanitizer it is not -- integration/scripts/tsan-check.sh
-// builds exactly this test with -fsanitize=thread and runs it, which is where the teeth are.
+// thousand runs. Build this test with -fsanitize=thread and run it under ThreadSanitizer
+// for teeth.
 
 #include "sve/backend_registry.h"
 #include "sve/encoder.h"
@@ -234,8 +233,8 @@ void the_shared_registry_survives_being_reached_first_by_everyone()
     }
     CHECK(!seen.front().empty());
     for (const std::vector<Backend>& kinds : seen) {
-        // Same set and same order: registration order is what §23 reports and what
-        // allow_unlisted walks, so a registry filled twice would be visible here.
+        // Same set and same order: registration order is what allow_unlisted walks, so a
+        // registry filled twice would be visible here.
         CHECK(kinds == seen.front());
     }
 }
