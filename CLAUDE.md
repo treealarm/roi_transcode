@@ -6,7 +6,7 @@
 else. `ta_vms` (as the `roitrc/ta_roienc` submodule, linked by `media_server` and `roitrc`)
 and `video_a` (as the `ta_roienc` submodule, for the decoder) consume it through
 `add_subdirectory`. Nothing in `include/` or `src/` knows either consumer exists, and the
-targets `public_headers_isolated` / `public_headers_selfcontained` keep the public headers
+targets `headers_isolated` / `public_headers_selfcontained` keep the public headers
 free of FFmpeg and self-contained.
 
 If something would only make sense to one consumer, it belongs in that consumer.
@@ -46,8 +46,8 @@ Built with **C++20**. Prefer modern C++20 techniques and standard library facili
 legacy patterns whenever the result is clearer and safer (`std::span`, ranges, RAII,
 `std::optional`, `std::variant`, structured bindings, constexpr helpers, etc.).
 
-One deliberate exception, so nobody "fixes" it: the hand-written `Result<T>` in
-`include/ta_roienc/status.h` is not `std::expected` because that is C++23 and this header
+One deliberate exception, so nobody "fixes" it: the hand-written `Fallible<T>` in
+`include/ta_roienc/verdict.h` is not `std::expected` because that is C++23 and this header
 is compiled by the embedding project, not by us.
 
 ## Portability and dependency weight

@@ -5,12 +5,12 @@
       "id": "unitTest",
       "type": "pickString",
       "description": "Which unit test to debug",
-      "default": "encoder_test",
+      "default": "encode_test",
       "options": [
-        "encoder_test", "decoder_test", "frame_test", "backend_conformance_test",
-        "ten_bit_test", "public_api_test", "sei_payload_test", "cbor_test",
-        "object_normalizer_test", "object_geometry_test", "geometry_test",
-        "importance_test", "temporal_roi_test", "bitrate_budget_test", "region_policy_test"
+        "encode_test", "decode_test", "picture_test", "engine_conformance_test",
+        "ten_bit_samples_test", "api_surface_test", "sei_record_test", "cbor_io_test",
+        "object_cleanup_test", "object_shapes_test", "shapes_test",
+        "weighting_test", "roi_memory_test", "bit_allowance_test", "region_rules_test"
       ]
     }
   ],

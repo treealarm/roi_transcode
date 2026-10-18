@@ -1,0 +1,263 @@
+#include "roi_coder.h"
+
+#include "failure.h"
+#include "access_unit_outlet.h"
+
+#include <algorithm>
+#include <cstring>
+#include <format>
+
+namespace ta_roienc {
+
+
+using roiav::fail;
+
+const char* RoiCoder::label() const
+{
+    const bool h264 = m_codec == Coding::H264;
+    switch (m_kind) {
+    case Engine::IntelOneVpl:
+        return h264 ? "h264_qsv (Intel VPL mfxExtEncoderROI)"
+                    : "hevc_qsv (Intel VPL mfxExtEncoderROI)";
+    case Engine::Vaapi:
+        return h264 ? "h264_vaapi (Intel iHD VAEncROI)"
+                    : "hevc_vaapi (Intel iHD VAEncROI)";
+    case Engine::X264:
+        return "libx264 (CPU, via libavcodec)";
+    case Engine::X264Direct:
+        return "libx264 (CPU, direct API, per-macroblock quant_offsets)";
+    case Engine::X265Direct:
+        return "libx265 (CPU, direct API, per-block quantOffsets)";
+    case Engine::X265:
+        return "libx265 (CPU, per-block quantOffsets)";
+    case Engine::IntelOneVplDirect:
+        return h264 ? "h264 (Intel oneVPL, direct API, mfxExtMBQP)"
+                    : "hevc (Intel oneVPL, direct API, mfxExtMBQP)";
+    default:
+        return h264 ? "libx264 (CPU)" : "libx265 (CPU)";
+    }
+}
+
+namespace {
+
+// A throwaway encode of a single frame, for backends that ask for it. Ubuntu's older iHD
+// opens the QSV encoder happily and then returns empty packets, and only an actual encode
+// tells the two apart -- which is why IEngine::NeedsProbe exists rather than the
+// caller guessing which backends lie.
+//
+// Written entirely against the interface: a grey frame from the backend's own factory,
+// submitted and drained the way any caller would, so that it works for backends that are
+// not libavcodec backends.
+bool probe_one_frame(const IEngine& backend, EngineRun& session)
+{
+    auto made = backend.CreatePicture(session, MemoryKind::CPU);
+    if (!made) {
+        return false;
+    }
+    IPictureStore* buffer = made.value().get();
+
+    // Mid-grey: luma at 0, chroma at 128. Any content would do -- what is being tested is
+    // whether a frame comes back out at all. The spans carry their own length, so there is
+    // no height arithmetic here to get wrong.
+    const LayerView y = buffer->plane(0);
+    std::fill(y.bytes.begin(), y.bytes.end(), uint8_t{0});
+    const LayerView uv = buffer->plane(1);
+    std::fill(uv.bytes.begin(), uv.bytes.end(), uint8_t{128});
+    buffer->commit();
+
+    if (!backend.SubmitPicture(session, *buffer, EnginePictureControl{})) {
+        return false;
+    }
+    auto pkt = backend.ReceiveAccessUnit(session);
+    if (!pkt && pkt.status().code() == VerdictCode::Again) {
+        if (!backend.Flush(session)) {
+            return false;
+        }
+        pkt = backend.ReceiveAccessUnit(session);
+    }
+    return pkt.ok();
+}
+
+} // namespace
+
+void RoiCoder::open(const EngineSetup& config, AccessUnitOutlet& sink)
+{
+    open_deferred(config);
+    attach(sink);
+}
+
+void RoiCoder::attach(AccessUnitOutlet& sink)
+{
+    m_sink = &sink;
+    m_sink->begin(m_params);
+}
+
+EngineAbilities RoiCoder::capabilities() const
+{
+    return m_backend
+        ? m_backend->GetCapabilities(AbilityQuery{m_codec, m_target_bitrate})
+        : EngineAbilities{};
+}
+
+AppliedSettings RoiCoder::effective_settings() const
+{
+    return m_backend && m_session ? m_backend->GetEffectiveSettings(*m_session)
+                                  : AppliedSettings{};
+}
+
+NativeHandle RoiCoder::hardware_device() const
+{
+    return m_backend && m_session ? m_backend->HardwareDevice(*m_session) : NativeHandle{};
+}
+
+Fallible<PictureStorePtr> RoiCoder::create_frame(MemoryKind memory)
+{
+    if (!m_backend || !m_session) {
+        return Verdict::Error("no encoder is open");
+    }
+    return m_backend->CreatePicture(*m_session.get(), memory);
+}
+
+void RoiCoder::open_deferred(const EngineSetup& config)
+{
+    std::string errors;
+    const std::vector<EngineHandle> chain = resolve_engines(config.kind,
+        config.engine_order, config.codec, &m_backends_skipped, *m_registry);
+    if (chain.empty()) {
+        std::string why;
+        for (const std::string& reason : m_backends_skipped) {
+            why += " " + reason + ";";
+        }
+        fail(why.empty()
+            ? std::string("backend selection excludes every backend this build has")
+            : "backend selection leaves nothing that can encode this codec:" + why);
+    }
+    for (const IEngine& backend : chain) {
+        auto opened = backend.Configure(config);
+        if (!opened) {
+            ++m_backends_declined;
+            errors += std::format(" {};", opened.status().message());
+            continue;
+        }
+        // Some backends open and only fail on the first frame. The probe consumes the
+        // context either way -- an encoder that has seen a frame cannot be handed back as
+        // fresh -- so a successful probe is followed by opening a second, untouched one.
+        if (backend.NeedsProbe()) {
+            const bool ok = probe_one_frame(backend, *opened.value().get());
+            opened.value().reset();
+            if (!ok) {
+                ++m_backends_declined;
+                errors += std::format(" {}: opened but encodes nothing;",
+                    engine_name(backend.kind()));
+                continue;
+            }
+            opened = backend.Configure(config);
+            if (!opened) {
+                errors += std::format(" {};", opened.status().message());
+                continue;
+            }
+        }
+        m_backend = &backend;
+        m_kind = backend.kind();
+        m_session = std::move(opened.value());
+        break;
+    }
+    if (!m_backend) {
+        fail(std::format("no {} encoder available:{}",
+            config.codec == Coding::H264 ? "H.264" : "HEVC", errors));
+    }
+
+    m_codec = config.codec;
+    // Kept because capabilities() has to ask the same question the session was opened
+    // with: the native oneVPL backend has a per-block QP map under CQP and hardware VBR
+    // under a target, and not both. Asking without the target would tell the adaptive
+    // layer it may drop the rectangle budget on a session that is going to want rectangles.
+    m_target_bitrate = config.rate_control.target_bitrate;
+
+    // Asked of the backend rather than read off its session: this is what replaced
+    // reaching for an AVCodecContext, and it is why a backend on its own SDK can now
+    // reach the muxer at all.
+    auto params = m_backend->GetCodingParams(*m_session.get());
+    if (!params) {
+        fail(params.status().message());
+    }
+    m_params = std::move(params.value());
+
+    // libx265 and the hardware wrappers hand back packets with no duration. The
+    // mp4 muxer derives each sample's duration from the next packet, so with
+    // nothing following it the final sample is silently dropped -- one frame
+    // short, and the file a frame shorter than the source. MPEG-TS does not
+    // care, which is why this only ever showed up in mp4.
+    //
+    // One frame lasts frame_rate.den/frame_rate.num seconds, expressed in the output time
+    // base -- which is av_rescale_q(1, 1/fps, time_base) written out. It is written out
+    // because this is the last thing in the core that needed libavutil, and a division
+    // with a rounding rule is a poor reason to keep the dependency. AV_ROUND_NEAR_INF is
+    // what av_rescale_q applies, and it is (b + c/2) / c for the positive values these
+    // always are; the 64-bit intermediate is what keeps a 90 kHz time base exact.
+    const int64_t seconds_per_frame_num =
+        static_cast<int64_t>(std::max(config.input.frame_rate.den, 1))
+        * std::max(m_params.time_base.den, 1);
+    const int64_t seconds_per_frame_den =
+        static_cast<int64_t>(m_params.time_base.num) * config.input.frame_rate.num;
+    m_frame_duration = seconds_per_frame_den > 0
+        ? (seconds_per_frame_num + seconds_per_frame_den / 2) / seconds_per_frame_den
+        : 0;
+    if (m_frame_duration <= 0) {
+        m_frame_duration = 1;
+    }
+}
+
+void RoiCoder::drain()
+{
+    for (;;) {
+        const auto pkt = m_backend->ReceiveAccessUnit(*m_session.get());
+        if (!pkt) {
+            const VerdictCode code = pkt.status().code();
+            if (code == VerdictCode::Again || code == VerdictCode::EndOfStream) {
+                return;
+            }
+            fail(pkt.status().message());
+        }
+        // The packet the backend handed back, and nothing reached past it to get here.
+        // A duration the encoder left unset is filled in from the frame rate: the mp4
+        // muxer derives a sample's duration from the next packet, so with nothing
+        // following it the last sample is silently dropped.
+        AccessUnit out = pkt.value();
+        if (out.duration <= 0) {
+            out.duration = m_frame_duration;
+        }
+        if (out.time_base.den <= 0) {
+            out.time_base = m_params.time_base;
+        }
+        m_sink->on_access_unit(out);
+    }
+}
+
+void RoiCoder::encode_buffer(
+    IPictureStore& buffer, const std::vector<Area>& rects, int64_t pts,
+    std::span<const uint8_t> sei_unregistered)
+{
+    EnginePictureControl control;
+    control.regions = rects;
+    control.pts = pts;
+    control.sei_unregistered = sei_unregistered;
+
+    const Verdict s = m_backend->SubmitPicture(*m_session.get(), buffer, control);
+    if (!s) {
+        fail(s.message());
+    }
+    drain();
+}
+
+void RoiCoder::flush()
+{
+    const Verdict s = m_backend->Flush(*m_session.get());
+    if (!s) {
+        fail(s.message());
+    }
+    drain();
+}
+
+
+} // namespace ta_roienc

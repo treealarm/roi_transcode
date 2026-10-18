@@ -1,0 +1,26 @@
+#pragma once
+
+// Limit how fast a region's QP may move between frames (max_qp_delta_per_frame).
+// Without this a track that flips priority (or a detector that blinks) paints a visible
+// flicker; the ceiling turns that step into a ramp.
+
+#include "object_cleanup.h"
+
+#include <cstdint>
+#include <unordered_map>
+
+namespace ta_roienc {
+
+class QpRateLimiter {
+public:
+    /// `max_step` 0 disables. Positive: each detection's qp_delta may move by at most this
+    /// many units from the last frame with the same track_id (or geometry key if untracked).
+    void apply(std::vector<Sighting>& detections, int32_t max_step);
+
+private:
+    static uint64_t key_of(const Sighting& d);
+
+    std::unordered_map<uint64_t, int32_t> m_last_qp;
+};
+
+} // namespace ta_roienc
