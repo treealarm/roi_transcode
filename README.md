@@ -48,3 +48,7 @@ ta_roienc::Outcome done = session.finish();
 
 `AccessUnitSink` carries no FFmpeg types -- bytes, timestamps and a keyframe flag -- so
 writing one needs nothing on the include path but this library's headers.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
