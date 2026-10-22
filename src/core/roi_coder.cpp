@@ -33,6 +33,9 @@ const char* RoiCoder::label() const
     case Engine::IntelOneVplDirect:
         return h264 ? "h264 (Intel oneVPL, direct API, mfxExtMBQP)"
                     : "hevc (Intel oneVPL, direct API, mfxExtMBQP)";
+    case Engine::Nvenc:
+        return h264 ? "h264_nvenc (NVIDIA NVENC, no regions)"
+                    : "hevc_nvenc (NVIDIA NVENC, no regions)";
     default:
         return h264 ? "libx264 (CPU)" : "libx265 (CPU)";
     }

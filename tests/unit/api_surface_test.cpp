@@ -239,7 +239,7 @@ int main()
     for (const ta_roienc::Engine kind : {ta_roienc::Engine::IntelOneVpl,
              ta_roienc::Engine::Vaapi, ta_roienc::Engine::X264, ta_roienc::Engine::X265,
              ta_roienc::Engine::X264Direct, ta_roienc::Engine::X265Direct,
-             ta_roienc::Engine::IntelOneVplDirect}) {
+             ta_roienc::Engine::IntelOneVplDirect, ta_roienc::Engine::Nvenc}) {
         if (ta_roienc::engine_choice_from_name(ta_roienc::engine_name(kind)).kind != kind) {
             std::fprintf(stderr, "public_api_test: %s does not round-trip through its name\n",
                 ta_roienc::engine_name(kind));

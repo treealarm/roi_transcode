@@ -24,6 +24,7 @@ const char* engine_name(Engine e)
     case Engine::X264Direct: return "x264direct";
     case Engine::X265Direct: return "x265direct";
     case Engine::IntelOneVplDirect: return "onevpldirect";
+    case Engine::Nvenc: return "nvenc";
     }
     return "?";
 }
@@ -46,11 +47,14 @@ namespace {
 /// still encodes on hardware. That is a fallback and not a substitution: the chain logs
 /// which backend declined and why, so the weaker path can be seen rather than guessed at.
 ///
+/// Nvenc comes after the Intel ones: it is hardware, so it beats software, but it puts no
+/// regions into the picture, which is what the Intel backends are ahead for.
+///
 /// The software encoders are last because they always work, and both are listed because a
 /// backend that cannot produce the requested codec is skipped here with its reason -- so
 /// H.264 takes X264Direct and H.265 takes X265Direct without the caller choosing.
 constexpr Engine kAutoOrder[] = {
-    Engine::IntelOneVplDirect, Engine::IntelOneVpl, Engine::Vaapi,
+    Engine::IntelOneVplDirect, Engine::IntelOneVpl, Engine::Vaapi, Engine::Nvenc,
     Engine::X264Direct, Engine::X265Direct};
 
 /// "cpu" is Auto over exactly the two software backends: whichever of the two cannot
@@ -80,6 +84,7 @@ constexpr NamedEngine kNamedEngines[] = {
     {"x265direct", Engine::X265Direct, {}},
     {"onevpldirect", Engine::IntelOneVplDirect, {}},
     {"qsvdirect", Engine::IntelOneVplDirect, {}},
+    {"nvenc", Engine::Nvenc, {}},
 };
 
 } // namespace

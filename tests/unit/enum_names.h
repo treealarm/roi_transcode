@@ -31,6 +31,7 @@ inline const char* spell(ta_roienc::Engine e)
     case ta_roienc::Engine::X264Direct:        return "X264Direct";
     case ta_roienc::Engine::X265Direct:        return "X265Direct";
     case ta_roienc::Engine::IntelOneVplDirect: return "IntelOneVplDirect";
+    case ta_roienc::Engine::Nvenc:             return "Nvenc";
     }
     return nullptr;
 }
