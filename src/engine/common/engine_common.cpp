@@ -500,6 +500,7 @@ Verdict LibavEngine::Flush(EngineRun& session) const
 
 const IEngine& onevpl_backend();
 const IEngine& vaapi_backend();
+const IEngine& nvenc_backend();
 const IEngine& x264_backend();
 const IEngine& x265_backend();
 
@@ -508,7 +509,8 @@ const IEngine& x265_backend();
 Verdict RegisterFfmpegEngines(EngineCatalog& registry) noexcept
 {
     for (const IEngine* backend :
-         {&x264_backend(), &x265_backend(), &onevpl_backend(), &vaapi_backend()}) {
+         {&x264_backend(), &x265_backend(), &onevpl_backend(), &vaapi_backend(),
+             &nvenc_backend()}) {
         if (const Verdict s = registry.Register(*backend); !s.ok()) {
             return s;
         }

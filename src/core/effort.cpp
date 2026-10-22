@@ -76,4 +76,18 @@ const char* qsv_preset(Effort p)
     return "medium";
 }
 
+const char* nvenc_preset(Effort p)
+{
+    // P1 to P7, NVENC's own scale from fastest to best. It also accepts names like "fast" and
+    // "hq", but those are mapped onto the P scale underneath, so the scale is what to ask for.
+    switch (p) {
+    case Effort::Fastest:  return "p1";
+    case Effort::Fast:     return "p2";
+    case Effort::Balanced: return "p4";
+    case Effort::Slow:     return "p6";
+    case Effort::Slowest:  return "p7";
+    }
+    return "p4";
+}
+
 } // namespace ta_roienc

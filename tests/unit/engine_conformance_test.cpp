@@ -502,6 +502,7 @@ int main()
         {Engine::IntelOneVpl, "onevpl"},
         {Engine::IntelOneVplDirect, "onevpldirect"},
         {Engine::Vaapi, "vaapi"},
+        {Engine::Nvenc, "nvenc"},
     };
 
     std::printf("H.264: encode, decode, frame count, PTS, EOS:\n");

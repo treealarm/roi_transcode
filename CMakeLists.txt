@@ -221,7 +221,7 @@ endif()
 # ---------------------------------------------------------------------------
 # ta_roienc_engine_ffmpeg
 #
-# libx264, libx265, QSV and VA-API through libavcodec.
+# libx264, libx265, QSV, VA-API and NVENC through libavcodec.
 # ---------------------------------------------------------------------------
 if(TA_ROIENC_BUILD_ENGINE_FFMPEG)
     add_library(ta_roienc_engine_ffmpeg
@@ -229,6 +229,7 @@ if(TA_ROIENC_BUILD_ENGINE_FFMPEG)
         src/engine/software/software_engine.cpp
         src/engine/onevpl/onevpl_engine.cpp
         src/engine/ffmpeg/vaapi_engine.cpp
+        src/engine/ffmpeg/nvenc_engine.cpp
     )
     ta_roienc_add_backend_component(ta_roienc_engine_ffmpeg)
     target_include_directories(ta_roienc_engine_ffmpeg SYSTEM PUBLIC ${FFMPEG_INCLUDE_DIRS})

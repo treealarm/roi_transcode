@@ -9,5 +9,6 @@ namespace ta_roienc {
 
 const char* libx26x_preset(Effort p);
 const char* qsv_preset(Effort p);
+const char* nvenc_preset(Effort p);
 
 } // namespace ta_roienc

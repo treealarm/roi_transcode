@@ -46,6 +46,9 @@ enum class Engine {
     /// Intel oneVPL through its own API. IntelOneVpl is the same hardware through
     /// libavcodec.
     IntelOneVplDirect,
+    /// NVIDIA NVENC through libavcodec, on a CUDA device. It takes no regions: libavcodec's
+    /// nvenc reads no AVRegionOfInterest, so the whole picture gets the same quantiser.
+    Nvenc,
 };
 
 
