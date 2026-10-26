@@ -33,10 +33,16 @@ namespace ta_roienc {
 
 namespace {
 
-/// Frames in the upload pool: the one being uploaded plus what the encoder may still hold
-/// while it works, with room to spare. A CUDA pool grows past it on demand; a D3D11 pool is
-/// one texture array of exactly this many, so there it is the ceiling.
+/// Frames the CUDA upload pool starts with: the one being uploaded plus what the encoder may
+/// still hold while it works, with room to spare. It grows past this on demand.
 constexpr int kUploadPool = 20;
+
+/// The D3D11 upload pool starts empty and makes one texture at a time as it needs them.
+/// Preallocating means one texture array, and D3D11 will not create an NV12 array of more
+/// than two textures with no bind flags (E_INVALIDARG, on a GTX 1050 Ti). Nor can the device
+/// be given a binding to fix that: one set on the device ("RTV") reaches the decoder's
+/// textures too, and NVENC then refuses to open on them.
+constexpr int kUploadPoolD3d11 = 0;
 
 /// NVIDIA's PCI vendor id, which DXGI reports as the adapter's VendorId. Naming it is what
 /// keeps a laptop's integrated GPU -- usually adapter 0 -- from being the one asked to run
@@ -64,12 +70,6 @@ AVPixelFormat frame_format(AVHWDeviceType type) noexcept
 
 /// Opens the device, on the NVIDIA adapter when it is D3D11. libavutil chooses the adapter
 /// itself for CUDA, which only ever enumerates NVIDIA's.
-///
-/// "RTV" makes every texture made on the device a render target -- the upload pool's and,
-/// since the decoder is handed this device, the decoder's too. Without it the upload pool's
-/// textures are bound to nothing, and D3D11 refuses to create an NV12 array like that
-/// (E_INVALIDARG, on a GTX 1050 Ti); a render target is also what FFmpeg's own D3D11 scaler
-/// gives the frames it hands an encoder.
 bool open_device(roiav::ByteBlock& hw, AVHWDeviceType type)
 {
     if (type != AV_HWDEVICE_TYPE_D3D11VA) {
@@ -78,7 +78,6 @@ bool open_device(roiav::ByteBlock& hw, AVHWDeviceType type)
     av_buffer_unref(&hw.p);
     AVDictionary* opts = nullptr;
     av_dict_set(&opts, "vendor_id", kNvidiaVendorId, 0);
-    av_dict_set(&opts, "RTV", "1", 0);
     const int err = av_hwdevice_ctx_create(&hw.p, type, nullptr, opts, 0);
     av_dict_free(&opts);
     return err >= 0;
@@ -128,8 +127,9 @@ public:
                 std::string(codec_name(p.codec)) + " in this FFmpeg has no ten-bit path");
         }
         const AVPixelFormat frames = frame_format(type);
+        const int pool = type == AV_HWDEVICE_TYPE_D3D11VA ? kUploadPoolD3d11 : kUploadPool;
         if (!backend_common::init_hw_frames(out.hw_device, out.hw_frames, frames,
-                surface, p.input.width, p.input.height, kUploadPool)) {
+                surface, p.input.width, p.input.height, pool)) {
             return Verdict::DeviceUnavailable(
                 std::string(device_name) + " device opened but allocates no frames");
         }
