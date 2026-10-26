@@ -14,15 +14,19 @@
 // Annex-B with the parameter sets in band -- which is the case that would install a parser
 // -- and it needs nothing checked in.
 
+#include "enum_names.h"
+
 #include "ta_roienc/decoder.h"
 #include "ta_roienc/encode.h"
 #include "ta_roienc/picture.h"
 #include "ta_roienc/access_unit.h"
 #include "ta_roienc/picture_view.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -198,6 +202,30 @@ void the_cpu_device_is_a_value_rather_than_an_absence()
     CHECK(!DecodeDevice::Opened(DecodeOrder{}).ok());
 }
 
+// Here rather than in labels_test, which links without the decoder when it is not built.
+// Every backend has a name of its own, the name parses back to a list holding that backend
+// alone, and "auto" tries every one of them -- a backend left out of it is one "auto" quietly
+// never reaches.
+void every_decode_backend_is_named_and_reachable_from_auto()
+{
+    const DecodeOrder automatic = decode_order_from_name("auto");
+    std::set<std::string_view> seen;
+    ta_roienc_enum_table::for_each<DecodeEngine>([&](DecodeEngine value, const char*) {
+        const std::string_view name = decode_backend_name(value);
+        CHECK(!name.empty() && name != "?");
+        CHECK(seen.insert(name).second);
+        if (value == DecodeEngine::Auto) {
+            return;
+        }
+        const DecodeOrder named = decode_order_from_name(name);
+        CHECK(named.preferred.size() == 1 && named.preferred[0] == value);
+        CHECK(std::ranges::find(automatic.preferred, value) != automatic.preferred.end());
+    });
+    CHECK(!seen.empty());
+    // Software last, so that "auto" means "hardware if you have it".
+    CHECK(automatic.preferred.back() == DecodeEngine::Cpu);
+}
+
 } // namespace
 
 int main()
@@ -205,6 +233,7 @@ int main()
     a_whole_access_unit_decodes_to_a_picture_without_the_next_one();
     a_cpu_frame_is_already_readable_and_downloads_to_itself();
     the_cpu_device_is_a_value_rather_than_an_absence();
+    every_decode_backend_is_named_and_reachable_from_auto();
     std::printf("decoder_test ok\n");
     return 0;
 }

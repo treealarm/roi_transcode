@@ -1,6 +1,7 @@
 #include "decode_hardware_access.h"
 
 #include "av_handles.h"
+#include "engine/common/av_hw_device.h"
 
 #include <cstdlib>
 #include <format>
@@ -29,28 +30,13 @@ AVHWDeviceType hw_type_of(DecodeEngine backend) noexcept
         return AV_HWDEVICE_TYPE_QSV;
     case DecodeEngine::NvidiaNvdec:
         return AV_HWDEVICE_TYPE_CUDA;
+    case DecodeEngine::D3d11va:
+        return AV_HWDEVICE_TYPE_D3D11VA;
     case DecodeEngine::Auto:
     case DecodeEngine::Cpu:
         return AV_HWDEVICE_TYPE_NONE;
     }
     return AV_HWDEVICE_TYPE_NONE;
-}
-
-/// Whether this build of FFmpeg contains the device type at all.
-///
-/// Asked rather than assumed, because the answer differs between our own images: this
-/// tree's FFmpeg has VA-API and QSV and no CUDA, and a backend that is simply absent must
-/// say so as itself rather than as "the device would not open" -- the two have different
-/// fixes, one in the image and one on the machine.
-bool device_type_present(AVHWDeviceType type) noexcept
-{
-    for (AVHWDeviceType t = av_hwdevice_iterate_types(AV_HWDEVICE_TYPE_NONE);
-         t != AV_HWDEVICE_TYPE_NONE; t = av_hwdevice_iterate_types(t)) {
-        if (t == type) {
-            return true;
-        }
-    }
-    return false;
 }
 
 /// vcpkg's libva compiles in its own build prefix as the driver search path, and that
@@ -113,14 +99,20 @@ Fallible<DecodeDevice> DecodeDevice::Opened(const DecodeOrder& selection)
         }
 
         const AVHWDeviceType type = hw_type_of(backend);
-        if (!device_type_present(type)) {
+        // Asked rather than assumed, because the answer differs between our own builds:
+        // the Linux images' FFmpeg has VA-API and QSV and no CUDA, the Windows one has
+        // D3D11VA and CUDA and neither of the others.
+        if (!hw_device_type_present(type)) {
             impl->skipped.emplace_back(std::format(
                 "{}: not built into this FFmpeg", decode_backend_name(backend)));
             continue;
         }
         // QSV reaches the same Intel silicon through libva on Linux, so it needs the driver
-        // path as much as VA-API does; only CUDA does not.
-        if (backend == DecodeEngine::Vaapi || backend == DecodeEngine::IntelQsv) {
+        // path and the render node as much as VA-API does; CUDA and D3D11VA need neither,
+        // and to D3D11VA a device string is an adapter number, not a path.
+        const bool through_libva =
+            backend == DecodeEngine::Vaapi || backend == DecodeEngine::IntelQsv;
+        if (through_libva) {
             ensure_libva_driver_path();
         }
 
@@ -131,7 +123,7 @@ Fallible<DecodeDevice> DecodeDevice::Opened(const DecodeOrder& selection)
         // describing the configuration the caller actually asked for.
         roiav::ByteBlock opened;
         int err = av_hwdevice_ctx_create(&opened.p, type, nullptr, nullptr, 0);
-        if (err < 0 && type != AV_HWDEVICE_TYPE_CUDA) {
+        if (err < 0 && through_libva) {
             roiav::ByteBlock named;
             if (av_hwdevice_ctx_create(&named.p, type, "/dev/dri/renderD128", nullptr, 0) >= 0) {
                 opened = std::move(named);

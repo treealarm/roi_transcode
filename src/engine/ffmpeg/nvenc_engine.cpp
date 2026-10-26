@@ -1,9 +1,10 @@
-// NVIDIA NVENC through libavcodec, on a CUDA device.
+// NVIDIA NVENC through libavcodec, on a Direct3D 11 device where this FFmpeg has one --
+// Windows -- and on a CUDA device everywhere else.
 //
 // Nothing of NVIDIA's is linked: libavcodec loads the driver's own libraries
-// (nvEncodeAPI64.dll / libnvidia-encode.so, nvcuda.dll / libcuda.so) when the device opens,
-// so a machine without the card -- or an FFmpeg built without nvcodec -- declines here like
-// any absent device rather than failing to load.
+// (nvEncodeAPI64.dll / libnvidia-encode.so, and libcuda.so for the CUDA device) when the
+// device opens, so a machine without the card -- or an FFmpeg built without nvcodec --
+// declines here like any absent device rather than failing to load.
 //
 // It takes no regions. libavcodec's nvenc reads no AVRegionOfInterest (NVENC's own QP delta
 // map is not wired up there), so the capabilities say so, and a caller that needs regions
@@ -13,6 +14,7 @@
 // actuator is a quantiser offset on the background, carried as a region -- here it would move
 // nothing, and a 1080p25 test pattern at QP 23 went out at 10 Mbit/s against a 3.9 Mbit/s target.
 
+#include "engine/common/av_hw_device.h"
 #include "engine/common/bitrate_control.h"
 #include "engine/common/engine_common.h"
 #include "effort.h"
@@ -22,6 +24,7 @@
 #include <string>
 
 extern "C" {
+#include <libavutil/dict.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/opt.h>
 }
@@ -30,10 +33,55 @@ namespace ta_roienc {
 
 namespace {
 
-/// Frames the upload pool starts with: the one being uploaded plus what the encoder may still
-/// hold while it works, with room to spare. CUDA pools grow past it on demand, so this is a
-/// starting size rather than a ceiling.
+/// Frames the CUDA upload pool starts with: the one being uploaded plus what the encoder may
+/// still hold while it works, with room to spare. It grows past this on demand.
 constexpr int kUploadPool = 20;
+
+/// The D3D11 upload pool starts empty and makes one texture at a time as it needs them.
+/// Preallocating means one texture array, and D3D11 will not create an NV12 array of more
+/// than two textures with no bind flags (E_INVALIDARG, on a GTX 1050 Ti). Nor can the device
+/// be given a binding to fix that: one set on the device ("RTV") reaches the decoder's
+/// textures too, and NVENC then refuses to open on them.
+constexpr int kUploadPoolD3d11 = 0;
+
+/// NVIDIA's PCI vendor id, which DXGI reports as the adapter's VendorId. Naming it is what
+/// keeps a laptop's integrated GPU -- usually adapter 0 -- from being the one asked to run
+/// NVENC, which it cannot.
+constexpr const char* kNvidiaVendorId = "0x10de";
+
+/// Where the device lives: Direct3D 11 if this FFmpeg has it, CUDA otherwise.
+///
+/// On D3D11 the decoder handed this device decodes through D3D11VA -- the same decoder every
+/// Windows GPU has, NVDEC underneath on this card -- into textures NVENC reads as they are,
+/// so the pipeline in front of the encoder is the vendor-neutral one that every Windows
+/// encoder can share. One road per platform rather than a chain: an NVIDIA adapter D3D11
+/// cannot open, CUDA could not open either.
+AVHWDeviceType device_type() noexcept
+{
+    return hw_device_type_present(AV_HWDEVICE_TYPE_D3D11VA) ? AV_HWDEVICE_TYPE_D3D11VA
+                                                            : AV_HWDEVICE_TYPE_CUDA;
+}
+
+/// The frames that device hands out, for the pool and for the encoder's pix_fmt.
+AVPixelFormat frame_format(AVHWDeviceType type) noexcept
+{
+    return type == AV_HWDEVICE_TYPE_D3D11VA ? AV_PIX_FMT_D3D11 : AV_PIX_FMT_CUDA;
+}
+
+/// Opens the device, on the NVIDIA adapter when it is D3D11. libavutil chooses the adapter
+/// itself for CUDA, which only ever enumerates NVIDIA's.
+bool open_device(roiav::ByteBlock& hw, AVHWDeviceType type)
+{
+    if (type != AV_HWDEVICE_TYPE_D3D11VA) {
+        return backend_common::open_hw_device(hw, type, nullptr);
+    }
+    av_buffer_unref(&hw.p);
+    AVDictionary* opts = nullptr;
+    av_dict_set(&opts, "vendor_id", kNvidiaVendorId, 0);
+    const int err = av_hwdevice_ctx_create(&hw.p, type, nullptr, opts, 0);
+    av_dict_free(&opts);
+    return err >= 0;
+}
 
 class NvencEngine final : public LibavEngine {
 public:
@@ -62,24 +110,30 @@ public:
 
     Verdict configure_context(LibavRun& out, const EngineSetup& p) const override
     {
-        if (!backend_common::open_hw_device(out.hw_device, AV_HWDEVICE_TYPE_CUDA, nullptr)) {
-            return Verdict::DeviceUnavailable("no CUDA device: no NVIDIA card, or no driver for it");
+        const AVHWDeviceType type = device_type();
+        const char* device_name = av_hwdevice_get_type_name(type);
+        if (!open_device(out.hw_device, type)) {
+            return Verdict::DeviceUnavailable(std::string("no NVIDIA ") + device_name
+                + " device: no NVIDIA card, or no driver for it");
         }
 
-        // The encoder reads CUDA frames out of a pool we own, so the upload from system memory
-        // is ours and counted (EngineRun::frames_uploaded), and a decoder given this device
-        // hands over frames that are already there -- NVDEC to NVENC without leaving the card.
+        // The encoder reads frames out of a pool we own, so the upload from system memory is
+        // ours and counted (EngineRun::frames_uploaded), and a decoder given this device hands
+        // over frames that are already there -- NVDEC to NVENC without leaving the card.
         const bool ten_bit = p.input.pixel_layout == PixelLayout::P010;
         const AVPixelFormat surface = ten_bit ? AV_PIX_FMT_P010 : AV_PIX_FMT_NV12;
         if (ten_bit && !backend_common::query_ten_bit(codec_name(p.codec)).main10) {
             return Verdict::Unsupported(
                 std::string(codec_name(p.codec)) + " in this FFmpeg has no ten-bit path");
         }
-        if (!backend_common::init_hw_frames(out.hw_device, out.hw_frames, AV_PIX_FMT_CUDA,
-                surface, p.input.width, p.input.height, kUploadPool)) {
-            return Verdict::DeviceUnavailable("CUDA device opened but allocates no frames");
+        const AVPixelFormat frames = frame_format(type);
+        const int pool = type == AV_HWDEVICE_TYPE_D3D11VA ? kUploadPoolD3d11 : kUploadPool;
+        if (!backend_common::init_hw_frames(out.hw_device, out.hw_frames, frames,
+                surface, p.input.width, p.input.height, pool)) {
+            return Verdict::DeviceUnavailable(
+                std::string(device_name) + " device opened but allocates no frames");
         }
-        out.enc.p->pix_fmt = AV_PIX_FMT_CUDA;
+        out.enc.p->pix_fmt = frames;
         out.enc.p->hw_frames_ctx = av_buffer_ref(out.hw_frames.p);
         out.sw_pix = surface;
         out.hw_upload = true;

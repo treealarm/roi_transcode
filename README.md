@@ -4,8 +4,10 @@ Adaptive ROI video encoding: keep the regions a detector found (plates, faces, p
 sharp and spend fewer bits on everything else. C++20, CMake, FFmpeg.
 
 Engines: libx264 and libx265 through their own APIs, Intel oneVPL through its own API
-(optional, needs the oneVPL SDK), and QSV, VA-API, libx264 and libx265 through libavcodec
-(optional). A standalone hardware-capable decoder ships beside the encoder.
+(optional, needs the oneVPL SDK), and QSV, VA-API, NVENC, libx264 and libx265 through
+libavcodec (optional). A standalone hardware-capable decoder ships beside the encoder:
+VA-API, QSV, NVDEC, and D3D11VA on Windows on any vendor's GPU. On Windows NVENC runs on a
+Direct3D 11 device, so frames decoded there reach it without leaving the card.
 
 ## Build
 
