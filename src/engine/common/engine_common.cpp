@@ -11,6 +11,7 @@
 #include <memory>
 
 extern "C" {
+#include <libavutil/dict.h>
 #include <libavutil/hwcontext.h>
 #include <libswscale/swscale.h>
 }
@@ -102,6 +103,22 @@ bool open_hw_device(roiav::ByteBlock& hw, AVHWDeviceType type, const char* devic
 {
     av_buffer_unref(&hw.p);
     return av_hwdevice_ctx_create(&hw.p, type, device, nullptr, 0) >= 0;
+}
+
+bool open_vaapi_device(roiav::ByteBlock& hw)
+{
+    return open_hw_device(hw, AV_HWDEVICE_TYPE_VAAPI, "/dev/dri/renderD128")
+        || open_hw_device(hw, AV_HWDEVICE_TYPE_VAAPI, nullptr);
+}
+
+bool open_d3d11_device(roiav::ByteBlock& hw, const char* vendor_id)
+{
+    av_buffer_unref(&hw.p);
+    AVDictionary* opts = nullptr;
+    av_dict_set(&opts, "vendor_id", vendor_id, 0);
+    const int err = av_hwdevice_ctx_create(&hw.p, AV_HWDEVICE_TYPE_D3D11VA, nullptr, opts, 0);
+    av_dict_free(&opts);
+    return err >= 0;
 }
 
 bool init_hw_frames(roiav::ByteBlock& device, roiav::ByteBlock& frames, AVPixelFormat hw_format,
@@ -274,6 +291,39 @@ bool is_hw_frame(const AVFrame* f)
     return f->hw_frames_ctx != nullptr;
 }
 
+/// A frame on the device under the encoder's own -- a decoder's, handed decode_device --
+/// made an encoder frame without a copy: the mapped frame names the same surface and holds
+/// the decoder's frame until the encoder lets it go. QSV is the one encoder this reaches.
+///
+/// It is mapped into a pool derived from the decoder's, not into the encoder's own: the map
+/// into the encoder's own succeeds, and the unmap then looks for the pool the frame came from
+/// and finds none. The encoder takes surfaces of another pool because its own is a dynamic
+/// one (see the QSV backend). Derived on the first frame, and again only when the decoder
+/// has replaced its pool, which it does when the stream's picture size changes.
+AVFrame* map_to_encoder(LibavRun& s, const AVFrame* src)
+{
+    if (src->hw_frames_ctx->data != s.mapped_from) {
+        av_buffer_unref(&s.mapped_frames.p);
+        s.mapped_from = nullptr;
+        roiav::check(av_hwframe_ctx_create_derived(&s.mapped_frames.p, s.enc.p->pix_fmt,
+                         s.hw_device.p, src->hw_frames_ctx, AV_HWFRAME_MAP_READ),
+            "derive an encoder pool from the decoder's");
+        s.mapped_from = src->hw_frames_ctx->data;
+    }
+
+    AVFrame* dst = s.mapped_frame.p;
+    av_frame_unref(dst);
+    dst->format = s.enc.p->pix_fmt;
+    dst->hw_frames_ctx = av_buffer_ref(s.mapped_frames.p);
+    if (!dst->hw_frames_ctx) {
+        roiav::fail("could not reference the mapped frames' pool");
+    }
+    roiav::check(av_hwframe_map(dst, src, AV_HWFRAME_MAP_READ),
+        "map a decoded frame onto the encoder's device");
+    roiav::check(av_frame_copy_props(dst, src), "copy frame properties");
+    return dst;
+}
+
 } // namespace
 
 Fallible<TranscoderPtr> LibavEngine::Configure(const EngineSetup& config) const
@@ -397,8 +447,11 @@ Verdict LibavEngine::SubmitPicture(EngineRun& session, IPictureStore& frame,
         AVFrame* send = src;
         // A frame that already lives in the encoder's own memory goes straight in. That is
         // the whole point of the factory: no conversion, no upload, no copy.
+        // So does one from the device under it, mapped rather than copied.
         if (!is_hw_frame(src)) {
             send = to_encoder_format(s, src);
+        } else if (s.decode_device.p && src->format != s.enc.p->pix_fmt) {
+            send = map_to_encoder(s, src);
         }
         send->pts = control.pts;
         // A frame handed straight through still carries the decoder's picture type.
@@ -455,10 +508,11 @@ EngineCounters LibavEngine::Statistics(const EngineRun& session) const
 NativeHandle LibavEngine::HardwareDevice(const EngineRun& session) const
 {
     const LibavRun& s = libav(const_cast<EngineRun&>(session));
-    if (!s.hw_device.p) {
+    const roiav::ByteBlock& device = s.decode_device.p ? s.decode_device : s.hw_device;
+    if (!device.p) {
         return {};  // x264 and x265 open none, and that is the whole answer
     }
-    return NativeHandle{NativeHandleKind::FfmpegHardwareDevice, s.hw_device.p};
+    return NativeHandle{NativeHandleKind::FfmpegHardwareDevice, device.p};
 }
 
 Fallible<AccessUnit> LibavEngine::ReceiveAccessUnit(EngineRun& session) const

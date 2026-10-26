@@ -39,10 +39,7 @@ public:
 
     Verdict configure_context(LibavRun& out, const EngineSetup& p) const override
     {
-        if (!backend_common::open_hw_device(
-                out.hw_device, AV_HWDEVICE_TYPE_VAAPI, "/dev/dri/renderD128")
-            && !backend_common::open_hw_device(
-                out.hw_device, AV_HWDEVICE_TYPE_VAAPI, nullptr)) {
+        if (!backend_common::open_vaapi_device(out.hw_device)) {
             return Verdict::DeviceUnavailable("no VA-API device on this machine");
         }
         if (!backend_common::init_hw_frames(out.hw_device, out.hw_frames,

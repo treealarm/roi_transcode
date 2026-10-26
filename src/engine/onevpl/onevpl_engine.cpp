@@ -4,6 +4,7 @@
 // AVRegionOfInterest side data. Everything unusual here was found by measurement on Alder
 // Lake and is commented where it happens; none of it follows from the documentation.
 
+#include "engine/common/av_hw_device.h"
 #include "engine/common/engine_common.h"
 #include "engine/common/intel_region_cap.h"
 #include "effort.h"
@@ -18,6 +19,30 @@ extern "C" {
 namespace ta_roienc {
 
 namespace {
+
+/// libavutil's spelling of a pool that grows on demand.
+constexpr int kDynamicPool = 0;
+
+/// Intel's PCI vendor id, which DXGI reports as the adapter's VendorId.
+constexpr const char* kIntelVendorId = "0x8086";
+
+/// The device QSV runs on top of: Direct3D 11 where this FFmpeg has it -- Windows -- and
+/// VA-API everywhere else. Opened here rather than left to QSV to make for itself, because
+/// it is also the device a decoder in front of this encoder is handed (LibavRun::
+/// decode_device): no decoder in libavcodec decodes into QSV surfaces, every one of them
+/// decodes into D3D11 or VA-API ones, and those map into QSV's without a copy.
+AVHWDeviceType child_device_type() noexcept
+{
+    return hw_device_type_present(AV_HWDEVICE_TYPE_D3D11VA) ? AV_HWDEVICE_TYPE_D3D11VA
+                                                            : AV_HWDEVICE_TYPE_VAAPI;
+}
+
+bool open_child_device(roiav::ByteBlock& hw, AVHWDeviceType type)
+{
+    return type == AV_HWDEVICE_TYPE_D3D11VA
+        ? backend_common::open_d3d11_device(hw, kIntelVendorId)
+        : backend_common::open_vaapi_device(hw);
+}
 
 class OneVplEngine final : public LibavEngine {
 public:
@@ -52,15 +77,17 @@ public:
 
     Verdict configure_context(LibavRun& out, const EngineSetup& p) const override
     {
-        AVDictionary* opts = nullptr;
-        av_dict_set(&opts, "child_device_type", "vaapi", 0);
-        const int derr = av_hwdevice_ctx_create(
-            &out.hw_device.p, AV_HWDEVICE_TYPE_QSV, "auto", opts, 0);
-        av_dict_free(&opts);
-        if (derr < 0
-            && !backend_common::open_hw_device(
-                out.hw_device, AV_HWDEVICE_TYPE_QSV, nullptr)) {
-            return Verdict::DeviceUnavailable("no QSV device on this machine");
+        const AVHWDeviceType child_type = child_device_type();
+        const char* child_name = av_hwdevice_get_type_name(child_type);
+        if (!open_child_device(out.decode_device, child_type)) {
+            return Verdict::DeviceUnavailable(std::string("no Intel ") + child_name
+                + " device: no Intel GPU, or no driver for it");
+        }
+        av_buffer_unref(&out.hw_device.p);
+        if (av_hwdevice_ctx_create_derived(
+                &out.hw_device.p, AV_HWDEVICE_TYPE_QSV, out.decode_device.p, 0) < 0) {
+            return Verdict::DeviceUnavailable(std::string("no QSV runtime on the Intel ")
+                + child_name + " device");
         }
 
         // The encoder reads mfxFrameSurface1 out of a pool we own, rather than taking NV12
@@ -77,8 +104,11 @@ public:
             return Verdict::Unsupported(
                 std::string(codec_name(p.codec)) + " on this device has no ten-bit path");
         }
+        // A dynamic pool, which makes its surfaces one at a time, and not for economy:
+        // qsvenc looks every surface of a fixed pool up among the ones that pool allocated,
+        // so a decoder's frame mapped into one is refused. From a dynamic pool it takes any.
         if (!backend_common::init_hw_frames(out.hw_device, out.hw_frames, AV_PIX_FMT_QSV,
-                surface, p.input.width, p.input.height, 24)) {
+                surface, p.input.width, p.input.height, kDynamicPool)) {
             return Verdict::DeviceUnavailable("QSV device opened but allocates no surfaces");
         }
         out.enc.p->pix_fmt = AV_PIX_FMT_QSV;

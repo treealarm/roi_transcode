@@ -292,6 +292,10 @@ public:
     /// the device the encoder is already using. Without it the frame comes back to system
     /// memory and goes up again, which costs more than the decode it accelerated.
     ///
+    /// For an encoder that runs on top of another device -- QSV on D3D11 or VA-API -- this
+    /// is that device, not the encoder's own: no decoder decodes into QSV surfaces, and the
+    /// encoder maps the frames it is handed from the device under it.
+    ///
     /// Defaulted to nothing, like GetEffectiveSettings above: a CPU backend has no device,
     /// and saying so is a truthful answer rather than a gap every backend must fill.
     virtual NativeHandle HardwareDevice(const EngineRun& session) const

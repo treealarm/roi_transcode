@@ -36,6 +36,15 @@ void apply_shared(AVCodecContext* enc, const EngineSetup& p);
 /// an absent GPU is the normal case on some machines, not an error.
 bool open_hw_device(roiav::ByteBlock& hw, AVHWDeviceType type, const char* device);
 
+/// Opens a VA-API device: the first render node, and failing that whichever libva chooses.
+bool open_vaapi_device(roiav::ByteBlock& hw);
+
+/// Opens a Direct3D 11 device on the adapter of one GPU vendor, given as the PCI vendor id
+/// DXGI reports ("0x10de", "0x8086"). Naming the vendor is what keeps a machine with two GPUs
+/// from opening the encoder on the one that has none of this kind: adapter 0 is usually the
+/// integrated GPU, and the one a monitor is plugged into may be either.
+bool open_d3d11_device(roiav::ByteBlock& hw, const char* vendor_id);
+
 /// Allocates the encoder's own pool of hardware surfaces. Owning the pool is what makes a
 /// frame factory possible at all: a surface handed to the caller has to come from the pool
 /// the encoder will read, or it is just another buffer to copy from.

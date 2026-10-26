@@ -24,7 +24,6 @@
 #include <string>
 
 extern "C" {
-#include <libavutil/dict.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/opt.h>
 }
@@ -44,9 +43,7 @@ constexpr int kUploadPool = 20;
 /// textures too, and NVENC then refuses to open on them.
 constexpr int kUploadPoolD3d11 = 0;
 
-/// NVIDIA's PCI vendor id, which DXGI reports as the adapter's VendorId. Naming it is what
-/// keeps a laptop's integrated GPU -- usually adapter 0 -- from being the one asked to run
-/// NVENC, which it cannot.
+/// NVIDIA's PCI vendor id, which DXGI reports as the adapter's VendorId.
 constexpr const char* kNvidiaVendorId = "0x10de";
 
 /// Where the device lives: Direct3D 11 if this FFmpeg has it, CUDA otherwise.
@@ -72,15 +69,9 @@ AVPixelFormat frame_format(AVHWDeviceType type) noexcept
 /// itself for CUDA, which only ever enumerates NVIDIA's.
 bool open_device(roiav::ByteBlock& hw, AVHWDeviceType type)
 {
-    if (type != AV_HWDEVICE_TYPE_D3D11VA) {
-        return backend_common::open_hw_device(hw, type, nullptr);
-    }
-    av_buffer_unref(&hw.p);
-    AVDictionary* opts = nullptr;
-    av_dict_set(&opts, "vendor_id", kNvidiaVendorId, 0);
-    const int err = av_hwdevice_ctx_create(&hw.p, type, nullptr, opts, 0);
-    av_dict_free(&opts);
-    return err >= 0;
+    return type == AV_HWDEVICE_TYPE_D3D11VA
+        ? backend_common::open_d3d11_device(hw, kNvidiaVendorId)
+        : backend_common::open_hw_device(hw, type, nullptr);
 }
 
 class NvencEngine final : public LibavEngine {
