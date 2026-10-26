@@ -2,9 +2,9 @@
 // Windows -- and on a CUDA device everywhere else.
 //
 // Nothing of NVIDIA's is linked: libavcodec loads the driver's own libraries
-// (nvEncodeAPI64.dll / libnvidia-encode.so, and libcuda.so off Windows) when the device
-// opens, so a machine without the card -- or an FFmpeg built without nvcodec -- declines
-// here like any absent device rather than failing to load.
+// (nvEncodeAPI64.dll / libnvidia-encode.so, and libcuda.so for the CUDA device) when the
+// device opens, so a machine without the card -- or an FFmpeg built without nvcodec --
+// declines here like any absent device rather than failing to load.
 //
 // It takes no regions. libavcodec's nvenc reads no AVRegionOfInterest (NVENC's own QP delta
 // map is not wired up there), so the capabilities say so, and a caller that needs regions
@@ -53,9 +53,9 @@ constexpr const char* kNvidiaVendorId = "0x10de";
 ///
 /// On D3D11 the decoder handed this device decodes through D3D11VA -- the same decoder every
 /// Windows GPU has, NVDEC underneath on this card -- into textures NVENC reads as they are,
-/// so the pipeline in front of the encoder is the vendor-neutral one, and CUDA is never
-/// loaded. One road per platform rather than a chain: an NVIDIA adapter D3D11 cannot open,
-/// CUDA could not open either.
+/// so the pipeline in front of the encoder is the vendor-neutral one that every Windows
+/// encoder can share. One road per platform rather than a chain: an NVIDIA adapter D3D11
+/// cannot open, CUDA could not open either.
 AVHWDeviceType device_type() noexcept
 {
     return hw_device_type_present(AV_HWDEVICE_TYPE_D3D11VA) ? AV_HWDEVICE_TYPE_D3D11VA
