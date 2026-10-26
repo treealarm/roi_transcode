@@ -20,6 +20,15 @@ public:
     roiav::CodingCtx enc;
     roiav::ByteBlock hw_device;
     roiav::ByteBlock hw_frames;
+    /// The device a decoder in front of this encoder is handed, when it is not hw_device
+    /// itself: the one QSV runs on top of (D3D11, VA-API), whose frames a decoder can
+    /// produce and SubmitPicture maps into the encoder's pool. Null: hw_device is that device.
+    roiav::ByteBlock decode_device;
+    /// The pool those frames are mapped into, derived from the decoder's -- QSV unmaps a
+    /// frame only through a pool that knows the one it came from -- and the decoder's pool
+    /// it was derived from, to tell when the decoder has replaced it.
+    roiav::ByteBlock mapped_frames;
+    const uint8_t* mapped_from = nullptr;
     AVPixelFormat sw_pix = AV_PIX_FMT_YUV420P;
     /// The encoder takes hardware frames, so software frames must be uploaded first.
     bool hw_upload = false;
@@ -29,9 +38,10 @@ public:
     roiav::RawUnit pkt;
 
     /// Scratch for SubmitPicture: planes in system memory wrapped without a copy, the
-    /// uploaded copy, and the converted one.
+    /// uploaded copy, the converted one, and a decode_device frame mapped into the pool.
     roiav::Picture wrapper;
     roiav::Picture hw_frame;
+    roiav::Picture mapped_frame;
     roiav::Picture sw_frame;
     bool sw_frame_ready = false;
     roiav::Scaler sws;

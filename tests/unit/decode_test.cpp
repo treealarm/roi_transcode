@@ -15,6 +15,7 @@
 // -- and it needs nothing checked in.
 
 #include "enum_names.h"
+#include "sample_stream.h"
 
 #include "ta_roienc/decoder.h"
 #include "ta_roienc/encode.h"
@@ -47,75 +48,10 @@ constexpr int32_t kWidth = 128;
 constexpr int32_t kHeight = 96;
 constexpr int64_t kFrames = 8;
 
-struct Samples {
-    std::vector<uint8_t> y = std::vector<uint8_t>(kWidth * kHeight, 128);
-    std::vector<uint8_t> u = std::vector<uint8_t>(kWidth * kHeight / 4, 128);
-    std::vector<uint8_t> v = std::vector<uint8_t>(kWidth * kHeight / 4, 128);
-};
-
 /// kFrames access units of H.264, in encode order and one to a vector.
 std::vector<std::vector<uint8_t>> annex_b_stream()
 {
-    EncodeOptions cfg;
-    cfg.input.width = kWidth;
-    cfg.input.height = kHeight;
-    cfg.input.frame_rate = Ratio{25, 1};
-    cfg.input.pixel_layout = PixelLayout::YUV420P;
-    cfg.settings.encoder = Engine::X264;
-    cfg.settings.codec = Coding::H264;
-    cfg.settings.crf = 32;
-    cfg.settings.metadata.bitstream_sei = false;
-    cfg.log = [](Verbosity, std::string_view) {};
-
-    std::vector<std::vector<uint8_t>> units;
-    auto encoder = CreateVideoEncoder(cfg);
-    const auto drain = [&units, &encoder] {
-        for (;;) {
-            AccessUnit packet;
-            const Verdict s = encoder->ReceiveAccessUnit(&packet);
-            if (s.code() == VerdictCode::Again || s.code() == VerdictCode::EndOfStream) {
-                return;
-            }
-            CHECK(s.ok());
-            const std::span<const uint8_t> bytes = packet.payload.bytes();
-            units.emplace_back(bytes.begin(), bytes.end());
-        }
-    };
-
-    auto pixels = std::make_shared<Samples>();
-    for (int64_t i = 0; i < kFrames; ++i) {
-        // A moving edge, so the encoder has something to code and no two access units are
-        // the same size. A flat picture would still exercise the timing, but a stream whose
-        // packets are all alike hides an off-by-one between them.
-        for (int32_t row = 0; row < kHeight; ++row) {
-            const std::size_t start = static_cast<std::size_t>(row) * kWidth;
-            for (int32_t col = 0; col < kWidth; ++col) {
-                pixels->y[start + static_cast<std::size_t>(col)]
-                    = static_cast<uint8_t>(col + i * 7 < kWidth / 2 ? 40 : 200);
-            }
-        }
-
-        PictureView view;
-        view.format.width = kWidth;
-        view.format.height = kHeight;
-        view.format.pixel_layout = PixelLayout::YUV420P;
-        view.layer_count = 3;
-        view.planes[0] = {pixels->y.data(), kWidth, pixels->y.size()};
-        view.planes[1] = {pixels->u.data(), kWidth / 2, pixels->u.size()};
-        view.planes[2] = {pixels->v.data(), kWidth / 2, pixels->v.size()};
-        view.timestamp = Stamp{i, Ratio{1, 25}};
-        view.owner = pixels;
-
-        StampedPicture timed;
-        CHECK(WrapPicture(view, &timed.frame).ok());
-        timed.metadata.timestamp = view.timestamp;
-        CHECK(encoder->SubmitPicture(timed).ok());
-        drain();
-    }
-    CHECK(encoder->Flush().ok());
-    drain();
-    CHECK(static_cast<int64_t>(units.size()) == kFrames);
-    return units;
+    return sample_stream::annex_b_h264(kWidth, kHeight, kFrames);
 }
 
 void a_whole_access_unit_decodes_to_a_picture_without_the_next_one()
