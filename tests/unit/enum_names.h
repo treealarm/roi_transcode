@@ -9,6 +9,7 @@
 // here (-Wswitch, in -Wall). That warning is the first line of defence; labels_test is the
 // second.
 
+#include "ta_roienc/decode_engine.h"
 #include "ta_roienc/engine_order.h"
 #include "ta_roienc/encode.h"
 #include "ta_roienc/picture_store.h"
@@ -32,6 +33,19 @@ inline const char* spell(ta_roienc::Engine e)
     case ta_roienc::Engine::X265Direct:        return "X265Direct";
     case ta_roienc::Engine::IntelOneVplDirect: return "IntelOneVplDirect";
     case ta_roienc::Engine::Nvenc:             return "Nvenc";
+    }
+    return nullptr;
+}
+
+inline const char* spell(ta_roienc::DecodeEngine e)
+{
+    switch (e) {
+    case ta_roienc::DecodeEngine::Auto:        return "Auto";
+    case ta_roienc::DecodeEngine::Vaapi:       return "Vaapi";
+    case ta_roienc::DecodeEngine::IntelQsv:    return "IntelQsv";
+    case ta_roienc::DecodeEngine::NvidiaNvdec: return "NvidiaNvdec";
+    case ta_roienc::DecodeEngine::D3d11va:     return "D3d11va";
+    case ta_roienc::DecodeEngine::Cpu:         return "Cpu";
     }
     return nullptr;
 }

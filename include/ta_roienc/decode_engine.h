@@ -30,6 +30,11 @@ enum class DecodeEngine {
     IntelQsv,
     /// NVDEC. Named for what decodes.
     NvidiaNvdec,
+    /// Direct3D 11 video, Windows only. Named for the API rather than for the silicon,
+    /// because it has none of its own: the same entry decodes on Intel, AMD and NVIDIA
+    /// alike, on whichever adapter the device was opened on -- the first one when named
+    /// here, the encoder's own when the encoder hands its device over.
+    D3d11va,
     /// libavcodec's own decoder. An ordinary entry in the list rather than a separate
     /// "allow software fallback" switch: leaving it out is how a caller says "hardware or
     /// nothing", and putting it last is how they say "hardware if you have it".

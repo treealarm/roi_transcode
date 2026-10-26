@@ -20,6 +20,7 @@ constexpr Slot k_entries[] = {
     {"vaapi", DecodeEngine::Vaapi},
     {"qsv", DecodeEngine::IntelQsv},
     {"nvdec", DecodeEngine::NvidiaNvdec},
+    {"d3d11va", DecodeEngine::D3d11va},
     {"cpu", DecodeEngine::Cpu},
 };
 
@@ -36,6 +37,8 @@ std::string_view decode_backend_name(DecodeEngine backend) noexcept
         return "qsv";
     case DecodeEngine::NvidiaNvdec:
         return "nvdec";
+    case DecodeEngine::D3d11va:
+        return "d3d11va";
     case DecodeEngine::Cpu:
         return "cpu";
     }
@@ -58,8 +61,12 @@ DecodeOrder decode_order_from_name(std::string_view name)
         // Hardware first, in the order this project has measured, and the CPU last so that
         // "auto" means "hardware if you have it" rather than "hardware or nothing". A
         // caller who wants the second spells it by naming a backend.
+        //
+        // D3d11va ahead of NvidiaNvdec: on Windows both reach an NVIDIA card's decoder, and
+        // only the first reaches anybody else's. Elsewhere it is not built and declines at
+        // once.
         return DecodeOrder{{DecodeEngine::Vaapi, DecodeEngine::IntelQsv,
-            DecodeEngine::NvidiaNvdec, DecodeEngine::Cpu}};
+            DecodeEngine::D3d11va, DecodeEngine::NvidiaNvdec, DecodeEngine::Cpu}};
     }
     for (const Slot& e : k_entries) {
         if (name == e.name) {

@@ -195,8 +195,9 @@ endif()
 # ---------------------------------------------------------------------------
 # ta_roienc_ffmpeg_interop
 #
-# Turns an AVFrame into a Picture and nothing else. libavutil alone: it does not encode, so
-# libavcodec has no business here.
+# Turns an AVFrame into a Picture, and answers which hardware devices this FFmpeg has --
+# the question the decoder and the encoders both ask. libavutil alone: it does not encode,
+# so libavcodec has no business here.
 # ---------------------------------------------------------------------------
 if(TA_ROIENC_BUILD_FFMPEG_INTEROP)
     add_library(ta_roienc_ffmpeg_interop
@@ -204,6 +205,7 @@ if(TA_ROIENC_BUILD_FFMPEG_INTEROP)
         src/core/av_picture_bridge.cpp
         src/core/av_log_bridge.cpp
         src/engine/common/av_pixel_layout.cpp
+        src/engine/common/av_hw_device.cpp
     )
     target_include_directories(ta_roienc_ffmpeg_interop
         PUBLIC  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

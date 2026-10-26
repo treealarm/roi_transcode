@@ -32,11 +32,12 @@ PixelLayout from_av_pix_fmt(int f)
     case AV_PIX_FMT_GRAY8:   return PixelLayout::GRAY8;
     case AV_PIX_FMT_P010:    return PixelLayout::P010;
     case AV_PIX_FMT_YUV420P10: return PixelLayout::YUV420P10;
-    // A frame the CPU cannot address: QSV, VAAPI, CUDA and the rest. They share one
+    // A frame the CPU cannot address: QSV, VAAPI, CUDA, D3D11 and the rest. They share one
     // answer here because what a caller can do with them is the same -- nothing directly.
     case AV_PIX_FMT_QSV:
     case AV_PIX_FMT_VAAPI:
     case AV_PIX_FMT_CUDA:
+    case AV_PIX_FMT_D3D11:
     case AV_PIX_FMT_DRM_PRIME: return PixelLayout::HardwareSurface;
     default:                   return PixelLayout::Unknown;
     }
