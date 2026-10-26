@@ -64,6 +64,12 @@ AVPixelFormat frame_format(AVHWDeviceType type) noexcept
 
 /// Opens the device, on the NVIDIA adapter when it is D3D11. libavutil chooses the adapter
 /// itself for CUDA, which only ever enumerates NVIDIA's.
+///
+/// "RTV" makes every texture made on the device a render target -- the upload pool's and,
+/// since the decoder is handed this device, the decoder's too. Without it the upload pool's
+/// textures are bound to nothing, and D3D11 refuses to create an NV12 array like that
+/// (E_INVALIDARG, on a GTX 1050 Ti); a render target is also what FFmpeg's own D3D11 scaler
+/// gives the frames it hands an encoder.
 bool open_device(roiav::ByteBlock& hw, AVHWDeviceType type)
 {
     if (type != AV_HWDEVICE_TYPE_D3D11VA) {
@@ -72,6 +78,7 @@ bool open_device(roiav::ByteBlock& hw, AVHWDeviceType type)
     av_buffer_unref(&hw.p);
     AVDictionary* opts = nullptr;
     av_dict_set(&opts, "vendor_id", kNvidiaVendorId, 0);
+    av_dict_set(&opts, "RTV", "1", 0);
     const int err = av_hwdevice_ctx_create(&hw.p, type, nullptr, opts, 0);
     av_dict_free(&opts);
     return err >= 0;
