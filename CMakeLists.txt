@@ -559,9 +559,16 @@ if(TA_ROIENC_BUILD_TESTS)
     target_compile_options(engine_conformance_test PRIVATE ${TA_ROIENC_WARNINGS})
     add_test(NAME engine_conformance COMMAND engine_conformance_test)
 
-    # A hardware encoder fed by Transcoder's decoder: the decode runs on the device the
-    # encoder names and no frame is uploaded. Skips, with the reason, where none opens.
     if(TARGET ta_roienc_transcoder)
+        # Transcoder fed compressed access units on the software path: every one comes out,
+        # and none is read past its end.
+        add_executable(transcode_test tests/unit/transcode_test.cpp)
+        target_link_libraries(transcode_test PRIVATE ta_roienc_all)
+        target_compile_options(transcode_test PRIVATE ${TA_ROIENC_WARNINGS})
+        add_test(NAME transcode COMMAND transcode_test)
+
+        # A hardware encoder fed by Transcoder's decoder: the decode runs on the device the
+        # encoder names and no frame is uploaded. Skips, with the reason, where none opens.
         add_executable(transcode_device_test tests/unit/transcode_device_test.cpp)
         target_link_libraries(transcode_device_test PRIVATE ta_roienc_all)
         target_compile_options(transcode_device_test PRIVATE ${TA_ROIENC_WARNINGS})

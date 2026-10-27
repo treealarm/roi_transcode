@@ -61,7 +61,9 @@ public:
     void submit(IPictureStore& pixels, const Regions& regions, int64_t pts);
 
     // `access_unit` is for a session opened with a codec: one compressed frame, decoded
-    // here and re-encoded with the regions applied.
+    // here and re-encoded with the regions applied. Only the bytes of the span are read --
+    // no padding is needed after them, whatever FFmpeg asks of its own callers -- and none
+    // is kept after the call returns.
     void submit(std::span<const uint8_t> access_unit, const Regions& regions, int64_t pts);
 
     // Which backend opened. Known as soon as the session exists, and with
@@ -77,7 +79,8 @@ public:
     // caller reads it once frames are flowing, and finish() reports the settled answer.
     std::string decoder_hardware() const;
 
-    // Drains decoder and encoder, ends the sink, and reports what happened.
+    // Drains decoder and encoder, ends the sink, and reports what happened. Every access
+    // unit submitted is decoded by then, the last one included.
     Outcome finish();
 
 private:

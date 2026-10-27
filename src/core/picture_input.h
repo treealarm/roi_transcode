@@ -8,6 +8,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -55,13 +56,18 @@ public:
     const std::string& hardware_name() const { return m_hardware_name; }
 
     // Feeds one buffer. Calls `cb` for every frame that comes out -- usually one,
-    // sometimes none while the decoder builds up state.
+    // sometimes none while the decoder builds up state. Reads [data, data + size) and nothing
+    // past it, and keeps nothing of it after returning.
     void push(const uint8_t* data, size_t size, int64_t pts, const PictureCb& cb);
-    // Drains frames the decoder is still holding.
+    // Drains frames the parser and the decoder are still holding.
     void flush(const PictureCb& cb);
 
 private:
     void receive(const PictureCb& cb);
+    // Sends one access unit to the decoder and hands on whatever that releases.
+    void decode(const uint8_t* data, int size, int64_t pts, const PictureCb& cb);
+    // decode() for an access unit the parser emitted, with the parser's timestamp for it.
+    void decode_parsed(const uint8_t* data, int size, const PictureCb& cb);
     // Fills m_dec for `codec`, optionally on `hw_device`. Returns false if the context
     // could not be opened, leaving nothing behind for the caller to clean up.
     bool open_context(const AVCodec* dec, const uint8_t* extradata, int extradata_size,
@@ -72,6 +78,9 @@ private:
     ta_roienc::SourceCodec m_codec = ta_roienc::SourceCodec::Raw;
     roiav::CodingCtx m_dec;
     AVCodecParserContext* m_parser = nullptr;
+    // What the parser reads: the caller's bytes followed by the zeroed padding it reads past
+    // their end. Kept between pushes so that its allocation is not repeated for each one.
+    std::vector<uint8_t> m_padded;
     roiav::Picture m_frame;
     roiav::RawUnit m_pkt;
 

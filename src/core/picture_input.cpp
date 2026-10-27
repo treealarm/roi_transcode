@@ -180,6 +180,22 @@ void PictureDecoder::receive(const PictureCb& cb)
     }
 }
 
+void PictureDecoder::decode(const uint8_t* data, int size, int64_t pts, const PictureCb& cb)
+{
+    // The packet borrows `data` rather than owning it, and libavcodec copies a borrowed
+    // packet -- into a buffer of its own, padded -- before anything reads it, so this path
+    // reads only [data, data + size).
+    av_packet_unref(m_pkt.p);
+    m_pkt.p->data = const_cast<uint8_t*>(data);
+    m_pkt.p->size = size;
+    m_pkt.p->pts = pts;
+    m_pkt.p->dts = pts;
+    check(avcodec_send_packet(m_dec.p, m_pkt.p), "send packet");
+    m_pkt.p->data = nullptr;
+    m_pkt.p->size = 0;
+    receive(cb);
+}
+
 void PictureDecoder::push(
     const uint8_t* data, size_t size, int64_t pts, const PictureCb& cb)
 {
@@ -191,19 +207,19 @@ void PictureDecoder::push(
     }
 
     if (!m_parser) {
-        av_packet_unref(m_pkt.p);
-        m_pkt.p->data = const_cast<uint8_t*>(data);
-        m_pkt.p->size = static_cast<int>(size);
-        m_pkt.p->pts = pts;
-        m_pkt.p->dts = pts;
-        check(avcodec_send_packet(m_dec.p, m_pkt.p), "send packet");
-        m_pkt.p->data = nullptr;
-        m_pkt.p->size = 0;
-        receive(cb);
+        decode(data, static_cast<int>(size), pts, cb);
         return;
     }
 
-    const uint8_t* in = data;
+    // The parser reads AV_INPUT_BUFFER_PADDING_SIZE bytes past the end of what it is given,
+    // and expects them zeroed -- a demuxer's packets have them, a caller's own buffer does
+    // not. So the bytes are copied into a buffer of the decoder's own, with the padding after
+    // them. One copy of a compressed access unit is small next to decoding it, and the buffer
+    // is kept, so after the first few pushes it is not even an allocation.
+    m_padded.assign(data, data + size);
+    m_padded.resize(size + AV_INPUT_BUFFER_PADDING_SIZE);
+
+    const uint8_t* in = m_padded.data();
     size_t left = size;
     while (left > 0) {
         uint8_t* out = nullptr;
@@ -215,25 +231,40 @@ void PictureDecoder::push(
         }
         in += used;
         left -= static_cast<size_t>(used);
-        if (out_size <= 0) {
-            continue;
+        if (out_size > 0) {
+            decode_parsed(out, out_size, cb);
         }
-        av_packet_unref(m_pkt.p);
-        m_pkt.p->data = out;
-        m_pkt.p->size = out_size;
-        m_pkt.p->pts = pts;
-        m_pkt.p->dts = pts;
-        check(avcodec_send_packet(m_dec.p, m_pkt.p), "send packet");
-        m_pkt.p->data = nullptr;
-        m_pkt.p->size = 0;
-        receive(cb);
     }
+}
+
+void PictureDecoder::decode_parsed(const uint8_t* data, int size, const PictureCb& cb)
+{
+    // Dated by the parser, not by the push that released it: an access unit comes out of the
+    // parser only once the next one has begun, so the push in hand is the next picture's,
+    // and its timestamp on this one would shift every picture by one -- and with it the
+    // regions the caller filed under each timestamp.
+    decode(data, size, m_parser->pts, cb);
 }
 
 void PictureDecoder::flush(const PictureCb& cb)
 {
     if (m_codec == ta_roienc::SourceCodec::Raw || !m_dec.p) {
         return;
+    }
+    // The parser still holds the last access unit: nothing after it began, so nothing has
+    // ended it. An empty buffer is how it is told the stream has, and it has to hear that
+    // before the decoder does, or the last picture never reaches the decoder at all.
+    if (m_parser) {
+        for (;;) {
+            uint8_t* out = nullptr;
+            int out_size = 0;
+            av_parser_parse2(m_parser, m_dec.p, &out, &out_size, nullptr, 0, AV_NOPTS_VALUE,
+                AV_NOPTS_VALUE, 0);
+            if (out_size <= 0) {
+                break;
+            }
+            decode_parsed(out, out_size, cb);
+        }
     }
     check(avcodec_send_packet(m_dec.p, nullptr), "flush decoder");
     receive(cb);
