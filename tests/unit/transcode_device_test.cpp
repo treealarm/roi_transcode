@@ -47,11 +47,6 @@ constexpr int32_t kWidth = 320;
 constexpr int32_t kHeight = 240;
 constexpr int64_t kFrames = 30;
 
-/// Zero bytes after each access unit, as a demuxer leaves them: FFmpeg's parser reads that far
-/// past the end of what it is given (AV_INPUT_BUFFER_PADDING_SIZE), and Transcoder hands it the
-/// caller's buffer as it is.
-constexpr std::size_t kInputPadding = 64;
-
 /// How far from the edge a pixel is read, on each side: past the ringing a coarse
 /// quantiser leaves along it.
 constexpr int64_t kEdgeMargin = 4;
@@ -129,26 +124,26 @@ void stays_on_the_gpu(Engine engine, const char* name,
     CHECK(session->engine_used() == engine);
 
     for (std::size_t i = 0; i < input.size(); ++i) {
-        std::vector<uint8_t> padded(input[i].size() + kInputPadding, 0);
-        std::ranges::copy(input[i], padded.begin());
-        session->submit(std::span<const uint8_t>(padded.data(), input[i].size()), Regions{},
-            static_cast<int64_t>(i));
+        session->submit(input[i], Regions{}, static_cast<int64_t>(i));
     }
     const Outcome r = session->finish();
 
+    const int64_t submitted = static_cast<int64_t>(input.size());
     const int64_t units = static_cast<int64_t>(sink.units.size());
     const int64_t in_place = frames_in_place(sink);
     std::printf("  %-4s  %-8s decoded on '%s', %lld frames, %lld uploaded, %lld converted, "
                 "%lld units, %lld pictures right\n",
-        !r.decoder_hardware.empty() && r.frames_uploaded == 0 && in_place == units ? "ok" : "FAIL",
+        !r.decoder_hardware.empty() && r.frames_uploaded == 0 && units == submitted
+                && in_place == units
+            ? "ok"
+            : "FAIL",
         name, r.decoder_hardware.c_str(), static_cast<long long>(r.frames),
         static_cast<long long>(r.frames_uploaded), static_cast<long long>(r.frames_converted),
         static_cast<long long>(units), static_cast<long long>(in_place));
-    // Every frame the encoder took came out, which is what says the mapped frames encoded
-    // rather than being dropped. Fewer than were submitted reach the encoder at all: the
-    // parser in front of the decoder keeps the last access unit, and finish() does not drain it.
-    CHECK(r.frames > 0);
-    CHECK(units == r.frames);
+    // Every frame submitted came out, which is what says the mapped frames encoded rather
+    // than being dropped.
+    CHECK(r.frames == submitted);
+    CHECK(units == submitted);
     CHECK(in_place == units);
     CHECK(!r.decoder_hardware.empty());
     CHECK(r.frames_uploaded == 0);

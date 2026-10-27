@@ -6,9 +6,8 @@
 // the following buffer arrives -- it holds every picture back by exactly one access unit.
 // On a stream pushed whole that is one frame of latency and invisible; on a caller that
 // pushes only keyframes, which is what analytics does between samples, it is a whole group
-// of pictures, and the frame it finally hands over is dated by the packet that dislodged
-// it. Nothing about that fails loudly. So the test is: the first push produces the first
-// picture.
+// of pictures. Nothing about that fails loudly. So the test is: the first push produces the
+// first picture.
 //
 // The stream comes from this library's own encoder rather than a fixture file. It is
 // Annex-B with the parameter sets in band -- which is the case that would install a parser
